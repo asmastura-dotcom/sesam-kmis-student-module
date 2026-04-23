@@ -1,7 +1,7 @@
 """
 SESAM KMIS - Student Module V1 (Complete with Add Student + Auto‑clear Fields)
-Author: [Your Name]
-Date: [Current Date]
+Author: Alyssa Fatmah S. Mastura
+Date: April 23, 2026
 """
 
 import streamlit as st
