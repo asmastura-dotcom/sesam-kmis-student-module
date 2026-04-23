@@ -29,6 +29,9 @@ if "role" not in st.session_state:
     st.session_state.role = None
 if "display_name" not in st.session_state:
     st.session_state.display_name = None
+# For staff selection
+if "selected_student_id" not in st.session_state:
+    st.session_state.selected_student_id = None
 
 # ==================== USER AUTH ====================
 USERS = {
@@ -69,7 +72,6 @@ def save_profile_picture(student_id, uploaded_file):
     """Save uploaded image to profile_pics folder. Returns filename."""
     if uploaded_file is None:
         return None
-    # Get file extension
     ext = uploaded_file.name.split('.')[-1].lower()
     if ext not in ['jpg', 'jpeg', 'png', 'gif']:
         st.error("Unsupported file format. Use JPG, PNG, or GIF.")
@@ -409,283 +411,236 @@ def filter_dataframe(search_term, data):
     )
     return data[mask]
 
-# ==================== STAFF VIEW ====================
+# ==================== STAFF VIEW (REDESIGNED) ====================
 if role == "SESAM Staff":
-    st.subheader("📋 All Students")
-    
-    # ----- CUSTOM FILTERS SECTION -----
-    with st.expander("🔍 Advanced Filters (click to expand)"):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            program_options = sorted(df["program"].unique())
-            selected_programs = st.multiselect("Program", program_options, default=program_options)
-            advisor_names = [USERS.get(u, {}).get("display_name", u) for u in df["advisor_username"].unique()]
-            advisor_username_map = {USERS.get(u, {}).get("display_name", u): u for u in df["advisor_username"].unique()}
-            selected_advisor_display = st.multiselect("Advisor", advisor_names, default=advisor_names)
-            selected_advisors = [advisor_username_map[name] for name in selected_advisor_display]
-            min_year = int(df["year_admitted"].min())
-            max_year = int(df["year_admitted"].max())
-            year_range = st.slider("Year Admitted", min_year, max_year, (min_year, max_year))
-        with col2:
-            pos_options = df["pos_status"].unique().tolist()
-            selected_pos = st.multiselect("POS Status", pos_options, default=pos_options)
-            final_options = df["final_exam_status"].unique().tolist()
-            selected_final = st.multiselect("Final Exam Status", final_options, default=final_options)
-            gwa_min = float(df["gwa"].min())
-            gwa_max = float(df["gwa"].max())
-            gwa_range = st.slider("GWA", gwa_min, gwa_max, (gwa_min, gwa_max), step=0.05)
-        with col3:
-            thesis_min = int(df["thesis_units_taken"].min())
-            thesis_max = int(df["thesis_units_taken"].max())
-            thesis_range = st.slider("Thesis Units Taken", thesis_min, thesis_max, (thesis_min, thesis_max))
-            if st.button("Reset All Filters"):
-                st.session_state.clear()
-                st.rerun()
-    
-    # Apply filters
-    filtered = df.copy()
-    filtered = filtered[filtered["program"].isin(selected_programs)]
-    filtered = filtered[filtered["advisor_username"].isin(selected_advisors)]
-    filtered = filtered[(filtered["year_admitted"] >= year_range[0]) & (filtered["year_admitted"] <= year_range[1])]
-    filtered = filtered[filtered["pos_status"].isin(selected_pos)]
-    filtered = filtered[filtered["final_exam_status"].isin(selected_final)]
-    filtered = filtered[(filtered["gwa"] >= gwa_range[0]) & (filtered["gwa"] <= gwa_range[1])]
-    filtered = filtered[(filtered["thesis_units_taken"] >= thesis_range[0]) & (filtered["thesis_units_taken"] <= thesis_range[1])]
-    
-    # ----- SEARCH BAR FOR THE TABLE (name/ID) -----
+    st.subheader("📋 All Students (Click on a row to select and edit)")
+
+    # 1. Search bar at the top
     search = st.text_input("🔍 Search by name or student ID", placeholder="e.g., Juan or S001")
-    filtered = filter_dataframe(search, filtered)
-    
-    st.dataframe(filtered, width='stretch', height=400)
+    filtered_df = filter_dataframe(search, df)
 
-    st.markdown("---")
-    st.subheader("✏️ Update Student Record")
+    # 2. Display table with row selection (single-row)
+    # Using st.dataframe with selection_mode="single-row" and on_select to capture selection.
+    # The selection object is stored in st.session_state via its key.
+    selection = st.dataframe(
+        filtered_df,
+        use_container_width=True,
+        selection_mode="single-row",
+        on_select="rerun",
+        key="staff_table"
+    )
 
-    if len(filtered) > 0:
-        # ----- SEARCHABLE STUDENT SELECTION -----
-        st.subheader("🔍 Search Student to Edit")
-        edit_search = st.text_input("Type name or student ID", value="", placeholder="e.g., Juan or S001", key="edit_search")
-        if edit_search:
-            edit_filtered = filter_dataframe(edit_search, filtered)
-            edit_filtered_names = edit_filtered["name"].tolist()
+    # 3. Handle row selection
+    if selection.selection.rows:
+        selected_idx = selection.selection.rows[0]
+        selected_student = filtered_df.iloc[selected_idx]
+        st.session_state.selected_student_id = selected_student["student_id"]
+    else:
+        # If no row selected, clear the selected student id
+        if st.session_state.selected_student_id is not None:
+            # But check if the previously selected student still exists in filtered_df?
+            # If not, clear selection.
+            if not any(filtered_df["student_id"] == st.session_state.selected_student_id):
+                st.session_state.selected_student_id = None
+        # If still None, user hasn't selected any valid student
+        pass
+
+    # 4. Detailed edit view for selected student
+    if st.session_state.selected_student_id is not None:
+        # Get the student record (from the original df, not filtered_df, to ensure we have the latest data)
+        student_row = df[df["student_id"] == st.session_state.selected_student_id]
+        if student_row.empty:
+            st.warning("Selected student no longer exists in the database. Please select another.")
+            st.session_state.selected_student_id = None
         else:
-            edit_filtered_names = filtered["name"].tolist()
-        
-        if not edit_filtered_names:
-            st.warning("No matching students found.")
-            st.stop()
-        
-        student_name = st.selectbox("Select Student", edit_filtered_names)
-        student = df[df["name"] == student_name].iloc[0].copy()
-        student_id = student["student_id"]
+            student = student_row.iloc[0].copy()
+            student_id = student["student_id"]
 
-        # ----- PROFILE PICTURE SECTION -----
-        st.markdown("---")
-        st.subheader("📸 Student Profile Picture")
-        col_pic1, col_pic2 = st.columns([1, 2])
-        with col_pic1:
-            pic_path = get_profile_picture_path(student_id)
-            if pic_path and os.path.exists(pic_path):
-                st.image(pic_path, width=150, caption="Current Picture")
-            else:
-                st.info("No profile picture uploaded.")
-        with col_pic2:
-            uploaded_file = st.file_uploader("Upload new profile picture (JPG, PNG, GIF)", type=["jpg", "jpeg", "png", "gif"], key=f"pic_{student_id}")
-            if uploaded_file:
-                new_filename = save_profile_picture(student_id, uploaded_file)
-                if new_filename:
-                    # Update CSV
-                    df.loc[df["student_id"] == student_id, "profile_pic"] = new_filename
-                    save_data(df)
-                    st.success("Profile picture updated!")
-                    st.rerun()
-            if st.button("🗑️ Delete current picture", key=f"del_pic_{student_id}"):
-                if delete_profile_picture(student_id):
-                    df.loc[df["student_id"] == student_id, "profile_pic"] = ""
-                    save_data(df)
-                    st.success("Profile picture deleted.")
-                    st.rerun()
+            st.markdown("---")
+            st.subheader(f"✏️ Editing Record: {student['name']} ({student_id})")
+
+            # Profile picture section
+            st.subheader("📸 Student Profile Picture")
+            col_pic1, col_pic2 = st.columns([1, 2])
+            with col_pic1:
+                pic_path = get_profile_picture_path(student_id)
+                if pic_path and os.path.exists(pic_path):
+                    st.image(pic_path, width=150, caption="Current Picture")
                 else:
-                    st.warning("No picture to delete.")
+                    st.info("No profile picture uploaded.")
+            with col_pic2:
+                uploaded_file = st.file_uploader("Upload new profile picture (JPG, PNG, GIF)", type=["jpg", "jpeg", "png", "gif"], key=f"pic_{student_id}")
+                if uploaded_file:
+                    new_filename = save_profile_picture(student_id, uploaded_file)
+                    if new_filename:
+                        df.loc[df["student_id"] == student_id, "profile_pic"] = new_filename
+                        save_data(df)
+                        st.success("Profile picture updated!")
+                        st.rerun()
+                if st.button("🗑️ Delete current picture", key=f"del_pic_{student_id}"):
+                    if delete_profile_picture(student_id):
+                        df.loc[df["student_id"] == student_id, "profile_pic"] = ""
+                        save_data(df)
+                        st.success("Profile picture deleted.")
+                        st.rerun()
+                    else:
+                        st.warning("No picture to delete.")
 
-        # Display warnings in RED
-        warnings = get_all_warnings(student)
-        if any("⚠️" in w for w in warnings):
-            for w in warnings:
-                st.error(w)
-        else:
-            st.success("\n".join(warnings))
-
-        # Basic info display - using markdown to avoid truncation
-        st.markdown("---")
-        st.markdown("### Student Information")
-        col1, col2, col3 = st.columns(3)
-        advisor_display = USERS.get(student["advisor_username"], {}).get("display_name", student["advisor_username"])
-        with col1:
-            st.markdown(f"**Student ID:** {student['student_id']}")
-            st.markdown(f"**Name:** {student['name']}")
-        with col2:
-            st.markdown(f"**Program:** {student['program']}")
-            st.markdown(f"**Advisor:** {advisor_display}")
-        with col3:
-            limit = get_thesis_limit(student["program"])
-            st.markdown(f"**Thesis Units:** {student['thesis_units_taken']} / {limit}")
-            st.markdown(f"**Year Admitted:** {format_ay(student['year_admitted'])}")
-            if student["thesis_units_taken"] > limit:
-                st.error("⚠️ Units exceeded!")
-
-        # Existing edit tabs
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["Coursework & Thesis", "Exams", "Residency & Leave", "Graduation", "Other"])
-
-        with tab1:
-            with st.form("coursework_form"):
-                st.subheader("Plan of Study (POS)")
-                pos_options = ["Not Filed", "Pending", "Approved"]
-                pos_status = st.selectbox("POS Status", pos_options, index=safe_index(pos_options, student["pos_status"]))
-                pos_submitted = st.text_input("POS Submitted Date (YYYY-MM-DD)", student["pos_submitted_date"])
-                pos_approved = st.text_input("POS Approved Date (YYYY-MM-DD)", student["pos_approved_date"])
-
-                st.subheader("Coursework")
-                gwa = st.number_input("GWA", min_value=1.0, max_value=5.0, step=0.01, value=float(student["gwa"]))
-                total_units_taken = st.number_input("Total Units Taken", min_value=0, max_value=60, step=1, value=int(student["total_units_taken"]))
-                total_units_required = st.number_input("Total Units Required", min_value=0, max_value=60, step=1, value=int(student["total_units_required"]))
-
-                st.subheader("Thesis/Dissertation")
-                thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=int(student["thesis_units_taken"]))
-                outline_options = ["Yes", "No"]
-                thesis_outline_approved = st.selectbox("Thesis Outline Approved", outline_options, index=safe_index(outline_options, student["thesis_outline_approved"]))
-                thesis_outline_date = st.text_input("Outline Approval Date", student["thesis_outline_approved_date"])
-                status_options = ["Not Started", "In Progress", "Draft with Adviser", "For Committee Review", "Approved", "Submitted"]
-                thesis_status = st.selectbox("Thesis Status", status_options, index=safe_index(status_options, student["thesis_status"]))
-
-                if st.form_submit_button("Update Coursework & Thesis"):
-                    df.loc[df["student_id"] == student_id, ["pos_status","pos_submitted_date","pos_approved_date","gwa","total_units_taken","total_units_required","thesis_units_taken","thesis_outline_approved","thesis_outline_approved_date","thesis_status"]] = [pos_status, pos_submitted, pos_approved, gwa, total_units_taken, total_units_required, thesis_units_taken, thesis_outline_approved, thesis_outline_date, thesis_status]
-                    save_data(df)
-                    st.success("✅ Updated!")
-                    st.rerun()
-
-        with tab2:
-            with st.form("exams_form"):
-                st.subheader("Examinations")
-                qual_options = ["N/A", "Not Taken", "Passed", "Failed", "Re-exam Scheduled"]
-                qualifying = st.selectbox("Qualifying Exam Status (PhD)", qual_options, index=safe_index(qual_options, student["qualifying_exam_status"]))
-                qualifying_date = st.text_input("Qualifying Exam Passed Date", student["qualifying_exam_passed_date"])
-                wcomp_options = ["N/A", "Not Taken", "Passed", "Failed"]
-                written_comp = st.selectbox("Written Comprehensive Status", wcomp_options, index=safe_index(wcomp_options, student["written_comprehensive_status"]))
-                written_comp_date = st.text_input("Written Comprehensive Passed Date", student["written_comprehensive_passed_date"])
-                ocomp_options = ["N/A", "Not Taken", "Passed", "Failed"]
-                oral_comp = st.selectbox("Oral Comprehensive Status", ocomp_options, index=safe_index(ocomp_options, student["oral_comprehensive_status"]))
-                oral_comp_date = st.text_input("Oral Comprehensive Passed Date", student["oral_comprehensive_passed_date"])
-                gen_options = ["N/A", "Not Taken", "Passed", "Failed"]
-                general = st.selectbox("General Exam Status (MS)", gen_options, index=safe_index(gen_options, student["general_exam_status"]))
-                general_date = st.text_input("General Exam Passed Date", student["general_exam_passed_date"])
-                final_options = ["Not Taken", "Passed", "Failed", "Re-exam Scheduled"]
-                final = st.selectbox("Final Exam Status", final_options, index=safe_index(final_options, student["final_exam_status"]))
-                final_date = st.text_input("Final Exam Passed Date", student["final_exam_passed_date"])
-
-                if st.form_submit_button("Update Exams"):
-                    df.loc[df["student_id"] == student_id, ["qualifying_exam_status","qualifying_exam_passed_date","written_comprehensive_status","written_comprehensive_passed_date","oral_comprehensive_status","oral_comprehensive_passed_date","general_exam_status","general_exam_passed_date","final_exam_status","final_exam_passed_date"]] = [qualifying, qualifying_date, written_comp, written_comp_date, oral_comp, oral_comp_date, general, general_date, final, final_date]
-                    save_data(df)
-                    st.success("✅ Updated!")
-                    st.rerun()
-
-        with tab3:
-            with st.form("residency_form"):
-                st.subheader("Residency")
-                residency_used = st.number_input("Years of Residence Used", min_value=0, max_value=10, step=1, value=int(student["residency_years_used"]))
-                max_years = get_residency_max(student["program"])
-                st.info(f"Maximum allowed: {max_years} years")
-                extension_count = st.number_input("Number of Extensions Granted", min_value=0, max_value=3, step=1, value=int(student["extension_count"]))
-                extension_end = st.text_input("Extension End Date (if applicable)", student["extension_end_date"])
-
-                st.subheader("Leave of Absence (LOA)")
-                loa_start = st.text_input("LOA Start Date", student["loa_start_date"])
-                loa_end = st.text_input("LOA End Date", student["loa_end_date"])
-                loa_terms = st.number_input("Total LOA Terms (each term = 0.5 year)", min_value=0, max_value=4, step=1, value=int(student["loa_total_terms"]))
-
-                st.subheader("AWOL")
-                awol_options = ["No", "Yes"]
-                awol = st.selectbox("AWOL Status", awol_options, index=safe_index(awol_options, student["awol_status"]))
-                awol_lifted = st.text_input("AWOL Lifted Date", student["awol_lifted_date"])
-
-                if st.form_submit_button("Update Residency & Leave"):
-                    df.loc[df["student_id"] == student_id, ["residency_years_used","extension_count","extension_end_date","loa_start_date","loa_end_date","loa_total_terms","awol_status","awol_lifted_date"]] = [residency_used, extension_count, extension_end, loa_start, loa_end, loa_terms, awol, awol_lifted]
-                    save_data(df)
-                    st.success("✅ Updated!")
-                    st.rerun()
-
-        with tab4:
-            with st.form("graduation_form"):
-                st.subheader("Graduation")
-                yn_options = ["No", "Yes"]
-                grad_applied = st.selectbox("Graduation Applied", yn_options, index=safe_index(yn_options, student["graduation_applied"]))
-                grad_approved = st.selectbox("Graduation Approved", yn_options, index=safe_index(yn_options, student["graduation_approved"]))
-                grad_date = st.text_input("Graduation Date (YYYY-MM-DD)", student["graduation_date"])
-
-                st.subheader("Transfer Credit")
-                transfer_units = st.number_input("Transfer Credits Approved (max 9 units)", min_value=0, max_value=9, step=1, value=int(student["transfer_units_approved"]))
-
-                if st.form_submit_button("Update Graduation & Transfer"):
-                    df.loc[df["student_id"] == student_id, ["graduation_applied","graduation_approved","graduation_date","transfer_units_approved"]] = [grad_applied, grad_approved, grad_date, transfer_units]
-                    save_data(df)
-                    st.success("✅ Updated!")
-                    st.rerun()
-
-        with tab5:
-            with st.form("other_form"):
-                st.subheader("Re-admission (for students who exceeded time limit)")
-                readmit_options = ["Not Applicable", "Applied", "Approved", "Denied"]
-                re_status = st.selectbox("Re-admission Status", readmit_options, index=safe_index(readmit_options, student["re_admission_status"]))
-                re_date = st.text_input("Re-admission Date", student["re_admission_date"])
-
-                if st.form_submit_button("Update Re-admission"):
-                    df.loc[df["student_id"] == student_id, ["re_admission_status","re_admission_date"]] = [re_status, re_date]
-                    save_data(df)
-                    st.success("✅ Updated!")
-                    st.rerun()
-
-        # ----- DELETE STUDENT WITH CONFIRMATION -----
-        st.markdown("---")
-        st.subheader("🗑️ Delete Student")
-        with st.expander("Click to expand and delete a student record"):
-            delete_search = st.text_input("Search student to delete", placeholder="name or ID", key="delete_search")
-            delete_filtered = filter_dataframe(delete_search, filtered) if delete_search else filtered
-            if len(delete_filtered) == 0:
-                st.warning("No matching students to delete.")
+            # Display warnings
+            warnings = get_all_warnings(student)
+            if any("⚠️" in w for w in warnings):
+                for w in warnings:
+                    st.error(w)
             else:
-                delete_name = st.selectbox("Select Student to Delete", delete_filtered["name"])
-                delete_id = df[df["name"] == delete_name]["student_id"].values[0]
+                st.success("\n".join(warnings))
+
+            # Basic info display
+            st.markdown("---")
+            st.markdown("### Student Information")
+            col1, col2, col3 = st.columns(3)
+            advisor_display = USERS.get(student["advisor_username"], {}).get("display_name", student["advisor_username"])
+            with col1:
+                st.markdown(f"**Student ID:** {student['student_id']}")
+                st.markdown(f"**Name:** {student['name']}")
+            with col2:
+                st.markdown(f"**Program:** {student['program']}")
+                st.markdown(f"**Advisor:** {advisor_display}")
+            with col3:
+                limit = get_thesis_limit(student["program"])
+                st.markdown(f"**Thesis Units:** {student['thesis_units_taken']} / {limit}")
+                st.markdown(f"**Year Admitted:** {format_ay(student['year_admitted'])}")
+                if student["thesis_units_taken"] > limit:
+                    st.error("⚠️ Units exceeded!")
+
+            # Editable tabs (same as original)
+            tab1, tab2, tab3, tab4, tab5 = st.tabs(["Coursework & Thesis", "Exams", "Residency & Leave", "Graduation", "Other"])
+
+            with tab1:
+                with st.form("coursework_form"):
+                    st.subheader("Plan of Study (POS)")
+                    pos_options = ["Not Filed", "Pending", "Approved"]
+                    pos_status = st.selectbox("POS Status", pos_options, index=safe_index(pos_options, student["pos_status"]))
+                    pos_submitted = st.text_input("POS Submitted Date (YYYY-MM-DD)", student["pos_submitted_date"])
+                    pos_approved = st.text_input("POS Approved Date (YYYY-MM-DD)", student["pos_approved_date"])
+
+                    st.subheader("Coursework")
+                    gwa = st.number_input("GWA", min_value=1.0, max_value=5.0, step=0.01, value=float(student["gwa"]))
+                    total_units_taken = st.number_input("Total Units Taken", min_value=0, max_value=60, step=1, value=int(student["total_units_taken"]))
+                    total_units_required = st.number_input("Total Units Required", min_value=0, max_value=60, step=1, value=int(student["total_units_required"]))
+
+                    st.subheader("Thesis/Dissertation")
+                    thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=int(student["thesis_units_taken"]))
+                    outline_options = ["Yes", "No"]
+                    thesis_outline_approved = st.selectbox("Thesis Outline Approved", outline_options, index=safe_index(outline_options, student["thesis_outline_approved"]))
+                    thesis_outline_date = st.text_input("Outline Approval Date", student["thesis_outline_approved_date"])
+                    status_options = ["Not Started", "In Progress", "Draft with Adviser", "For Committee Review", "Approved", "Submitted"]
+                    thesis_status = st.selectbox("Thesis Status", status_options, index=safe_index(status_options, student["thesis_status"]))
+
+                    if st.form_submit_button("Update Coursework & Thesis"):
+                        df.loc[df["student_id"] == student_id, ["pos_status","pos_submitted_date","pos_approved_date","gwa","total_units_taken","total_units_required","thesis_units_taken","thesis_outline_approved","thesis_outline_approved_date","thesis_status"]] = [pos_status, pos_submitted, pos_approved, gwa, total_units_taken, total_units_required, thesis_units_taken, thesis_outline_approved, thesis_outline_date, thesis_status]
+                        save_data(df)
+                        st.success("✅ Updated!")
+                        st.rerun()
+
+            with tab2:
+                with st.form("exams_form"):
+                    st.subheader("Examinations")
+                    qual_options = ["N/A", "Not Taken", "Passed", "Failed", "Re-exam Scheduled"]
+                    qualifying = st.selectbox("Qualifying Exam Status (PhD)", qual_options, index=safe_index(qual_options, student["qualifying_exam_status"]))
+                    qualifying_date = st.text_input("Qualifying Exam Passed Date", student["qualifying_exam_passed_date"])
+                    wcomp_options = ["N/A", "Not Taken", "Passed", "Failed"]
+                    written_comp = st.selectbox("Written Comprehensive Status", wcomp_options, index=safe_index(wcomp_options, student["written_comprehensive_status"]))
+                    written_comp_date = st.text_input("Written Comprehensive Passed Date", student["written_comprehensive_passed_date"])
+                    ocomp_options = ["N/A", "Not Taken", "Passed", "Failed"]
+                    oral_comp = st.selectbox("Oral Comprehensive Status", ocomp_options, index=safe_index(ocomp_options, student["oral_comprehensive_status"]))
+                    oral_comp_date = st.text_input("Oral Comprehensive Passed Date", student["oral_comprehensive_passed_date"])
+                    gen_options = ["N/A", "Not Taken", "Passed", "Failed"]
+                    general = st.selectbox("General Exam Status (MS)", gen_options, index=safe_index(gen_options, student["general_exam_status"]))
+                    general_date = st.text_input("General Exam Passed Date", student["general_exam_passed_date"])
+                    final_options = ["Not Taken", "Passed", "Failed", "Re-exam Scheduled"]
+                    final = st.selectbox("Final Exam Status", final_options, index=safe_index(final_options, student["final_exam_status"]))
+                    final_date = st.text_input("Final Exam Passed Date", student["final_exam_passed_date"])
+
+                    if st.form_submit_button("Update Exams"):
+                        df.loc[df["student_id"] == student_id, ["qualifying_exam_status","qualifying_exam_passed_date","written_comprehensive_status","written_comprehensive_passed_date","oral_comprehensive_status","oral_comprehensive_passed_date","general_exam_status","general_exam_passed_date","final_exam_status","final_exam_passed_date"]] = [qualifying, qualifying_date, written_comp, written_comp_date, oral_comp, oral_comp_date, general, general_date, final, final_date]
+                        save_data(df)
+                        st.success("✅ Updated!")
+                        st.rerun()
+
+            with tab3:
+                with st.form("residency_form"):
+                    st.subheader("Residency")
+                    residency_used = st.number_input("Years of Residence Used", min_value=0, max_value=10, step=1, value=int(student["residency_years_used"]))
+                    max_years = get_residency_max(student["program"])
+                    st.info(f"Maximum allowed: {max_years} years")
+                    extension_count = st.number_input("Number of Extensions Granted", min_value=0, max_value=3, step=1, value=int(student["extension_count"]))
+                    extension_end = st.text_input("Extension End Date (if applicable)", student["extension_end_date"])
+
+                    st.subheader("Leave of Absence (LOA)")
+                    loa_start = st.text_input("LOA Start Date", student["loa_start_date"])
+                    loa_end = st.text_input("LOA End Date", student["loa_end_date"])
+                    loa_terms = st.number_input("Total LOA Terms (each term = 0.5 year)", min_value=0, max_value=4, step=1, value=int(student["loa_total_terms"]))
+
+                    st.subheader("AWOL")
+                    awol_options = ["No", "Yes"]
+                    awol = st.selectbox("AWOL Status", awol_options, index=safe_index(awol_options, student["awol_status"]))
+                    awol_lifted = st.text_input("AWOL Lifted Date", student["awol_lifted_date"])
+
+                    if st.form_submit_button("Update Residency & Leave"):
+                        df.loc[df["student_id"] == student_id, ["residency_years_used","extension_count","extension_end_date","loa_start_date","loa_end_date","loa_total_terms","awol_status","awol_lifted_date"]] = [residency_used, extension_count, extension_end, loa_start, loa_end, loa_terms, awol, awol_lifted]
+                        save_data(df)
+                        st.success("✅ Updated!")
+                        st.rerun()
+
+            with tab4:
+                with st.form("graduation_form"):
+                    st.subheader("Graduation")
+                    yn_options = ["No", "Yes"]
+                    grad_applied = st.selectbox("Graduation Applied", yn_options, index=safe_index(yn_options, student["graduation_applied"]))
+                    grad_approved = st.selectbox("Graduation Approved", yn_options, index=safe_index(yn_options, student["graduation_approved"]))
+                    grad_date = st.text_input("Graduation Date (YYYY-MM-DD)", student["graduation_date"])
+
+                    st.subheader("Transfer Credit")
+                    transfer_units = st.number_input("Transfer Credits Approved (max 9 units)", min_value=0, max_value=9, step=1, value=int(student["transfer_units_approved"]))
+
+                    if st.form_submit_button("Update Graduation & Transfer"):
+                        df.loc[df["student_id"] == student_id, ["graduation_applied","graduation_approved","graduation_date","transfer_units_approved"]] = [grad_applied, grad_approved, grad_date, transfer_units]
+                        save_data(df)
+                        st.success("✅ Updated!")
+                        st.rerun()
+
+            with tab5:
+                with st.form("other_form"):
+                    st.subheader("Re-admission (for students who exceeded time limit)")
+                    readmit_options = ["Not Applicable", "Applied", "Approved", "Denied"]
+                    re_status = st.selectbox("Re-admission Status", readmit_options, index=safe_index(readmit_options, student["re_admission_status"]))
+                    re_date = st.text_input("Re-admission Date", student["re_admission_date"])
+
+                    if st.form_submit_button("Update Re-admission"):
+                        df.loc[df["student_id"] == student_id, ["re_admission_status","re_admission_date"]] = [re_status, re_date]
+                        save_data(df)
+                        st.success("✅ Updated!")
+                        st.rerun()
+
+            # Delete student button for the selected student
+            st.markdown("---")
+            st.subheader("🗑️ Delete This Student")
+            with st.expander("Click to expand and delete the selected student"):
                 confirm = st.checkbox("⚠️ I confirm that I want to permanently delete this student. This action cannot be undone.")
                 if confirm and st.button("Yes, Delete This Student"):
-                    # Also delete profile picture
-                    delete_profile_picture(delete_id)
-                    df = df[df["student_id"] != delete_id]
+                    delete_profile_picture(student_id)
+                    df = df[df["student_id"] != student_id]
                     save_data(df)
-                    st.success(f"✅ Student '{delete_name}' has been deleted.")
+                    st.success(f"✅ Student '{student['name']}' has been deleted.")
+                    st.session_state.selected_student_id = None
                     st.rerun()
                 elif not confirm and st.button("Yes, Delete This Student"):
                     st.warning("Please check the confirmation box before deleting.")
-
-        # ----- RESET ALL DATA BUTTON (restores only S001-S005) -----
-        st.markdown("---")
-        st.subheader("🔄 Reset All Data")
-        with st.expander("⚠️ Click to reset all student data to default samples (S001–S005). This will delete all other students and their pictures."):
-            reset_confirm = st.checkbox("I understand that this will permanently delete ALL current student data and restore only the sample records (S001–S005).")
-            if reset_confirm and st.button("Yes, Reset All Data"):
-                # Delete all profile pictures
-                for f in os.listdir(PIC_FOLDER):
-                    os.remove(os.path.join(PIC_FOLDER, f))
-                df = create_default_data()
-                save_data(df)
-                st.success("✅ Data has been reset to the default sample students (S001–S005).")
-                st.rerun()
-            elif not reset_confirm and st.button("Yes, Reset All Data"):
-                st.warning("Please check the confirmation box before resetting.")
-
     else:
-        st.info("No students match the current filters. Adjust filters or add a new student below.")
+        # No student selected – show a friendly message
+        st.info("👈 Select a student from the table above to view and edit their details.")
 
-    # ----- ADD NEW STUDENT -----
+    # 5. Separate section for adding a new student (always visible)
     st.markdown("---")
     st.subheader("➕ Add New Student")
     with st.expander("Click to expand and add a new student record"):
@@ -761,6 +716,21 @@ if role == "SESAM Staff":
                     st.success(f"✅ Student '{new_name}' added!")
                     st.rerun()
 
+    # Reset all data button (keep at bottom)
+    st.markdown("---")
+    st.subheader("🔄 Reset All Data")
+    with st.expander("⚠️ Click to reset all student data to default samples (S001–S005). This will delete all other students and their pictures."):
+        reset_confirm = st.checkbox("I understand that this will permanently delete ALL current student data and restore only the sample records (S001–S005).")
+        if reset_confirm and st.button("Yes, Reset All Data"):
+            for f in os.listdir(PIC_FOLDER):
+                os.remove(os.path.join(PIC_FOLDER, f))
+            df = create_default_data()
+            save_data(df)
+            st.success("✅ Data has been reset to the default sample students (S001–S005).")
+            st.rerun()
+        elif not reset_confirm and st.button("Yes, Reset All Data"):
+            st.warning("Please check the confirmation box before resetting.")
+
 # ==================== ADVISER VIEW ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees ({st.session_state.display_name})")
@@ -793,7 +763,6 @@ elif role == "Faculty Adviser":
                         st.markdown(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
                         st.markdown(f"**Final Exam:** {row['final_exam_status']}")
                         st.markdown(f"**Residency:** {row['residency_years_used']}/{get_residency_max(row['program'])} years")
-                    # Show profile picture if exists
                     pic_path = get_profile_picture_path(row["student_id"])
                     if pic_path and os.path.exists(pic_path):
                         st.image(pic_path, width=100, caption="Profile Picture")
@@ -822,7 +791,6 @@ elif role == "Student":
         else:
             st.success("\n".join(warnings))
 
-        # Show profile picture if exists
         pic_path = get_profile_picture_path(student["student_id"])
         if pic_path and os.path.exists(pic_path):
             col_pic, col_info = st.columns([1, 2])
@@ -845,7 +813,6 @@ elif role == "Student":
                     st.metric("Residency", f"{student['residency_years_used']} / {get_residency_max(student['program'])} years")
                     st.metric("Final Exam", student["final_exam_status"])
         else:
-            # No picture, show normally
             col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("Student ID", student["student_id"])
