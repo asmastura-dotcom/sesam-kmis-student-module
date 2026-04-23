@@ -193,8 +193,11 @@ def check_gwa_warning(gwa):
         gwa = float(gwa)
     except:
         return "⚠️ GWA data error"
-    if gwa < 2.0:
-        return f"⚠️ GWA {gwa:.2f} is below 2.00 – may affect exam eligibility and graduation"
+    # UP Grading System: 1.00 highest, 5.00 lowest
+    # Good standing: GWA ≤ 2.00
+    # Problematic: GWA > 2.00
+    if gwa > 2.00:
+        return f"⚠️ GWA {gwa:.2f} is above 2.00 – may affect exam eligibility and graduation"
     return f"✅ GWA {gwa:.2f} – good standing"
 
 def check_awol_warning(row):
