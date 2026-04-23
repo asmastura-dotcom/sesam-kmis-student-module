@@ -1,7 +1,7 @@
 """
 SESAM KMIS - Student Module V2 (Graduate School Rules Integration)
-Author: [Your Name]
-Date: [Current Date]
+Author: SESAM Dev Team
+Date: 2026-04-23
 Description: Tracks graduate student milestones, thesis units, exams, residency, LOA/AWOL, etc.
 Plus student uploads: profile picture and AMIS screenshot (with manual GWA entry).
 """
@@ -46,7 +46,7 @@ PROGRAMS = [
     "Professional Masters in Tropical Marine Ecosystems Management (PM-TMEM)"
 ]
 
-PhD_TRACKS = ["MS EnvSci graduate", "non‑MS EnvSci graduate"]
+PhD_TRACKS = ["MS EnvSci graduate", "non-MS EnvSci graduate"]
 SEMESTERS = ["1st Sem", "2nd Sem", "Summer"]
 
 current_year = date.today().year
@@ -142,16 +142,26 @@ def save_image(student_number, uploaded_file, folder, prefix):
     return filename
 
 def delete_image(student_number, folder, column_name, df, student_number_col):
-    old_filename = df.loc[df[student_number_col] == student_number, column_name].iloc[0]
+    # Find the row index
+    mask = df[student_number_col] == student_number
+    if not mask.any():
+        return df
+    idx = df.index[mask][0]
+    old_filename = df.at[idx, column_name]
     if old_filename and pd.notna(old_filename) and old_filename != "":
         filepath = os.path.join(folder, old_filename)
         if os.path.exists(filepath):
             os.remove(filepath)
-    df.loc[df[student_number_col] == student_number, column_name] = ""
+    df.at[idx, column_name] = ""
     return df
 
 def show_image(student_number, folder, column_name, df, student_number_col, caption):
-    pic = df.loc[df[student_number_col] == student_number, column_name].iloc[0]
+    mask = df[student_number_col] == student_number
+    if not mask.any():
+        st.info(f"No {caption.lower()} uploaded yet.")
+        return False
+    idx = df.index[mask][0]
+    pic = df.at[idx, column_name]
     if pic and pd.notna(pic) and pic != "":
         path = os.path.join(folder, pic)
         if os.path.exists(path):
@@ -189,7 +199,7 @@ if not st.session_state.logged_in:
             st.error("❌ Invalid username or password")
     st.stop()
 
-# ==================== DATA LOADING WITH MIGRATION & DTYPE FIX ====================
+# ==================== DATA LOADING WITH MIGRATION ====================
 DATA_FILE = "students.csv"
 
 def create_default_data():
@@ -200,7 +210,7 @@ def create_default_data():
         "first_name": ["Juan", "Maria", "Jose", "Ana", "Carlos"],
         "middle_name": ["M.", "L.", "P.", "C.", "R."],
         "program": [PROGRAMS[0], PROGRAMS[1], PROGRAMS[0], PROGRAMS[1], PROGRAMS[0]],
-        "phd_track": ["", "MS EnvSci graduate", "", "non‑MS EnvSci graduate", ""],
+        "phd_track": ["", "MS EnvSci graduate", "", "non-MS EnvSci graduate", ""],
         "advisor": ["Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava"],
         "ay_start": [2024, 2023, 2024, 2022, 2024],
         "semester": ["1st Sem", "1st Sem", "2nd Sem", "1st Sem", "1st Sem"],
@@ -266,7 +276,7 @@ def load_data():
         if col not in df.columns:
             df[col] = default_df[col]
     
-    # Convert numeric columns
+    # Convert numeric columns safely
     numeric_int_cols = [
         "thesis_units_taken", "thesis_units_limit",
         "total_units_taken", "total_units_required",
@@ -605,7 +615,7 @@ if role == "SESAM Staff":
                 st.success(f"GWA updated to {new_gwa}")
                 st.rerun()
 
-        # ----- EDIT TABS (full functionality) -----
+        # ----- EDIT TABS -----
         tabs = st.tabs(["Coursework & Thesis", "Exams", "Residency & Leave", "Graduation", "Committee", "Other"])
         
         with tabs[0]:  # Coursework & Thesis
@@ -630,7 +640,7 @@ if role == "SESAM Staff":
             st.markdown(get_thesis_pattern_description(student["program"]))
             st.markdown("---")
             st.subheader("Thesis/Dissertation Outline")
-            outline_status = st.selectbox("Outline Approved?", ["Yes", "No"], index=0 if student["thesis_outline_approved"] == "Yes" else 1)
+            outline_status = st.selectbox("Outline Approved?", ["Yes", "No"], index=safe_index(["Yes", "No"], student["thesis_outline_approved"]))
             if st.button("Update Outline Approval"):
                 df.loc[df["student_number"] == student_number, "thesis_outline_approved"] = outline_status
                 if outline_status == "Yes" and not student["thesis_outline_approved_date"]:
@@ -641,7 +651,7 @@ if role == "SESAM Staff":
         with tabs[1]:  # Exams
             st.subheader("Exam Status")
             if is_master_program(student["program"]):
-                gen_exam = st.selectbox("General Exam", ["Not Taken", "Passed", "Failed"], index=["Not Taken", "Passed", "Failed"].index(student["general_exam_status"]))
+                gen_exam = st.selectbox("General Exam", ["Not Taken", "Passed", "Failed"], index=safe_index(["Not Taken", "Passed", "Failed"], student["general_exam_status"]))
                 if st.button("Update General Exam"):
                     df.loc[df["student_number"] == student_number, "general_exam_status"] = gen_exam
                     if gen_exam == "Passed" and not student["general_exam_passed_date"]:
@@ -649,7 +659,7 @@ if role == "SESAM Staff":
                     save_data(df)
                     st.success("General Exam updated.")
             else:
-                qual_exam = st.selectbox("Qualifying Exam", ["N/A", "Not Taken", "Passed", "Failed"], index=["N/A", "Not Taken", "Passed", "Failed"].index(student["qualifying_exam_status"]))
+                qual_exam = st.selectbox("Qualifying Exam", ["N/A", "Not Taken", "Passed", "Failed"], index=safe_index(["N/A", "Not Taken", "Passed", "Failed"], student["qualifying_exam_status"]))
                 if st.button("Update Qualifying Exam"):
                     df.loc[df["student_number"] == student_number, "qualifying_exam_status"] = qual_exam
                     if qual_exam == "Passed" and not student["qualifying_exam_passed_date"]:
@@ -658,8 +668,8 @@ if role == "SESAM Staff":
                     st.success("Qualifying Exam updated.")
             st.markdown("---")
             if is_phd_program(student["program"]):
-                written_comp = st.selectbox("Written Comprehensive Exam", ["N/A", "Not Taken", "Passed", "Failed"], index=["N/A", "Not Taken", "Passed", "Failed"].index(student["written_comprehensive_status"]))
-                oral_comp = st.selectbox("Oral Comprehensive Exam", ["N/A", "Not Taken", "Passed", "Failed"], index=["N/A", "Not Taken", "Passed", "Failed"].index(student["oral_comprehensive_status"]))
+                written_comp = st.selectbox("Written Comprehensive Exam", ["N/A", "Not Taken", "Passed", "Failed"], index=safe_index(["N/A", "Not Taken", "Passed", "Failed"], student["written_comprehensive_status"]))
+                oral_comp = st.selectbox("Oral Comprehensive Exam", ["N/A", "Not Taken", "Passed", "Failed"], index=safe_index(["N/A", "Not Taken", "Passed", "Failed"], student["oral_comprehensive_status"]))
                 if st.button("Update Comprehensive Exams"):
                     df.loc[df["student_number"] == student_number, "written_comprehensive_status"] = written_comp
                     df.loc[df["student_number"] == student_number, "oral_comprehensive_status"] = oral_comp
@@ -669,7 +679,7 @@ if role == "SESAM Staff":
                         df.loc[df["student_number"] == student_number, "oral_comprehensive_passed_date"] = date.today().isoformat()
                     save_data(df)
                     st.success("Comprehensive exams updated.")
-            final_exam = st.selectbox("Final Exam", ["Not Taken", "Passed", "Failed"], index=["Not Taken", "Passed", "Failed"].index(student["final_exam_status"]))
+            final_exam = st.selectbox("Final Exam", ["Not Taken", "Passed", "Failed"], index=safe_index(["Not Taken", "Passed", "Failed"], student["final_exam_status"]))
             if st.button("Update Final Exam"):
                 df.loc[df["student_number"] == student_number, "final_exam_status"] = final_exam
                 if final_exam == "Passed" and not student["final_exam_passed_date"]:
@@ -689,7 +699,7 @@ if role == "SESAM Staff":
                 else:
                     st.error(f"Residency cannot exceed {max_years} years without extension.")
             st.markdown("---")
-            awol = st.selectbox("AWOL Status", ["No", "Yes"], index=0 if student["awol_status"] == "No" else 1)
+            awol = st.selectbox("AWOL Status", ["No", "Yes"], index=safe_index(["No", "Yes"], student["awol_status"]))
             if st.button("Update AWOL"):
                 df.loc[df["student_number"] == student_number, "awol_status"] = awol
                 if awol == "Yes" and not student["awol_lifted_date"]:
@@ -712,8 +722,8 @@ if role == "SESAM Staff":
         
         with tabs[3]:  # Graduation
             st.subheader("Graduation Application")
-            grad_applied = st.selectbox("Graduation Applied?", ["No", "Yes"], index=0 if student["graduation_applied"] == "No" else 1)
-            grad_approved = st.selectbox("Graduation Approved?", ["No", "Yes"], index=0 if student["graduation_approved"] == "No" else 1)
+            grad_applied = st.selectbox("Graduation Applied?", ["No", "Yes"], index=safe_index(["No", "Yes"], student["graduation_applied"]))
+            grad_approved = st.selectbox("Graduation Approved?", ["No", "Yes"], index=safe_index(["No", "Yes"], student["graduation_approved"]))
             grad_date = st.text_input("Graduation Date (YYYY-MM-DD)", value=student["graduation_date"])
             if st.button("Update Graduation Status"):
                 df.loc[df["student_number"] == student_number, "graduation_applied"] = grad_applied
@@ -734,7 +744,7 @@ if role == "SESAM Staff":
         
         with tabs[5]:  # Other
             st.subheader("Plan of Study (POS)")
-            pos_stat = st.selectbox("POS Status", ["Not Filed", "Pending", "Approved"], index=["Not Filed", "Pending", "Approved"].index(student["pos_status"]))
+            pos_stat = st.selectbox("POS Status", ["Not Filed", "Pending", "Approved"], index=safe_index(["Not Filed", "Pending", "Approved"], student["pos_status"]))
             pos_sub = st.text_input("POS Submitted Date", value=student["pos_submitted_date"])
             pos_app = st.text_input("POS Approved Date", value=student["pos_approved_date"])
             if st.button("Update POS"):
@@ -780,7 +790,8 @@ if role == "SESAM Staff":
             
             col6, col7 = st.columns(2)
             with col6:
-                selected_ay_range = st.selectbox("Academic Year *", options=ACADEMIC_YEARS, index=ACADEMIC_YEARS.index(f"{current_year}-{current_year+1}") if f"{current_year}-{current_year+1}" in ACADEMIC_YEARS else 0)
+                selected_ay_range = st.selectbox("Academic Year *", options=ACADEMIC_YEARS, 
+                                                index=ACADEMIC_YEARS.index(f"{current_year}-{current_year+1}") if f"{current_year}-{current_year+1}" in ACADEMIC_YEARS else 0)
                 ay_start = int(selected_ay_range.split("-")[0])
             with col7:
                 semester = st.selectbox("Semester *", options=SEMESTERS)
@@ -996,7 +1007,7 @@ elif role == "Student":
             st.success("Profile picture removed.")
             st.rerun()
     
-    # ------ AMIS SCREENSHOT (subjects, grades, units, GWA) ------
+    # ------ AMIS SCREENSHOT ------
     st.markdown("---")
     st.subheader("📊 AMIS Screenshot (Subjects, Grades, Units, GWA)")
     col_amis1, col_amis2 = st.columns([1, 2])
@@ -1017,7 +1028,7 @@ elif role == "Student":
             st.success("AMIS screenshot removed.")
             st.rerun()
     
-    # ------ MANUAL GWA ENTRY (from the uploaded AMIS screenshot) ------
+    # ------ MANUAL GWA ENTRY ------
     st.markdown("---")
     st.subheader("📈 GWA from AMIS Screenshot")
     current_gwa = float(student["gwa"])
