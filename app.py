@@ -1,5 +1,5 @@
 """
-SESAM KMIS - Student Module V1 (Complete)
+SESAM KMIS - Student Module V1 (Complete with Add Student + Toast)
 Author: [Your Name]
 Date: [Current Date]
 """
@@ -197,7 +197,7 @@ if role == "SESAM Staff":
     else:
         st.info("No students found. Use the form below to add the first student.")
 
-    # ----- ADD NEW STUDENT -----
+    # ----- ADD NEW STUDENT WITH TOAST CONFIRMATION -----
     st.markdown("---")
     st.subheader("➕ Add New Student")
 
@@ -242,7 +242,10 @@ if role == "SESAM Staff":
                     }])
                     df = pd.concat([df, new_row], ignore_index=True)
                     save_data(df)
+                    # Show temporary toast and balloon celebration
+                    st.toast(f"🎉 Student '{new_name}' (ID: {new_id}) has been added to the system!", icon="✅")
                     st.success(f"✅ Student '{new_name}' (ID: {new_id}) added successfully!")
+                    st.balloons()
                     st.rerun()
 
     # ----- QUICK STATISTICS -----
