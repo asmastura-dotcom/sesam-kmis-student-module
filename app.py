@@ -37,7 +37,7 @@ USERS = {
     "student2": {"password": "stu456", "role": "Student", "display_name": "Santos, Maria L."}
 }
 
-# ==================== PROGRAM DEFINITIONS ====================
+# ==================== PROGRAM & TRACK DEFINITIONS ====================
 PROGRAMS = [
     "MS Environmental Science",
     "PhD Environmental Science",
@@ -46,9 +46,9 @@ PROGRAMS = [
     "Professional Masters in Tropical Marine Ecosystems Management (PM-TMEM)"
 ]
 
+PhD_TRACKS = ["MS EnvSci graduate", "non‑MS EnvSci graduate"]
 SEMESTERS = ["1st Sem", "2nd Sem", "Summer"]
 
-# Generate academic year ranges for dropdown (current year -5 to current year +5)
 current_year = date.today().year
 ACADEMIC_YEARS = [f"{year}-{year+1}" for year in range(current_year-5, current_year+6)]
 
@@ -64,11 +64,25 @@ def get_thesis_limit_from_program(program):
 def get_residency_max_from_program(program):
     return 5 if is_master_program(program) else 7
 
+def get_required_units(program, phd_track=None):
+    """Return total units required based on program and PhD track."""
+    if program == "MS Environmental Science":
+        return 32
+    elif program == "PhD Environmental Science":
+        if phd_track == "MS EnvSci graduate":
+            return 37
+        else:  # non‑MS EnvSci graduate
+            return 50
+    else:  # other programs – default 36 (typical master's) or 48 (typical PhD)
+        if is_master_program(program):
+            return 36
+        else:
+            return 48
+
 def format_ay(ay_start, semester):
     return f"A.Y. {ay_start}-{ay_start+1} ({semester})"
 
 def get_thesis_pattern_description(program):
-    """Return a readable description of how thesis/dissertation units are typically taken."""
     if is_master_program(program):
         return "💡 MS students: thesis units (6 total) can be taken as 2-2-2 (three terms) or 3-3 (two terms)."
     else:
@@ -82,7 +96,6 @@ def compute_coursework_progress(row):
     return min(100, int((taken / required) * 100))
 
 def check_deadline_alerts(row):
-    """Return list of deadline‑related warnings."""
     alerts = []
     program = row["program"]
     thesis_units = row["thesis_units_taken"]
@@ -90,23 +103,19 @@ def check_deadline_alerts(row):
     pos_status = row["pos_status"]
     residency_used = row.get("residency_years_used", 0)
     
-    # POS deadline
     if program.startswith("MS") and residency_used >= 1 and pos_status not in ["Approved", "Completed"]:
         alerts.append("⚠️ Plan of Study (POS) should be approved by 2nd semester of residence.")
     elif program.startswith("PhD") and row.get("qualifying_exam_status") == "Passed" and pos_status != "Approved":
         alerts.append("⚠️ Plan of Study (POS) pending approval after qualifying exam.")
     
-    # Thesis outline deadline
     if program.startswith("MS") and thesis_units >= 4 and outline_approved != "Yes":
         alerts.append("⚠️ Thesis outline approval overdue (must be approved by 2nd thesis semester).")
     if program.startswith("PhD") and thesis_units >= 8 and outline_approved != "Yes":
         alerts.append("⚠️ Dissertation outline approval overdue (must be approved by 3rd dissertation semester).")
     
-    # Qualifying exam deadline
     if program.startswith("PhD") and residency_used >= 1 and row["qualifying_exam_status"] not in ["Passed", "N/A"]:
         alerts.append("⚠️ Qualifying exam should be taken before 2nd semester of residence.")
     
-    # Comprehensive exam deadline
     if program.startswith("PhD") and row["total_units_taken"] >= row["total_units_required"] and row["written_comprehensive_status"] != "Passed":
         alerts.append("⚠️ Written comprehensive exam pending after completing all coursework.")
     
@@ -148,10 +157,10 @@ def create_default_data():
         "first_name": ["Juan", "Maria", "Jose", "Ana", "Carlos"],
         "middle_name": ["M.", "L.", "P.", "C.", "R."],
         "program": [PROGRAMS[0], PROGRAMS[1], PROGRAMS[0], PROGRAMS[1], PROGRAMS[0]],
+        "phd_track": ["", "MS EnvSci graduate", "", "non‑MS EnvSci graduate", ""],
         "advisor": ["Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava"],
         "ay_start": [2024, 2023, 2024, 2022, 2024],
         "semester": ["1st Sem", "1st Sem", "2nd Sem", "1st Sem", "1st Sem"],
-        "profile_pic": ["", "", "", "", ""],
         "committee_members": ["Dr. Eslava, Dr. Sanchez", "Dr. Sanchez, Dr. Eslava", "Dr. Eslava", "Dr. Sanchez, Dr. Eslava", "Dr. Eslava"],
         "committee_approval_date": ["2024-02-01", "2023-07-01", "", "2022-09-15", ""],
         "pos_status": ["Approved", "Approved", "Pending", "Approved", "Pending"],
@@ -159,7 +168,7 @@ def create_default_data():
         "pos_approved_date": ["2024-02-01", "2023-07-01", "", "2022-09-15", ""],
         "gwa": [1.75, 1.85, 2.10, 1.95, 2.05],
         "total_units_taken": [12, 18, 9, 24, 6],
-        "total_units_required": [24, 24, 24, 24, 24],
+        "total_units_required": [32, 37, 32, 50, 32],
         "thesis_units_taken": [3, 8, 2, 12, 1],
         "thesis_units_limit": [6, 12, 6, 12, 6],
         "thesis_outline_approved": ["No", "Yes", "No", "Yes", "No"],
@@ -203,12 +212,6 @@ def load_data():
         if col not in df.columns:
             df[col] = default_df[col]
     
-    # Migrate old year_admitted column if exists
-    if "year_admitted" in df.columns and "ay_start" not in df.columns:
-        df["ay_start"] = df["year_admitted"]
-        df["semester"] = "1st Sem"
-        df = df.drop(columns=["year_admitted"])
-    
     if "ay_start" not in df.columns:
         df["ay_start"] = 2024
     if "semester" not in df.columns:
@@ -217,8 +220,9 @@ def load_data():
         df["committee_members"] = ""
     if "committee_approval_date" not in df.columns:
         df["committee_approval_date"] = ""
+    if "phd_track" not in df.columns:
+        df["phd_track"] = ""
     
-    # Convert numeric columns
     numeric_int_cols = [
         "thesis_units_taken", "thesis_units_limit",
         "total_units_taken", "total_units_required",
@@ -241,6 +245,17 @@ def load_data():
             else:
                 program = PROGRAMS[0]
             df.at[idx, "program"] = program
+        
+        # Recalculate total_units_required if needed
+        if program in ["PhD Environmental Science", "PhD Environmental Diplomacy and Negotiations"]:
+            track = row.get("phd_track", "")
+            if track not in PhD_TRACKS:
+                track = "MS EnvSci graduate"  # default
+            req = get_required_units(program, track)
+        else:
+            req = get_required_units(program)
+        df.at[idx, "total_units_required"] = req
+        
         df.at[idx, "residency_max_years"] = get_residency_max_from_program(program)
         df.at[idx, "thesis_units_limit"] = get_thesis_limit_from_program(program)
         
@@ -392,7 +407,6 @@ def get_all_warnings(row):
         return ["✅ All rules satisfied"]
     return warnings
 
-# Load data
 df = load_data()
 
 # ==================== SIDEBAR ====================
@@ -409,7 +423,6 @@ if st.sidebar.button("Logout"):
 st.sidebar.markdown("---")
 st.sidebar.caption("Version 2.0 | ISSP 2026-2031 | Graduate School Rules")
 
-# ==================== MAIN ====================
 st.title("🎓 SESAM Graduate Student Milestone Tracker")
 st.markdown("*Centralized tracking for graduate students based on UPLB Graduate School Policies*")
 st.markdown("---")
@@ -491,7 +504,7 @@ if role == "SESAM Staff":
             if student["thesis_units_taken"] > limit:
                 st.error("⚠️ Units exceeded!")
 
-        # ----- EDIT TABS (6 tabs now) -----
+        # ----- EDIT TABS -----
         tabs = st.tabs(["Coursework & Thesis", "Exams", "Residency & Leave", "Graduation", "Committee", "Other"])
         
         with tabs[0]:
@@ -501,14 +514,16 @@ if role == "SESAM Staff":
                 pos_status = st.selectbox("POS Status", pos_options, index=safe_index(pos_options, student["pos_status"]))
                 pos_submitted = st.text_input("POS Submitted Date (YYYY-MM-DD)", student["pos_submitted_date"])
                 pos_approved = st.text_input("POS Approved Date (YYYY-MM-DD)", student["pos_approved_date"])
+                
                 st.subheader("Coursework")
                 gwa = st.number_input("GWA", min_value=1.0, max_value=5.0, step=0.01, value=float(student["gwa"]))
                 total_units_taken = st.number_input("Total Units Taken", min_value=0, max_value=60, step=1, value=int(student["total_units_taken"]))
                 total_units_required = st.number_input("Total Units Required", min_value=0, max_value=60, step=1, value=int(student["total_units_required"]))
-                # Progress bar
-                progress = compute_coursework_progress(student)
-                st.progress(progress / 100, text=f"Coursework completion: {progress}% ({student['total_units_taken']} of {student['total_units_required']} units)")
-                st.caption(f"Remaining units: {max(0, student['total_units_required'] - student['total_units_taken'])}")
+                
+                prog = compute_coursework_progress({"total_units_taken": total_units_taken, "total_units_required": total_units_required})
+                st.progress(prog / 100, text=f"Coursework completion: {prog}% ({total_units_taken} of {total_units_required} units)")
+                st.caption(f"Remaining units: {max(0, total_units_required - total_units_taken)}")
+                
                 st.subheader("Thesis/Dissertation")
                 thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=int(student["thesis_units_taken"]))
                 st.caption(get_thesis_pattern_description(student["program"]))
@@ -517,6 +532,7 @@ if role == "SESAM Staff":
                 thesis_outline_date = st.text_input("Outline Approval Date", student["thesis_outline_approved_date"])
                 status_options = ["Not Started", "In Progress", "Draft with Adviser", "For Committee Review", "Approved", "Submitted"]
                 thesis_status = st.selectbox("Thesis Status", status_options, index=safe_index(status_options, student["thesis_status"]))
+                
                 if st.form_submit_button("Update Coursework & Thesis"):
                     df.loc[df["student_number"] == student_number, ["pos_status","pos_submitted_date","pos_approved_date","gwa","total_units_taken","total_units_required","thesis_units_taken","thesis_outline_approved","thesis_outline_approved_date","thesis_status"]] = [pos_status, pos_submitted, pos_approved, gwa, total_units_taken, total_units_required, thesis_units_taken, thesis_outline_approved, thesis_outline_date, thesis_status]
                     save_data(df)
@@ -580,11 +596,11 @@ if role == "SESAM Staff":
                     save_data(df)
                     st.success("✅ Updated!")
                     st.rerun()
-        with tabs[4]:   # COMMITTEE TAB
+        with tabs[4]:
             with st.form("committee_form"):
                 st.subheader("Guidance / Advisory Committee")
                 committee_members = st.text_area("Committee Members (one per line)", value=student.get("committee_members", ""), height=150,
-                                                 help="List names of major professor/adviser and other committee members.")
+                                                 help="Example:\nDr. Maria Santos (Major Adviser)\nDr. Jose Rizal (Member)\nDr. Andres Bonifacio (Member)")
                 committee_approval_date = st.text_input("Committee Approval Date (YYYY-MM-DD)", student.get("committee_approval_date", ""))
                 if st.form_submit_button("Update Committee"):
                     df.loc[df["student_number"] == student_number, "committee_members"] = committee_members
@@ -603,7 +619,6 @@ if role == "SESAM Staff":
                     save_data(df)
                     st.success("✅ Updated!")
                     st.rerun()
-
     else:
         st.info("No students match the current search. Try a different name/number or add a new student below.")
 
@@ -626,12 +641,22 @@ if role == "SESAM Staff":
             with col5:
                 program = st.selectbox("Program *", options=PROGRAMS)
             
+            # PhD track selection (only shown for PhD programs)
+            phd_track = None
+            if program in ["PhD Environmental Science", "PhD Environmental Diplomacy and Negotiations"]:
+                track_col, dummy = st.columns([1, 1])
+                with track_col:
+                    phd_track = st.selectbox("PhD Track *", options=PhD_TRACKS, help="Select based on your previous degree")
+            else:
+                phd_track = None
+            
             col6, col7 = st.columns(2)
             with col6:
                 selected_ay_range = st.selectbox("Academic Year *", options=ACADEMIC_YEARS, index=ACADEMIC_YEARS.index(f"{current_year}-{current_year+1}") if f"{current_year}-{current_year+1}" in ACADEMIC_YEARS else 0)
                 ay_start = int(selected_ay_range.split("-")[0])
             with col7:
                 semester = st.selectbox("Semester *", options=SEMESTERS)
+            st.caption(f"📅 {format_ay(ay_start, semester)}")
             
             col8, col9 = st.columns(2)
             with col8:
@@ -670,12 +695,21 @@ if role == "SESAM Staff":
                     errors.append("Student Number is required.")
                 if student_number in df["student_number"].values:
                     errors.append("Student number already exists. Please use a unique number.")
+                if program in ["PhD Environmental Science", "PhD Environmental Diplomacy and Negotiations"] and not phd_track:
+                    errors.append("PhD Track is required for PhD programs.")
                 if errors:
                     for err in errors:
                         st.error(err)
                 else:
                     middle = f" {middle_name.strip()}" if middle_name.strip() else ""
                     full_name = f"{last_name.strip()}, {first_name.strip()}{middle}"
+                    
+                    # Compute required units
+                    if program in ["PhD Environmental Science", "PhD Environmental Diplomacy and Negotiations"]:
+                        required_units = get_required_units(program, phd_track)
+                    else:
+                        required_units = get_required_units(program)
+                    
                     new_row = create_default_data().iloc[0].to_dict()
                     new_row.update({
                         "student_number": student_number.strip(),
@@ -684,6 +718,7 @@ if role == "SESAM Staff":
                         "first_name": first_name.strip(),
                         "middle_name": middle_name.strip(),
                         "program": program,
+                        "phd_track": phd_track if phd_track else "",
                         "advisor": advisor.strip() if advisor else "Not assigned",
                         "ay_start": ay_start,
                         "semester": semester,
@@ -691,14 +726,13 @@ if role == "SESAM Staff":
                         "gwa": gwa,
                         "thesis_units_taken": thesis_units_taken,
                         "thesis_units_limit": get_thesis_limit(program),
+                        "total_units_required": required_units,
                         "residency_max_years": get_residency_max(program),
                         "committee_members": "",
                         "committee_approval_date": "",
-                        "profile_pic": "",
                         "pos_submitted_date": "",
                         "pos_approved_date": "",
                         "total_units_taken": 0,
-                        "total_units_required": 24,
                         "thesis_outline_approved": "No",
                         "thesis_outline_approved_date": "",
                         "thesis_status": "Not Started",
@@ -749,8 +783,6 @@ elif role == "Faculty Adviser":
             filtered_advisees = filter_dataframe(search_adv, advisees)
             filtered_advisees["academic_year"] = filtered_advisees.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
             filtered_advisees["warnings"] = filtered_advisees.apply(lambda row: "\n".join(get_all_warnings(row)), axis=1)
-            # Also add deadline alerts to the table
-            filtered_advisees["deadline_alerts"] = filtered_advisees.apply(lambda row: "\n".join(check_deadline_alerts(row)), axis=1)
             display_cols = ["student_number", "name", "program", "academic_year", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status", "warnings"]
             st.dataframe(filtered_advisees[display_cols], width='stretch')
             if len(filtered_advisees) > 0:
@@ -770,9 +802,7 @@ elif role == "Faculty Adviser":
                             st.markdown(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
                             st.markdown(f"**Final Exam:** {row['final_exam_status']}")
                             st.markdown(f"**Residency:** {row['residency_years_used']}/{get_residency_max(row['program'])} years")
-                        pic_path = get_profile_picture_path(row["student_number"])
-                        if pic_path and os.path.exists(pic_path):
-                            st.image(pic_path, width=100, caption="Profile Picture")
+                        
                         # Show deadline alerts
                         alerts = check_deadline_alerts(row)
                         if alerts:
@@ -796,12 +826,10 @@ elif role == "Student":
         st.error("Your record not found. Please contact SESAM Staff.")
     else:
         student = student_record.iloc[0]
-        # Deadline alerts
         alerts = check_deadline_alerts(student)
         if alerts:
             for alert in alerts:
                 st.error(alert)
-        # Standard warnings
         warnings = get_all_warnings(student)
         if any("⚠️" in w for w in warnings):
             for w in warnings:
@@ -809,53 +837,38 @@ elif role == "Student":
         else:
             st.success("\n".join(warnings))
 
-        pic_path = get_profile_picture_path(student["student_number"])
-        if pic_path and os.path.exists(pic_path):
-            col_pic, col_info = st.columns([1, 2])
-            with col_pic:
-                st.image(pic_path, width=150, caption="Your Profile Picture")
-            with col_info:
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Student Number", student["student_number"])
-                    st.metric("Program", student["program"])
-                    st.metric("Academic Year", format_ay(student["ay_start"], student["semester"]))
-                with col2:
-                    st.metric("Advisor", student["advisor"])
-                    st.metric("GWA", f"{student['gwa']:.2f}")
-                    st.metric("POS Status", student["pos_status"])
-                with col3:
-                    limit = get_thesis_limit(student["program"])
-                    st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
-                    st.metric("Residency", f"{student['residency_years_used']} / {get_residency_max(student['program'])} years")
-                    st.metric("Final Exam", student["final_exam_status"])
-        else:
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Student Number", student["student_number"])
-                st.metric("Program", student["program"])
-                st.metric("Academic Year", format_ay(student["ay_start"], student["semester"]))
-            with col2:
-                st.metric("Advisor", student["advisor"])
-                st.metric("GWA", f"{student['gwa']:.2f}")
-                st.metric("POS Status", student["pos_status"])
-            with col3:
-                limit = get_thesis_limit(student["program"])
-                st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
-                st.metric("Residency", f"{student['residency_years_used']} / {get_residency_max(student['program'])} years")
-                st.metric("Final Exam", student["final_exam_status"])
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Student Number", student["student_number"])
+            st.metric("Program", student["program"])
+            st.metric("Academic Year", format_ay(student["ay_start"], student["semester"]))
+        with col2:
+            st.metric("Advisor", student["advisor"])
+            st.metric("GWA", f"{student['gwa']:.2f}")
+            st.metric("POS Status", student["pos_status"])
+        with col3:
+            limit = get_thesis_limit(student["program"])
+            st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
+            st.metric("Residency", f"{student['residency_years_used']} / {get_residency_max(student['program'])} years")
+            st.metric("Final Exam", student["final_exam_status"])
 
-        # Coursework progress bar
+        # Coursework progress
         st.markdown("---")
         st.subheader("📚 Coursework Progress")
-        progress = compute_coursework_progress(student)
-        st.progress(progress / 100, text=f"{progress}% completed ({student['total_units_taken']} of {student['total_units_required']} units)")
+        prog = compute_coursework_progress(student)
+        st.progress(prog / 100, text=f"{prog}% completed ({student['total_units_taken']} of {student['total_units_required']} units)")
         st.caption(f"Remaining units: {max(0, student['total_units_required'] - student['total_units_taken'])}")
         
-        # Committee information
+        # Committee display
         if student.get("committee_members"):
             with st.expander("📋 Your Guidance/Advisory Committee"):
-                st.text_area("Committee Members", value=student["committee_members"], height=120, disabled=True)
+                members = student["committee_members"].strip().split('\n')
+                if members and members[0]:
+                    for m in members:
+                        if m.strip():
+                            st.markdown(f"- {m.strip()}")
+                else:
+                    st.info("Committee members not yet listed.")
                 if student.get("committee_approval_date"):
                     st.caption(f"Approved on: {student['committee_approval_date']}")
 
@@ -883,6 +896,5 @@ elif role == "Student":
         st.dataframe(milestone_df, width='stretch', hide_index=True)
         st.info("📌 Read-only view. For updates, contact your adviser or SESAM Staff.")
 
-# ==================== FOOTER ====================
 st.markdown("---")
 st.caption("SESAM KMIS – Student Module V2 | Based on UPLB Graduate School Rules (2009)")
