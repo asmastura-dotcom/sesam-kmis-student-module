@@ -573,82 +573,35 @@ if role == "SESAM Staff":
         student = df[df["name"] == student_name].iloc[0].copy()
         student_number = student["student_number"]
 
-        # ----- PROFILE PICTURE -----
+        # ----- PROFILE PICTURE (Staff: view only) -----
         st.markdown("---")
-        st.subheader("📸 Student Profile Picture")
-        col_pic1, col_pic2 = st.columns([1, 2])
-        with col_pic1:
-            pic_path = get_profile_picture_path(student_number)
-            if pic_path and os.path.exists(pic_path):
-                st.image(pic_path, width=100, caption="Current Picture")
-            else:
-                st.info("No profile picture uploaded.")
-        with col_pic2:
-            uploaded_file = st.file_uploader("Upload new profile picture (JPG, PNG, GIF)", type=["jpg", "jpeg", "png", "gif"], key=f"pic_{student_number}")
-            if uploaded_file:
-                new_filename = save_profile_picture(student_number, uploaded_file)
-                if new_filename:
-                    df.loc[df["student_number"] == student_number, "profile_pic"] = new_filename
-                    save_data(df)
-                    st.success("Profile picture updated!")
-                    st.rerun()
-            if st.button("🗑️ Delete current picture", key=f"del_pic_{student_number}"):
-                if delete_profile_picture(student_number):
-                    df.loc[df["student_number"] == student_number, "profile_pic"] = ""
-                    save_data(df)
-                    st.success("Profile picture deleted.")
-                    st.rerun()
-                else:
-                    st.warning("No picture to delete.")
-
-        # ----- AMIS SCREENSHOT SECTION -----
-        st.markdown("---")
-        st.subheader("📊 AMIS Screenshot (Subjects, Grades, Units)")
-        col_amis1, col_amis2 = st.columns([1, 2])
-        with col_amis1:
-            amis_path = get_amis_screenshot_path(student_number)
-            if amis_path and os.path.exists(amis_path):
-                st.image(amis_path, width=250, caption="AMIS Screenshot")
-            else:
-                st.info("No AMIS screenshot uploaded.")
-        with col_amis2:
-            uploaded_amis = st.file_uploader("Upload AMIS screenshot (JPG/PNG)", type=["jpg", "jpeg", "png"], key=f"amis_{student_number}")
-            if uploaded_amis:
-                new_file = save_amis_screenshot(student_number, uploaded_amis)
-                if new_file:
-                    st.success("AMIS screenshot uploaded and compressed!")
-                    st.rerun()
-            if st.button("🗑️ Delete AMIS screenshot", key=f"del_amis_{student_number}"):
-                if delete_amis_screenshot(student_number):
-                    st.success("AMIS screenshot deleted.")
-                    st.rerun()
-                else:
-                    st.warning("No screenshot to delete.")
-
-        # ----- MANUAL GWA ENTRY -----
-        st.markdown("---")
-        st.subheader("📈 Manual GWA Entry (based on AMIS)")
-        current_gwa = float(student["gwa"])
-        new_gwa = st.number_input("Enter the GWA exactly as shown on the AMIS screenshot", 
-                                  min_value=1.0, max_value=5.0, step=0.01, value=current_gwa)
-        if st.button("Update GWA from AMIS"):
-            df.loc[df["student_number"] == student_number, "gwa"] = new_gwa
-            save_data(df)
-            st.success(f"GWA updated to {new_gwa}")
-            st.rerun()
-
-        # ----- DEADLINE ALERTS & WARNINGS -----
-        deadline_alerts = check_deadline_alerts(student)
-        if deadline_alerts:
-            for alert in deadline_alerts:
-                st.error(alert)
-
-        warnings = get_all_warnings(student)
-        if any("⚠️" in w for w in warnings):
-            for w in warnings:
-                st.error(w)
+        st.subheader("📸 Student Profile Picture (View Only)")
+        pic_path = get_profile_picture_path(student_number)
+        if pic_path and os.path.exists(pic_path):
+            st.image(pic_path, width=100, caption="Current Profile Picture")
         else:
-            st.success("\n".join(warnings))
+            st.info("No profile picture uploaded by student.")
+        
+        # ----- AMIS SCREENSHOT (Staff: view only) -----
+        st.markdown("---")
+        st.subheader("📊 AMIS Screenshot (View Only)")
+        amis_path = get_amis_screenshot_path(student_number)
+        if amis_path and os.path.exists(amis_path):
+            st.image(amis_path, width=250, caption="AMIS Screenshot")
+        else:
+            st.info("No AMIS screenshot uploaded by student.")
+                # ----- DEADLINE ALERTS & WARNINGS -----
+                deadline_alerts = check_deadline_alerts(student)
+                if deadline_alerts:
+                    for alert in deadline_alerts:
+                        st.error(alert)
+        
+                warnings = get_all_warnings(student)
+                if any("⚠️" in w for w in warnings):
+                    for w in warnings:
+                        st.error(w)
+                else:
+                    st.success("\n".join(warnings))
 
         # ----- STUDENT INFO -----
         st.markdown("---")
