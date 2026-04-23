@@ -864,6 +864,7 @@ if role == "SESAM Staff":
                 ay_start = int(selected_ay_range.split("-")[0])
             with col7:
                 semester = st.selectbox("Semester *", options=SEMESTERS)
+            st.caption(f"📅 {format_ay(ay_start, semester)}")
             
             col8, col9 = st.columns(2)
             with col8:
@@ -872,6 +873,23 @@ if role == "SESAM Staff":
                 st.empty()
             
             st.markdown("---")
+            st.markdown("### Initial Milestone Status (optional)")
+            col10, col11, col12 = st.columns(3)
+            with col10:
+                gwa = st.number_input("Initial GWA", min_value=1.0, max_value=5.0, step=0.01, value=2.0, help="1.0 best, 5.0 failing")
+            with col11:
+                thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=0)
+                st.caption(get_thesis_pattern_description(program))
+            with col12:
+                pos_status = st.selectbox("POS Status", ["Not Filed", "Pending", "Approved"])
+            
+            col13, col14, col15 = st.columns(3)
+            with col13:
+                comp_exam = st.selectbox("Comprehensive Exam (PhD)", ["N/A", "Not Taken", "Passed", "Failed"])
+            with col14:
+                general_exam = st.selectbox("General Exam (MS)", ["N/A", "Not Taken", "Passed", "Failed"])
+            with col15:
+                final_exam = st.selectbox("Final Exam Status", ["Not Taken", "Passed", "Failed"])
             
             submitted = st.form_submit_button("Register Student")
             if submitted:
@@ -956,80 +974,81 @@ if role == "SESAM Staff":
                     st.success(f"✅ Student {full_name} (Number: {student_number}) registered successfully!")
                     st.rerun()
 
-# ==================== ADVISER VIEW (with notification system) ====================
+# ==================== ADVISER VIEW (with notification system, no dropdown) ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees")
-    all_advisors = sorted(df["advisor"].unique())
-    if len(all_advisors) == 0:
-        st.warning("No advisors found in the data.")
+    # Get the logged-in adviser's name from session state
+    adviser_name = st.session_state.display_name
+    # Filter students where advisor column matches the logged-in adviser
+    advisees = df[df["advisor"] == adviser_name].copy()
+    
+    if len(advisees) == 0:
+        st.warning(f"You have no students assigned yet. Contact SESAM Staff to assign students to you.")
     else:
-        selected_advisor = st.selectbox("Select your name", all_advisors)
-        advisees = df[df["advisor"] == selected_advisor].copy()
-        if len(advisees) == 0:
-            st.warning("No students assigned to this advisor.")
+        # Optional search within advisees
+        search_adv = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001")
+        filtered_advisees = filter_dataframe(search_adv, advisees)
+        filtered_advisees["academic_year"] = filtered_advisees.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
+        filtered_advisees["warnings"] = filtered_advisees.apply(lambda row: "\n".join(get_all_warnings(row)), axis=1)
+        display_cols = ["student_number", "name", "program", "academic_year", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status", "warnings"]
+        st.dataframe(filtered_advisees[display_cols], width='stretch')
+        
+        if len(filtered_advisees) > 0:
+            st.markdown("---")
+            st.subheader("📌 Detailed View & Send Notifications")
+            for _, row in filtered_advisees.iterrows():
+                with st.expander(f"{row['name']} ({row['student_number']})"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"**Program:** {row['program']}")
+                        st.markdown(f"**Academic Year:** {format_ay(row['ay_start'], row['semester'])}")
+                        st.markdown(f"**GWA:** {row['gwa']}")
+                        st.markdown(f"**POS Status:** {row['pos_status']}")
+                        st.markdown(f"**Thesis Units:** {row['thesis_units_taken']}/{row['thesis_units_limit']}")
+                    with col2:
+                        st.markdown(f"**General Exam:** {row['general_exam_status']}")
+                        st.markdown(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
+                        st.markdown(f"**Final Exam:** {row['final_exam_status']}")
+                        st.markdown(f"**Residency:** {row['residency_years_used']}/{get_residency_max(row['program'])} years")
+                    
+                    # Profile picture (view only)
+                    pic_path = get_profile_picture_path(row["student_number"])
+                    if pic_path and os.path.exists(pic_path):
+                        st.image(pic_path, width=100, caption="Profile Picture")
+                    # AMIS screenshot (view only)
+                    amis_path = get_amis_screenshot_path(row["student_number"])
+                    if amis_path and os.path.exists(amis_path):
+                        with st.expander("📄 View AMIS Screenshot"):
+                            st.image(amis_path, width=300)
+                    
+                    # ===== NOTIFICATION SECTION FOR ADVISER =====
+                    st.markdown("---")
+                    st.subheader("📬 Send Notification to Student")
+                    with st.form(key=f"notif_form_{row['student_number']}"):
+                        notif_type = st.selectbox("Notification Type", ["General Reminder", "Academic Warning", "Meeting Request", "Requirement Follow-up"])
+                        message = st.text_area("Message", height=100, placeholder="Type your message here...")
+                        send = st.form_submit_button("Send Notification")
+                        if send and message.strip():
+                            df = add_notification(df, row["student_number"], adviser_name, message, notif_type)
+                            save_data(df)
+                            st.success(f"Notification sent to {row['name']}!")
+                            st.rerun()
+                        elif send and not message.strip():
+                            st.error("Message cannot be empty.")
+                    
+                    # Deadline alerts and warnings
+                    alerts = check_deadline_alerts(row)
+                    if alerts:
+                        for alert in alerts:
+                            st.error(alert)
+                    warnings_text = row["warnings"]
+                    if any("⚠️" in w for w in warnings_text.split("\n")):
+                        for w in warnings_text.split("\n"):
+                            st.error(w)
+                    else:
+                        st.success(warnings_text)
         else:
-            search_adv = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001")
-            filtered_advisees = filter_dataframe(search_adv, advisees)
-            filtered_advisees["academic_year"] = filtered_advisees.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
-            filtered_advisees["warnings"] = filtered_advisees.apply(lambda row: "\n".join(get_all_warnings(row)), axis=1)
-            display_cols = ["student_number", "name", "program", "academic_year", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status", "warnings"]
-            st.dataframe(filtered_advisees[display_cols], width='stretch')
-            if len(filtered_advisees) > 0:
-                st.markdown("---")
-                st.subheader("📌 Detailed View")
-                for _, row in filtered_advisees.iterrows():
-                    with st.expander(f"{row['name']} ({row['student_number']})"):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.markdown(f"**Program:** {row['program']}")
-                            st.markdown(f"**Academic Year:** {format_ay(row['ay_start'], row['semester'])}")
-                            st.markdown(f"**GWA:** {row['gwa']}")
-                            st.markdown(f"**POS Status:** {row['pos_status']}")
-                            st.markdown(f"**Thesis Units:** {row['thesis_units_taken']}/{row['thesis_units_limit']}")
-                        with col2:
-                            st.markdown(f"**General Exam:** {row['general_exam_status']}")
-                            st.markdown(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
-                            st.markdown(f"**Final Exam:** {row['final_exam_status']}")
-                            st.markdown(f"**Residency:** {row['residency_years_used']}/{get_residency_max(row['program'])} years")
-                        
-                        # Profile picture (view only)
-                        pic_path = get_profile_picture_path(row["student_number"])
-                        if pic_path and os.path.exists(pic_path):
-                            st.image(pic_path, width=100, caption="Profile Picture")
-                        # AMIS screenshot (view only)
-                        amis_path = get_amis_screenshot_path(row["student_number"])
-                        if amis_path and os.path.exists(amis_path):
-                            with st.expander("📄 View AMIS Screenshot"):
-                                st.image(amis_path, width=300)
-                        
-                        # ===== NOTIFICATION SECTION FOR ADVISER =====
-                        st.markdown("---")
-                        st.subheader("📬 Send Notification to Student")
-                        with st.form(key=f"notif_form_{row['student_number']}"):
-                            notif_type = st.selectbox("Notification Type", ["General Reminder", "Academic Warning", "Meeting Request", "Requirement Follow-up"])
-                            message = st.text_area("Message", height=100, placeholder="Type your message here...")
-                            send = st.form_submit_button("Send Notification")
-                            if send and message.strip():
-                                df = add_notification(df, row["student_number"], selected_advisor, message, notif_type)
-                                save_data(df)
-                                st.success(f"Notification sent to {row['name']}!")
-                                st.rerun()
-                            elif send and not message.strip():
-                                st.error("Message cannot be empty.")
-                        
-                        # Deadline alerts and warnings
-                        alerts = check_deadline_alerts(row)
-                        if alerts:
-                            for alert in alerts:
-                                st.error(alert)
-                        warnings_text = row["warnings"]
-                        if any("⚠️" in w for w in warnings_text.split("\n")):
-                            for w in warnings_text.split("\n"):
-                                st.error(w)
-                        else:
-                            st.success(warnings_text)
-            else:
-                st.info("No matching students.")
+            st.info("No matching students.")
     st.info("📌 You can send notifications to your advisees. They will see them immediately when they log in.")
 
 # ==================== STUDENT VIEW (with notification display) ====================
