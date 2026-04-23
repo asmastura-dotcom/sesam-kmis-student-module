@@ -567,39 +567,6 @@ if role == "SESAM Staff":
                     st.success("✅ Updated!")
                     st.rerun()
 
-        st.markdown("---")
-        st.subheader("🗑️ Delete Student")
-        with st.expander("Click to expand and delete a student record"):
-            delete_search = st.text_input("Search student to delete", placeholder="name or number", key="delete_search")
-            delete_filtered = filter_dataframe(delete_search, filtered_df) if delete_search else filtered_df
-            if len(delete_filtered) == 0:
-                st.warning("No matching students to delete.")
-            else:
-                delete_name = st.selectbox("Select Student to Delete", delete_filtered["name"])
-                delete_num = df[df["name"] == delete_name]["student_number"].values[0]
-                confirm = st.checkbox("⚠️ I confirm that I want to permanently delete this student. This action cannot be undone.")
-                if confirm and st.button("Yes, Delete This Student"):
-                    delete_profile_picture(delete_num)
-                    df = df[df["student_number"] != delete_num]
-                    save_data(df)
-                    st.success(f"✅ Student '{delete_name}' has been deleted.")
-                    st.rerun()
-                elif not confirm and st.button("Yes, Delete This Student"):
-                    st.warning("Please check the confirmation box before deleting.")
-
-        st.markdown("---")
-        st.subheader("🔄 Reset All Data")
-        with st.expander("⚠️ Click to reset all student data to default samples (S001–S005). This will delete all other students and their pictures."):
-            reset_confirm = st.checkbox("I understand that this will permanently delete ALL current student data and restore only the sample records (S001–S005).")
-            if reset_confirm and st.button("Yes, Reset All Data"):
-                for f in os.listdir(PIC_FOLDER):
-                    os.remove(os.path.join(PIC_FOLDER, f))
-                df = create_default_data()
-                save_data(df)
-                st.success("✅ Data has been reset to the default sample students (S001–S005).")
-                st.rerun()
-            elif not reset_confirm and st.button("Yes, Reset All Data"):
-                st.warning("Please check the confirmation box before resetting.")
     else:
         st.info("No students match the current search. Try a different name/number or add a new student below.")
 
