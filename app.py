@@ -1,10 +1,11 @@
 """
 SESAM KMIS - Student Module V2 (Graduate School Rules Integration)
-Author: Alyssa Fatmah S. Mastura
+Author: SESAM Dev Team
 Date: 2026-04-23
 Description: Tracks graduate student milestones, thesis units, exams, residency, LOA/AWOL, etc.
 Students upload profile picture and AMIS screenshot (with manual GWA entry).
 Staff & faculty can only view uploaded images.
+All names are enforced as "Last, First Middle".
 Based on UPLB Graduate School Policies, Rules and Regulations (2009).
 """
 
@@ -232,7 +233,7 @@ if not st.session_state.logged_in:
             st.error("❌ Invalid username or password")
     st.stop()
 
-# ==================== DATA LOADING WITH MIGRATION ====================
+# ==================== DATA LOADING WITH MIGRATION & NAME FIX ====================
 DATA_FILE = "students.csv"
 
 def create_default_data():
@@ -295,7 +296,7 @@ def load_data():
     else:
         df = create_default_data()
     
-    # Migrate old column names and add missing ones
+    # ---- COLUMN MIGRATION ----
     if "advisor_username" in df.columns and "advisor" not in df.columns:
         df.rename(columns={"advisor_username": "advisor"}, inplace=True)
     if "year_admitted" in df.columns and "ay_start" not in df.columns:
@@ -303,10 +304,36 @@ def load_data():
         df["semester"] = "1st Sem"
         df.drop(columns=["year_admitted"], inplace=True)
     
+    # Add missing columns
     default_df = create_default_data()
     for col in default_df.columns:
         if col not in df.columns:
             df[col] = default_df[col]
+    
+    # ---- ENSURE NAME COMPONENTS EXIST ----
+    if "last_name" not in df.columns:
+        df["last_name"] = ""
+    if "first_name" not in df.columns:
+        df["first_name"] = ""
+    if "middle_name" not in df.columns:
+        df["middle_name"] = ""
+    
+    # ---- REBUILD NAME FROM COMPONENTS (enforces "Last, First Middle") ----
+    def build_name(row):
+        last = str(row.get("last_name", "")).strip()
+        first = str(row.get("first_name", "")).strip()
+        middle = str(row.get("middle_name", "")).strip()
+        if last and first:
+            middle_part = f" {middle}" if middle else ""
+            return f"{last}, {first}{middle_part}"
+        # Fallback: use existing name column if components missing
+        return row.get("name", "")
+    
+    df["name"] = df.apply(build_name, axis=1)
+    
+    # ---- REMOVE ROWS WITH EMPTY STUDENT NUMBER ----
+    df = df[df["student_number"].notna() & (df["student_number"].astype(str).str.strip() != "")]
+    df = df[df["student_number"] != "None"]
     
     # Convert numeric columns
     numeric_int_cols = [
@@ -583,7 +610,7 @@ if role == "SESAM Staff":
         else:
             st.info("No profile picture uploaded by student.")
 
-        # ----- AMIS SCREENSHOT (Staff: view only) -----
+        # AMIS SCREENSHOT (Staff: view only)
         st.markdown("---")
         st.subheader("📊 AMIS Screenshot (View Only)")
         amis_path = get_amis_screenshot_path(student_number)
@@ -592,7 +619,7 @@ if role == "SESAM Staff":
         else:
             st.info("No AMIS screenshot uploaded by student.")
 
-        # ----- MANUAL GWA ENTRY (Staff can edit based on AMIS) -----
+        # MANUAL GWA ENTRY (Staff can edit based on AMIS)
         st.markdown("---")
         st.subheader("📈 Manual GWA Entry (based on AMIS)")
         current_gwa = float(student["gwa"])
@@ -604,7 +631,7 @@ if role == "SESAM Staff":
             st.success(f"GWA updated to {new_gwa}")
             st.rerun()
 
-        # ----- DEADLINE ALERTS & WARNINGS -----
+        # ---- DEADLINE ALERTS & WARNINGS ----
         deadline_alerts = check_deadline_alerts(student)
         if deadline_alerts:
             for alert in deadline_alerts:
@@ -634,7 +661,7 @@ if role == "SESAM Staff":
             if student["thesis_units_taken"] > limit:
                 st.error("⚠️ Units exceeded!")
 
-        # ----- EDIT TABS (unchanged – staff can edit all milestone data) -----
+        # ----- EDIT TABS (full milestone editing) -----
         tabs = st.tabs(["Coursework & Thesis", "Exams", "Residency & Leave", "Graduation", "Committee", "Other"])
         
         with tabs[0]:
@@ -748,7 +775,7 @@ if role == "SESAM Staff":
     else:
         st.info("No students match the current search. Try a different name/number or add a new student below.")
 
-    # ----- ADD NEW STUDENT (unchanged) -----
+    # ----- ADD NEW STUDENT -----
     st.markdown("---")
     st.subheader("➕ Add New Student")
     with st.expander("Register New Student", expanded=True):
@@ -789,6 +816,23 @@ if role == "SESAM Staff":
                 st.empty()
             
             st.markdown("---")
+            st.markdown("### Initial Milestone Status (optional)")
+            col10, col11, col12 = st.columns(3)
+            with col10:
+                gwa = st.number_input("Initial GWA", min_value=1.0, max_value=5.0, step=0.01, value=2.0, help="1.0 best, 5.0 failing")
+            with col11:
+                thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=0)
+                st.caption(get_thesis_pattern_description(program))
+            with col12:
+                pos_status = st.selectbox("POS Status", ["Not Filed", "Pending", "Approved"])
+            
+            col13, col14, col15 = st.columns(3)
+            with col13:
+                comp_exam = st.selectbox("Comprehensive Exam (PhD)", ["N/A", "Not Taken", "Passed", "Failed"])
+            with col14:
+                general_exam = st.selectbox("General Exam (MS)", ["N/A", "Not Taken", "Passed", "Failed"])
+            with col15:
+                final_exam = st.selectbox("Final Exam Status", ["Not Taken", "Passed", "Failed"])
             
             submitted = st.form_submit_button("Register Student")
             if submitted:
@@ -1006,7 +1050,7 @@ elif role == "Student":
                 st.success("AMIS screenshot deleted.")
                 st.rerun()
 
-    # ------ MANUAL GWA ENTRY (student can also update GWA) ------
+    # ------ MANUAL GWA ENTRY (student can update) ------
     st.markdown("---")
     st.subheader("📈 Update GWA from AMIS Screenshot")
     current_gwa = float(student["gwa"])
