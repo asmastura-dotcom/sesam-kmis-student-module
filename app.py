@@ -656,7 +656,6 @@ if role == "SESAM Staff":
                 ay_start = int(selected_ay_range.split("-")[0])
             with col7:
                 semester = st.selectbox("Semester *", options=SEMESTERS)
-            st.caption(f"📅 {format_ay(ay_start, semester)}")
             
             col8, col9 = st.columns(2)
             with col8:
