@@ -133,7 +133,7 @@ def load_data():
         if col not in df.columns:
             df[col] = default_df[col]
     
-    # Convert numeric columns, replacing NaN with 0 (or 2.0 for GWA)
+    # Convert numeric columns, replacing NaN with 0
     numeric_int_cols = [
         "thesis_units_taken", "thesis_units_limit",
         "total_units_taken", "total_units_required",
@@ -148,6 +148,16 @@ def load_data():
     
     # Year admitted as int
     df["year_admitted"] = pd.to_numeric(df["year_admitted"], errors='coerce').fillna(2024).astype(int)
+    
+    # Force residency_max_years based on program (fix any invalid values)
+    for idx, row in df.iterrows():
+        program = str(row["program"]).strip()
+        if program == "MS":
+            df.at[idx, "residency_max_years"] = 5
+        elif program == "PhD":
+            df.at[idx, "residency_max_years"] = 7
+        else:
+            df.at[idx, "residency_max_years"] = 5  # default
     
     # Save the cleaned data back to CSV
     df.to_csv(DATA_FILE, index=False)
@@ -176,12 +186,16 @@ def get_warning_text(program, units_taken):
 
 def check_residency_warning(row):
     used = row.get("residency_years_used", 0)
-    max_years = row.get("residency_max_years", 5)
+    program = str(row.get("program", "MS")).strip()
+    
     try:
         used = float(used)
-        max_years = float(max_years)
     except:
         return "⚠️ Residency data error"
+    
+    # Always derive max_years from program (ignore stored value)
+    max_years = 5 if program == "MS" else 7
+    
     if used >= max_years:
         return f"⚠️ Residency limit reached ({used}/{max_years} years). Extension required."
     elif used >= max_years - 1:
@@ -431,6 +445,7 @@ if role == "SESAM Staff":
             with st.form("residency_form"):
                 st.subheader("Residency")
                 residency_used = st.number_input("Years of Residence Used", min_value=0, max_value=10, step=1, value=int(student["residency_years_used"]))
+                # Always show the correct max from program (not from stored value)
                 max_years = get_residency_max(student["program"])
                 st.info(f"Maximum allowed: {max_years} years")
                 extension_count = st.number_input("Number of Extensions Granted", min_value=0, max_value=3, step=1, value=int(student["extension_count"]))
@@ -559,7 +574,7 @@ elif role == "Faculty Adviser":
                     st.write(f"**General Exam:** {row['general_exam_status']}")
                     st.write(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
                     st.write(f"**Final Exam:** {row['final_exam_status']}")
-                    st.write(f"**Residency:** {row['residency_years_used']}/{row['residency_max_years']} years")
+                    st.write(f"**Residency:** {row['residency_years_used']}/{5 if row['program']=='MS' else 7} years")
                 warnings_text = row["warnings"]
                 if any("⚠️" in w for w in warnings_text.split("\n")):
                     st.warning(warnings_text)
@@ -594,7 +609,7 @@ elif role == "Student":
         with col3:
             limit = get_thesis_limit(student["program"])
             st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
-            st.metric("Residency", f"{student['residency_years_used']} / {student['residency_max_years']} years")
+            st.metric("Residency", f"{student['residency_years_used']} / {5 if student['program']=='MS' else 7} years")
             st.metric("Final Exam", student["final_exam_status"])
 
         st.markdown("---")
