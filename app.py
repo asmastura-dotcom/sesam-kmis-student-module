@@ -46,6 +46,8 @@ PROGRAMS = [
     "Professional Masters in Tropical Marine Ecosystems Management (PM-TMEM)"
 ]
 
+SEMESTERS = ["1st Sem", "2nd Sem", "Summer"]
+
 def is_master_program(program):
     return program.startswith("MS") or program.startswith("Master") or program.startswith("Professional Masters")
 
@@ -57,6 +59,10 @@ def get_thesis_limit_from_program(program):
 
 def get_residency_max_from_program(program):
     return 5 if is_master_program(program) else 7
+
+def format_ay(ay_start, semester):
+    """Format academic year and semester, e.g., A.Y. 2024-2025 (1st Sem)"""
+    return f"A.Y. {ay_start}-{ay_start+1} ({semester})"
 
 # ==================== PROFILE PICTURE HELPER ====================
 PIC_FOLDER = "profile_pics"
@@ -114,7 +120,7 @@ if not st.session_state.logged_in:
             st.error("❌ Invalid username or password")
     st.stop()
 
-# ==================== DATA LOADING ====================
+# ==================== DATA LOADING WITH MIGRATION ====================
 DATA_FILE = "students.csv"
 
 def create_default_data():
@@ -126,7 +132,8 @@ def create_default_data():
         "middle_name": ["M.", "L.", "P.", "C.", "R."],
         "program": [PROGRAMS[0], PROGRAMS[1], PROGRAMS[0], PROGRAMS[1], PROGRAMS[0]],
         "advisor": ["Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava"],
-        "year_admitted": [2024, 2023, 2024, 2022, 2024],
+        "ay_start": [2024, 2023, 2024, 2022, 2024],
+        "semester": ["1st Sem", "1st Sem", "2nd Sem", "1st Sem", "1st Sem"],
         "profile_pic": ["", "", "", "", ""],
         "pos_status": ["Approved", "Approved", "Pending", "Approved", "Pending"],
         "pos_submitted_date": ["2024-01-15", "2023-06-10", "", "2022-09-01", ""],
@@ -177,17 +184,30 @@ def load_data():
         if col not in df.columns:
             df[col] = default_df[col]
     
+    # Migrate old year_admitted column if exists
+    if "year_admitted" in df.columns and "ay_start" not in df.columns:
+        df["ay_start"] = df["year_admitted"]
+        df["semester"] = "1st Sem"
+        df = df.drop(columns=["year_admitted"])
+    
+    # Ensure ay_start and semester exist
+    if "ay_start" not in df.columns:
+        df["ay_start"] = 2024
+    if "semester" not in df.columns:
+        df["semester"] = "1st Sem"
+    
+    # Convert numeric columns
     numeric_int_cols = [
         "thesis_units_taken", "thesis_units_limit",
         "total_units_taken", "total_units_required",
         "residency_years_used", "residency_max_years",
-        "extension_count", "loa_total_terms", "transfer_units_approved"
+        "extension_count", "loa_total_terms", "transfer_units_approved",
+        "ay_start"
     ]
     for col in numeric_int_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
     
     df["gwa"] = pd.to_numeric(df["gwa"], errors='coerce').fillna(2.0).astype(float)
-    df["year_admitted"] = pd.to_numeric(df["year_admitted"], errors='coerce').fillna(2024).astype(int)
     
     for idx, row in df.iterrows():
         program = str(row["program"]).strip()
@@ -202,7 +222,8 @@ def load_data():
         df.at[idx, "residency_max_years"] = get_residency_max_from_program(program)
         df.at[idx, "thesis_units_limit"] = get_thesis_limit_from_program(program)
         
-        if row["year_admitted"] >= 2025:
+        # Reset progress for very new students (ay_start >= 2025)
+        if row["ay_start"] >= 2025:
             df.at[idx, "total_units_taken"] = 0
             df.at[idx, "written_comprehensive_status"] = "N/A"
             df.at[idx, "oral_comprehensive_status"] = "N/A"
@@ -309,13 +330,13 @@ def check_comprehensive_exam_deadline(row):
     total_taken = row.get("total_units_taken", 0)
     total_required = row.get("total_units_required", 24)
     written_status = str(row.get("written_comprehensive_status", "N/A")).strip()
-    year_admitted = row.get("year_admitted", 2026)
+    ay_start = row.get("ay_start", 2026)
     try:
         total_taken = float(total_taken)
         total_required = float(total_required)
     except:
         return "⚠️ Units data error"
-    if is_phd_program(program) and total_taken >= total_required and year_admitted <= 2023:
+    if is_phd_program(program) and total_taken >= total_required and ay_start <= 2023:
         if written_status != "Passed":
             return "⚠️ Written comprehensive exam pending after completing coursework"
     return "✅ Comprehensive exam on track"
@@ -380,9 +401,6 @@ def safe_index(options, value):
     except ValueError:
         return 0
 
-def format_ay(year):
-    return f"A.Y. {year}-{year+1} (1st Sem)"
-
 def filter_dataframe(search_term, data):
     if not search_term:
         return data
@@ -397,7 +415,10 @@ if role == "SESAM Staff":
     st.subheader("📋 All Students")
     search = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001")
     filtered_df = filter_dataframe(search, df)
-    st.dataframe(filtered_df, width='stretch', height=400)
+    # Add formatted academic year column for display
+    filtered_df["academic_year"] = filtered_df.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
+    display_cols = ["student_number", "name", "program", "academic_year", "advisor", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status"]
+    st.dataframe(filtered_df[display_cols], width='stretch', height=400)
 
     st.markdown("---")
     st.subheader("✏️ Update Student Record")
@@ -468,10 +489,11 @@ if role == "SESAM Staff":
         with col3:
             limit = get_thesis_limit(student["program"])
             st.markdown(f"**Thesis Units:** {student['thesis_units_taken']} / {limit}")
-            st.markdown(f"**Year Admitted:** {format_ay(student['year_admitted'])}")
+            st.markdown(f"**Academic Year & Semester:** {format_ay(student['ay_start'], student['semester'])}")
             if student["thesis_units_taken"] > limit:
                 st.error("⚠️ Units exceeded!")
 
+        # Edit tabs (same as before, but we need to add ay_start and semester to the edit form)
         tabs = st.tabs(["Coursework & Thesis", "Exams", "Residency & Leave", "Graduation", "Other"])
         with tabs[0]:
             with st.form("coursework_form"):
@@ -569,7 +591,7 @@ if role == "SESAM Staff":
     else:
         st.info("No students match the current search. Try a different name/number or add a new student below.")
 
-    # ----- ADD NEW STUDENT (with formatted Year Admitted) -----
+    # ----- ADD NEW STUDENT (with separate AY and semester) -----
     st.markdown("---")
     st.subheader("➕ Add New Student")
     with st.expander("Register New Student", expanded=True):
@@ -590,27 +612,33 @@ if role == "SESAM Staff":
             
             col6, col7 = st.columns(2)
             with col6:
-                year_admitted = st.number_input("Year Admitted", min_value=2000, max_value=2030, value=2026, step=1, help="Enter the starting year of the academic year")
-                st.caption(f"📅 {format_ay(year_admitted)}")
+                ay_start = st.number_input("Academic Year Start Year", min_value=2000, max_value=2030, value=2026, step=1, help="e.g., 2024 for A.Y. 2024-2025")
             with col7:
+                semester = st.selectbox("Semester", options=SEMESTERS)
+            st.caption(f"📅 {format_ay(ay_start, semester)}")
+            
+            col8, col9 = st.columns(2)
+            with col8:
                 advisor = st.text_input("Advisor (optional)", placeholder="Dr. Faustino-Eslava")
+            with col9:
+                st.empty()  # placeholder for alignment
             
             st.markdown("---")
             st.markdown("### Initial Milestone Status (optional)")
-            col8, col9, col10 = st.columns(3)
-            with col8:
-                gwa = st.number_input("Initial GWA", min_value=1.0, max_value=5.0, step=0.01, value=2.0, help="1.0 best, 5.0 failing")
-            with col9:
-                thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=0)
+            col10, col11, col12 = st.columns(3)
             with col10:
+                gwa = st.number_input("Initial GWA", min_value=1.0, max_value=5.0, step=0.01, value=2.0, help="1.0 best, 5.0 failing")
+            with col11:
+                thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=0)
+            with col12:
                 pos_status = st.selectbox("POS Status", ["Not Filed", "Pending", "Approved"])
             
-            col11, col12, col13 = st.columns(3)
-            with col11:
-                comp_exam = st.selectbox("Comprehensive Exam (PhD)", ["N/A", "Not Taken", "Passed", "Failed"])
-            with col12:
-                general_exam = st.selectbox("General Exam (MS)", ["N/A", "Not Taken", "Passed", "Failed"])
+            col13, col14, col15 = st.columns(3)
             with col13:
+                comp_exam = st.selectbox("Comprehensive Exam (PhD)", ["N/A", "Not Taken", "Passed", "Failed"])
+            with col14:
+                general_exam = st.selectbox("General Exam (MS)", ["N/A", "Not Taken", "Passed", "Failed"])
+            with col15:
                 final_exam = st.selectbox("Final Exam Status", ["Not Taken", "Passed", "Failed"])
             
             submitted = st.form_submit_button("Register Student")
@@ -629,11 +657,9 @@ if role == "SESAM Staff":
                     for err in errors:
                         st.error(err)
                 else:
-                    # Construct full name
                     middle = f" {middle_name.strip()}" if middle_name.strip() else ""
                     full_name = f"{last_name.strip()}, {first_name.strip()}{middle}"
                     
-                    # Create new student record (match DataFrame columns)
                     new_row = create_default_data().iloc[0].to_dict()
                     new_row.update({
                         "student_number": student_number.strip(),
@@ -643,13 +669,14 @@ if role == "SESAM Staff":
                         "middle_name": middle_name.strip(),
                         "program": program,
                         "advisor": advisor.strip() if advisor else "Not assigned",
-                        "year_admitted": year_admitted,
+                        "ay_start": ay_start,
+                        "semester": semester,
                         "pos_status": pos_status,
                         "gwa": gwa,
                         "thesis_units_taken": thesis_units_taken,
                         "thesis_units_limit": get_thesis_limit(program),
                         "residency_max_years": get_residency_max(program),
-                        # Reset all other fields to initial values
+                        # Reset all other fields
                         "profile_pic": "",
                         "pos_submitted_date": "",
                         "pos_approved_date": "",
@@ -692,7 +719,6 @@ if role == "SESAM Staff":
 # ==================== ADVISER VIEW ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees")
-    # Get all unique advisor names from the data
     all_advisors = sorted(df["advisor"].unique())
     if len(all_advisors) == 0:
         st.warning("No advisors found in the data.")
@@ -704,8 +730,9 @@ elif role == "Faculty Adviser":
         else:
             search_adv = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001")
             filtered_advisees = filter_dataframe(search_adv, advisees)
+            filtered_advisees["academic_year"] = filtered_advisees.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
             filtered_advisees["warnings"] = filtered_advisees.apply(lambda row: "\n".join(get_all_warnings(row)), axis=1)
-            display_cols = ["student_number", "name", "program", "year_admitted", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status", "warnings"]
+            display_cols = ["student_number", "name", "program", "academic_year", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status", "warnings"]
             st.dataframe(filtered_advisees[display_cols], width='stretch')
             if len(filtered_advisees) > 0:
                 st.markdown("---")
@@ -715,7 +742,7 @@ elif role == "Faculty Adviser":
                         col1, col2 = st.columns(2)
                         with col1:
                             st.markdown(f"**Program:** {row['program']}")
-                            st.markdown(f"**Admitted:** {format_ay(row['year_admitted'])}")
+                            st.markdown(f"**Academic Year:** {format_ay(row['ay_start'], row['semester'])}")
                             st.markdown(f"**GWA:** {row['gwa']}")
                             st.markdown(f"**POS Status:** {row['pos_status']}")
                             st.markdown(f"**Thesis Units:** {row['thesis_units_taken']}/{row['thesis_units_limit']}")
@@ -762,7 +789,7 @@ elif role == "Student":
                 with col1:
                     st.metric("Student Number", student["student_number"])
                     st.metric("Program", student["program"])
-                    st.metric("Year Admitted", format_ay(student["year_admitted"]))
+                    st.metric("Academic Year", format_ay(student["ay_start"], student["semester"]))
                 with col2:
                     st.metric("Advisor", student["advisor"])
                     st.metric("GWA", f"{student['gwa']:.2f}")
@@ -777,7 +804,7 @@ elif role == "Student":
             with col1:
                 st.metric("Student Number", student["student_number"])
                 st.metric("Program", student["program"])
-                st.metric("Year Admitted", format_ay(student["year_admitted"]))
+                st.metric("Academic Year", format_ay(student["ay_start"], student["semester"]))
             with col2:
                 st.metric("Advisor", student["advisor"])
                 st.metric("GWA", f"{student['gwa']:.2f}")
