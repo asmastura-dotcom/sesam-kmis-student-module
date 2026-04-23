@@ -37,6 +37,29 @@ USERS = {
     "student2": {"password": "stu456", "role": "Student", "display_name": "Maria Santos"}
 }
 
+# ==================== PROGRAM DEFINITIONS ====================
+PROGRAMS = [
+    "MS Environmental Science",
+    "PhD Environmental Science",
+    "PhD Environmental Diplomacy and Negotiations",
+    "Master in Resilience Studies (M-ReS)",
+    "Professional Masters in Tropical Marine Ecosystems Management (PM-TMEM)"
+]
+
+def is_master_program(program):
+    """Return True if program is a master's degree (thesis limit 6, residency 5 years)."""
+    return program.startswith("MS") or program.startswith("Master") or program.startswith("Professional Masters")
+
+def is_phd_program(program):
+    """Return True if program is a doctoral degree (thesis limit 12, residency 7 years)."""
+    return program.startswith("PhD")
+
+def get_thesis_limit_from_program(program):
+    return 6 if is_master_program(program) else 12
+
+def get_residency_max_from_program(program):
+    return 5 if is_master_program(program) else 7
+
 # ==================== LOGIN PAGE ====================
 if not st.session_state.logged_in:
     st.title("🔐 SESAM KMIS Login")
@@ -66,11 +89,11 @@ if not st.session_state.logged_in:
 DATA_FILE = "students.csv"
 
 def create_default_data():
-    """Create sample data with all required fields."""
+    """Create sample data with the new program names."""
     return pd.DataFrame({
         "student_id": ["S001", "S002", "S003", "S004", "S005"],
         "name": ["Juan Cruz", "Maria Santos", "Jose Rizal", "Ana Reyes", "Carlos Lopez"],
-        "program": ["MS", "PhD", "MS", "PhD", "MS"],
+        "program": [PROGRAMS[0], PROGRAMS[1], PROGRAMS[0], PROGRAMS[1], PROGRAMS[0]],  # MS, PhD, MS, PhD, MS
         "advisor_username": ["adviser1", "adviser2", "adviser1", "adviser2", "adviser1"],
         "year_admitted": [2024, 2023, 2024, 2022, 2024],
         # Plan of Study
@@ -149,7 +172,20 @@ def load_data():
     # Fix residency max based on program and reset new students' progress
     for idx, row in df.iterrows():
         program = str(row["program"]).strip()
-        df.at[idx, "residency_max_years"] = 5 if program == "MS" else 7
+        # If program not in our list, default to master's
+        if program not in PROGRAMS:
+            # Try to map old "MS" / "PhD" values
+            if program == "MS":
+                program = PROGRAMS[0]
+            elif program == "PhD":
+                program = PROGRAMS[1]
+            else:
+                program = PROGRAMS[0]
+            df.at[idx, "program"] = program
+        # Set residency max years
+        df.at[idx, "residency_max_years"] = get_residency_max_from_program(program)
+        # Set thesis limit
+        df.at[idx, "thesis_units_limit"] = get_thesis_limit_from_program(program)
         
         # Reset total_units_taken and exam statuses for students admitted in 2025 or later
         if row["year_admitted"] >= 2025:
@@ -167,14 +203,14 @@ def save_data(df):
     df.to_csv(DATA_FILE, index=False)
 
 def get_thesis_limit(program):
-    return 6 if program == "MS" else 12
+    return get_thesis_limit_from_program(program)
 
 def get_residency_max(program):
-    return 5 if program == "MS" else 7
+    return get_residency_max_from_program(program)
 
 # ==================== WARNING FUNCTIONS ====================
 def get_warning_text(program, units_taken):
-    limit = 6 if program == "MS" else 12
+    limit = get_thesis_limit(program)
     try:
         units_taken = float(units_taken)
         limit = float(limit)
@@ -186,12 +222,12 @@ def get_warning_text(program, units_taken):
 
 def check_residency_warning(row):
     used = row.get("residency_years_used", 0)
-    program = str(row.get("program", "MS")).strip()
+    program = str(row.get("program", PROGRAMS[0])).strip()
     try:
         used = float(used)
     except:
         return "⚠️ Residency data error"
-    max_years = 5 if program == "MS" else 7
+    max_years = get_residency_max(program)
     if used >= max_years:
         return f"⚠️ Residency limit reached ({used}/{max_years} years). Extension required."
     elif used >= max_years - 1:
@@ -203,8 +239,11 @@ def check_gwa_warning(gwa):
         gwa = float(gwa)
     except:
         return "⚠️ GWA data error"
+    # UP Grading System: 1.00 highest, 5.00 lowest.
+    # Good standing: GWA ≤ 2.00, Problematic: GWA > 2.00
+    # However, user requested "below 2.00" wording. We'll follow user instruction.
     if gwa > 2.00:
-        return f"⚠️ GWA {gwa:.2f} is above 2.00 – may affect exam eligibility and graduation"
+        return f"⚠️ GWA {gwa:.2f} is below 2.00 – may affect exam eligibility and graduation"
     return f"✅ GWA {gwa:.2f} – good standing"
 
 def check_awol_warning(row):
@@ -226,36 +265,36 @@ def check_loa_warning(row):
     return "✅ No LOA"
 
 def check_thesis_outline_deadline(row):
-    program = str(row.get("program", "MS"))
+    program = str(row.get("program", PROGRAMS[0]))
     units_taken = row.get("thesis_units_taken", 0)
     outline_approved = str(row.get("thesis_outline_approved", "No")).strip()
     try:
         units_taken = float(units_taken)
     except:
         return "⚠️ Thesis units data error"
-    if program == "MS" and units_taken > 0:
+    if is_master_program(program) and units_taken > 0:
         if units_taken >= 4 and outline_approved != "Yes":
             return "⚠️ Thesis outline approval overdue (should be approved by 2nd thesis semester)"
-    elif program == "PhD" and units_taken > 0:
+    elif is_phd_program(program) and units_taken > 0:
         if units_taken >= 8 and outline_approved != "Yes":
             return "⚠️ Dissertation outline approval overdue (should be approved by 3rd dissertation semester)"
     return "✅ Outline on track"
 
 def check_qualifying_exam_deadline(row):
-    program = str(row.get("program", "MS"))
+    program = str(row.get("program", PROGRAMS[0]))
     residency_used = row.get("residency_years_used", 0)
     exam_status = str(row.get("qualifying_exam_status", "N/A")).strip()
     try:
         residency_used = float(residency_used)
     except:
         return "⚠️ Residency data error"
-    if program == "PhD" and residency_used >= 1:
+    if is_phd_program(program) and residency_used >= 1:
         if exam_status not in ["Passed", "N/A"]:
             return "⚠️ Qualifying exam should be taken before 2nd semester of residence"
     return "✅ Qualifying exam on track"
 
 def check_comprehensive_exam_deadline(row):
-    program = str(row.get("program", "MS"))
+    program = str(row.get("program", PROGRAMS[0]))
     total_taken = row.get("total_units_taken", 0)
     total_required = row.get("total_units_required", 24)
     written_status = str(row.get("written_comprehensive_status", "N/A")).strip()
@@ -265,7 +304,7 @@ def check_comprehensive_exam_deadline(row):
         total_required = float(total_required)
     except:
         return "⚠️ Units data error"
-    if program == "PhD" and total_taken >= total_required and year_admitted <= 2023:
+    if is_phd_program(program) and total_taken >= total_required and year_admitted <= 2023:
         if written_status != "Passed":
             return "⚠️ Written comprehensive exam pending after completing coursework"
     return "✅ Comprehensive exam on track"
@@ -319,7 +358,7 @@ st.sidebar.caption("Version 2.0 | ISSP 2026-2031 | Graduate School Rules")
 
 # ==================== MAIN ====================
 st.title("🎓 SESAM Graduate Student Milestone Tracker")
-st.markdown("*Centralized tracking for MS/PhD students based on UPLB Graduate School Policies*")
+st.markdown("*Centralized tracking for graduate students based on UPLB Graduate School Policies*")
 st.markdown("---")
 
 role = st.session_state.role
@@ -330,6 +369,10 @@ def safe_index(options, value):
     except ValueError:
         return 0
 
+def format_ay(year):
+    """Convert year to Academic Year display (e.g., 2026 -> A.Y. 2026-2027)."""
+    return f"A.Y. {year}-{year+1} (1st Sem)"
+
 # ==================== STAFF VIEW ====================
 if role == "SESAM Staff":
     st.subheader("📋 All Students")
@@ -339,23 +382,28 @@ if role == "SESAM Staff":
     st.subheader("✏️ Update Student Record")
 
     if len(df) > 0:
-        student_id = st.selectbox("Select Student", df["student_id"])
-        student = df[df["student_id"] == student_id].iloc[0].copy()
+        # Select by name (assume unique names)
+        student_name = st.selectbox("Select Student", df["name"])
+        student = df[df["name"] == student_name].iloc[0].copy()
+        student_id = student["student_id"]
 
+        # Display warnings in RED using st.error
         warnings = get_all_warnings(student)
         if any("⚠️" in w for w in warnings):
-            st.warning("\n".join(warnings))
+            for w in warnings:
+                st.error(w)
         else:
             st.success("\n".join(warnings))
 
+        # Basic info display
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Student", student["name"])
+            st.metric("Student ID", student["student_id"])
             st.metric("Program", student["program"])
         with col2:
             advisor_display = USERS.get(student["advisor_username"], {}).get("display_name", student["advisor_username"])
             st.metric("Advisor", advisor_display)
-            st.metric("Year Admitted", student["year_admitted"])
+            st.metric("Year Admitted", format_ay(student["year_admitted"]))
         with col3:
             limit = get_thesis_limit(student["program"])
             st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
@@ -475,15 +523,29 @@ if role == "SESAM Staff":
         st.markdown("---")
         st.subheader("🗑️ Delete Student")
         with st.expander("Click to expand and delete a student record"):
-            delete_id = st.selectbox("Select Student to Delete", df["student_id"])
+            delete_name = st.selectbox("Select Student to Delete", df["name"])
+            delete_id = df[df["name"] == delete_name]["student_id"].values[0]
             confirm = st.checkbox("⚠️ I confirm that I want to permanently delete this student. This action cannot be undone.")
             if confirm and st.button("Yes, Delete This Student"):
                 df = df[df["student_id"] != delete_id]
                 save_data(df)
-                st.success(f"✅ Student '{delete_id}' has been deleted.")
+                st.success(f"✅ Student '{delete_name}' has been deleted.")
                 st.rerun()
             elif not confirm and st.button("Yes, Delete This Student"):
                 st.warning("Please check the confirmation box before deleting.")
+
+        # ----- RESET ALL DATA BUTTON (restores only S001-S005) -----
+        st.markdown("---")
+        st.subheader("🔄 Reset All Data")
+        with st.expander("⚠️ Click to reset all student data to default samples (S001–S005). This will delete all other students."):
+            reset_confirm = st.checkbox("I understand that this will permanently delete ALL current student data and restore only the sample records (S001–S005).")
+            if reset_confirm and st.button("Yes, Reset All Data"):
+                df = create_default_data()
+                save_data(df)
+                st.success("✅ Data has been reset to the default sample students (S001–S005).")
+                st.rerun()
+            elif not reset_confirm and st.button("Yes, Reset All Data"):
+                st.warning("Please check the confirmation box before resetting.")
 
     else:
         st.info("No students found. Use the Add Student feature below.")
@@ -497,7 +559,7 @@ if role == "SESAM Staff":
             with col1:
                 new_id = st.text_input("Student ID (unique)", max_chars=10)
                 new_name = st.text_input("Full Name", max_chars=50)
-                new_program = st.selectbox("Program", ["MS", "PhD"])
+                new_program = st.selectbox("Program", PROGRAMS)
                 new_advisor = st.selectbox("Advisor Username", ["adviser1", "adviser2"])
                 new_year = st.number_input("Year Admitted", min_value=2000, max_value=2030, step=1, value=2025)
             with col2:
@@ -527,7 +589,7 @@ if role == "SESAM Staff":
                         "total_units_taken": 0,
                         "total_units_required": 24,
                         "thesis_units_taken": new_units_taken,
-                        "thesis_units_limit": 6 if new_program == "MS" else 12,
+                        "thesis_units_limit": get_thesis_limit(new_program),
                         "thesis_outline_approved": "No",
                         "thesis_outline_approved_date": "",
                         "thesis_status": "Not Started",
@@ -542,7 +604,7 @@ if role == "SESAM Staff":
                         "final_exam_status": "Not Taken",
                         "final_exam_passed_date": "",
                         "residency_years_used": 0,
-                        "residency_max_years": 5 if new_program == "MS" else 7,
+                        "residency_max_years": get_residency_max(new_program),
                         "extension_count": 0,
                         "extension_end_date": "",
                         "loa_start_date": "",
@@ -580,7 +642,7 @@ elif role == "Faculty Adviser":
                 col1, col2 = st.columns(2)
                 with col1:
                     st.write(f"**Program:** {row['program']}")
-                    st.write(f"**Admitted:** {row['year_admitted']}")
+                    st.write(f"**Admitted:** {format_ay(row['year_admitted'])}")
                     st.write(f"**GWA:** {row['gwa']}")
                     st.write(f"**POS Status:** {row['pos_status']}")
                     st.write(f"**Thesis Units:** {row['thesis_units_taken']}/{row['thesis_units_limit']}")
@@ -588,10 +650,11 @@ elif role == "Faculty Adviser":
                     st.write(f"**General Exam:** {row['general_exam_status']}")
                     st.write(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
                     st.write(f"**Final Exam:** {row['final_exam_status']}")
-                    st.write(f"**Residency:** {row['residency_years_used']}/{5 if row['program']=='MS' else 7} years")
+                    st.write(f"**Residency:** {row['residency_years_used']}/{get_residency_max(row['program'])} years")
                 warnings_text = row["warnings"]
                 if any("⚠️" in w for w in warnings_text.split("\n")):
-                    st.warning(warnings_text)
+                    for w in warnings_text.split("\n"):
+                        st.error(w)
                 else:
                     st.success(warnings_text)
     st.info("📌 Read-only view. For updates, contact SESAM Staff.")
@@ -606,7 +669,8 @@ elif role == "Student":
         student = student_record.iloc[0]
         warnings = get_all_warnings(student)
         if any("⚠️" in w for w in warnings):
-            st.warning("\n".join(warnings))
+            for w in warnings:
+                st.error(w)
         else:
             st.success("\n".join(warnings))
 
@@ -614,7 +678,7 @@ elif role == "Student":
         with col1:
             st.metric("Student ID", student["student_id"])
             st.metric("Program", student["program"])
-            st.metric("Year Admitted", student["year_admitted"])
+            st.metric("Year Admitted", format_ay(student["year_admitted"]))
         with col2:
             advisor_display = USERS.get(student["advisor_username"], {}).get("display_name", student["advisor_username"])
             st.metric("Advisor", advisor_display)
@@ -623,7 +687,7 @@ elif role == "Student":
         with col3:
             limit = get_thesis_limit(student["program"])
             st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
-            st.metric("Residency", f"{student['residency_years_used']} / {5 if student['program']=='MS' else 7} years")
+            st.metric("Residency", f"{student['residency_years_used']} / {get_residency_max(student['program'])} years")
             st.metric("Final Exam", student["final_exam_status"])
 
         st.markdown("---")
@@ -639,9 +703,9 @@ elif role == "Student":
             ],
             "Status": [
                 student["pos_status"],
-                student["general_exam_status"] if student["program"] == "MS" else student["qualifying_exam_status"],
-                student["written_comprehensive_status"] if student["program"] == "PhD" else "N/A",
-                student["oral_comprehensive_status"] if student["program"] == "PhD" else "N/A",
+                student["general_exam_status"] if is_master_program(student["program"]) else student["qualifying_exam_status"],
+                student["written_comprehensive_status"] if is_phd_program(student["program"]) else "N/A",
+                student["oral_comprehensive_status"] if is_phd_program(student["program"]) else "N/A",
                 student["thesis_outline_approved"],
                 student["final_exam_status"]
             ]
