@@ -1,11 +1,12 @@
 """
 SESAM KMIS - Student Module V2 (Graduate School Rules Integration)
+Enhanced with Faculty-to-Student Notification System
 Author: SESAM Dev Team
-Date: 2026-04-23
+Date: 2026-04-24
 Description: Tracks graduate student milestones, thesis units, exams, residency, LOA/AWOL, etc.
 Students upload profile picture and AMIS screenshot (with manual GWA entry).
 Staff & faculty can only view uploaded images.
-All names are enforced as "Last, First Middle".
+Faculty advisers can send notifications to students; students see them in real time.
 Based on UPLB Graduate School Policies, Rules and Regulations (2009).
 """
 
@@ -15,6 +16,7 @@ import os
 from datetime import date, datetime
 from PIL import Image
 import io
+import json
 
 # ==================== PAGE CONFIGURATION ====================
 st.set_page_config(
@@ -207,6 +209,47 @@ def get_amis_screenshot_path(student_number):
             return os.path.join(AMIS_FOLDER, f)
     return None
 
+# ==================== NOTIFICATION FUNCTIONS ====================
+def get_notifications(student_row):
+    """Return list of notifications from student row (JSON column)."""
+    notif_str = student_row.get("notifications", "[]")
+    try:
+        return json.loads(notif_str)
+    except:
+        return []
+
+def add_notification(df, student_number, adviser_name, message, notif_type="General"):
+    """Append a new notification to the student's record."""
+    idx = df[df["student_number"] == student_number].index
+    if len(idx) == 0:
+        return df
+    current_list = []
+    try:
+        current_list = json.loads(df.at[idx[0], "notifications"])
+    except:
+        pass
+    new_notif = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "from": adviser_name,
+        "message": message,
+        "type": notif_type,
+        "read": False
+    }
+    current_list.append(new_notif)
+    df.at[idx[0], "notifications"] = json.dumps(current_list)
+    return df
+
+def dismiss_notification(df, student_number, notif_index):
+    """Remove a notification by index."""
+    idx = df[df["student_number"] == student_number].index
+    if len(idx) == 0:
+        return df
+    notif_list = get_notifications(df.loc[idx[0]])
+    if 0 <= notif_index < len(notif_list):
+        notif_list.pop(notif_index)
+        df.at[idx[0], "notifications"] = json.dumps(notif_list)
+    return df
+
 # ==================== LOGIN PAGE ====================
 if not st.session_state.logged_in:
     st.title("🔐 SESAM KMIS Login")
@@ -233,7 +276,7 @@ if not st.session_state.logged_in:
             st.error("❌ Invalid username or password")
     st.stop()
 
-# ==================== DATA LOADING WITH MIGRATION & NAME FIX ====================
+# ==================== DATA LOADING WITH MIGRATION ====================
 DATA_FILE = "students.csv"
 
 def create_default_data():
@@ -250,6 +293,7 @@ def create_default_data():
         "semester": ["1st Sem", "1st Sem", "2nd Sem", "1st Sem", "1st Sem"],
         "profile_pic": ["", "", "", "", ""],
         "amis_screenshot": ["", "", "", "", ""],
+        "notifications": ["[]", "[]", "[]", "[]", "[]"],
         "committee_members": ["Dr. Eslava, Dr. Sanchez", "Dr. Sanchez, Dr. Eslava", "Dr. Eslava", "Dr. Sanchez, Dr. Eslava", "Dr. Eslava"],
         "committee_approval_date": ["2024-02-01", "2023-07-01", "", "2022-09-15", ""],
         "pos_status": ["Approved", "Approved", "Pending", "Approved", "Pending"],
@@ -310,6 +354,20 @@ def load_data():
         if col not in df.columns:
             df[col] = default_df[col]
     
+    # Ensure notifications column exists and is valid JSON
+    if "notifications" not in df.columns:
+        df["notifications"] = "[]"
+    # Fix any non-JSON values
+    for idx in df.index:
+        val = df.at[idx, "notifications"]
+        if pd.isna(val) or not isinstance(val, str) or (val.strip() == ""):
+            df.at[idx, "notifications"] = "[]"
+        else:
+            try:
+                json.loads(val)
+            except:
+                df.at[idx, "notifications"] = "[]"
+    
     # ---- ENSURE NAME COMPONENTS EXIST ----
     if "last_name" not in df.columns:
         df["last_name"] = ""
@@ -318,7 +376,7 @@ def load_data():
     if "middle_name" not in df.columns:
         df["middle_name"] = ""
     
-    # ---- REBUILD NAME FROM COMPONENTS (enforces "Last, First Middle") ----
+    # ---- REBUILD NAME FROM COMPONENTS ----
     def build_name(row):
         last = str(row.get("last_name", "")).strip()
         first = str(row.get("first_name", "")).strip()
@@ -326,7 +384,6 @@ def load_data():
         if last and first:
             middle_part = f" {middle}" if middle else ""
             return f"{last}, {first}{middle_part}"
-        # Fallback: use existing name column if components missing
         return row.get("name", "")
     
     df["name"] = df.apply(build_name, axis=1)
@@ -572,7 +629,7 @@ def filter_dataframe(search_term, data):
     )
     return data[mask]
 
-# ==================== STAFF VIEW (view‑only images) ====================
+# ==================== STAFF VIEW ====================
 if role == "SESAM Staff":
     st.subheader("📋 All Students")
     search = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001")
@@ -601,7 +658,7 @@ if role == "SESAM Staff":
         student = df[df["name"] == student_name].iloc[0].copy()
         student_number = student["student_number"]
 
-        # ----- PROFILE PICTURE (Staff: view only) -----
+        # ----- PROFILE PICTURE (view only) -----
         st.markdown("---")
         st.subheader("📸 Student Profile Picture (View Only)")
         pic_path = get_profile_picture_path(student_number)
@@ -610,7 +667,7 @@ if role == "SESAM Staff":
         else:
             st.info("No profile picture uploaded by student.")
 
-        # AMIS SCREENSHOT (Staff: view only)
+        # ----- AMIS SCREENSHOT (view only) -----
         st.markdown("---")
         st.subheader("📊 AMIS Screenshot (View Only)")
         amis_path = get_amis_screenshot_path(student_number)
@@ -619,7 +676,7 @@ if role == "SESAM Staff":
         else:
             st.info("No AMIS screenshot uploaded by student.")
 
-        # MANUAL GWA ENTRY (Staff can edit based on AMIS)
+        # ----- MANUAL GWA ENTRY -----
         st.markdown("---")
         st.subheader("📈 Manual GWA Entry (based on AMIS)")
         current_gwa = float(student["gwa"])
@@ -631,7 +688,7 @@ if role == "SESAM Staff":
             st.success(f"GWA updated to {new_gwa}")
             st.rerun()
 
-        # ---- DEADLINE ALERTS & WARNINGS ----
+        # ----- DEADLINE ALERTS & WARNINGS -----
         deadline_alerts = check_deadline_alerts(student)
         if deadline_alerts:
             for alert in deadline_alerts:
@@ -661,7 +718,7 @@ if role == "SESAM Staff":
             if student["thesis_units_taken"] > limit:
                 st.error("⚠️ Units exceeded!")
 
-        # ----- EDIT TABS (full milestone editing) -----
+        # ----- EDIT TABS (milestone editing) -----
         tabs = st.tabs(["Coursework & Thesis", "Exams", "Residency & Leave", "Graduation", "Committee", "Other"])
         
         with tabs[0]:
@@ -877,6 +934,7 @@ if role == "SESAM Staff":
                         "residency_max_years": get_residency_max(program),
                         "profile_pic": "",
                         "amis_screenshot": "",
+                        "notifications": "[]",
                         "committee_members": "",
                         "committee_approval_date": "",
                         "pos_submitted_date": "",
@@ -916,7 +974,7 @@ if role == "SESAM Staff":
                     st.success(f"✅ Student {full_name} (Number: {student_number}) registered successfully!")
                     st.rerun()
 
-# ==================== ADVISER VIEW (view‑only images) ====================
+# ==================== ADVISER VIEW (with notification system) ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees")
     all_advisors = sorted(df["advisor"].unique())
@@ -951,6 +1009,7 @@ elif role == "Faculty Adviser":
                             st.markdown(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
                             st.markdown(f"**Final Exam:** {row['final_exam_status']}")
                             st.markdown(f"**Residency:** {row['residency_years_used']}/{get_residency_max(row['program'])} years")
+                        
                         # Profile picture (view only)
                         pic_path = get_profile_picture_path(row["student_number"])
                         if pic_path and os.path.exists(pic_path):
@@ -960,6 +1019,23 @@ elif role == "Faculty Adviser":
                         if amis_path and os.path.exists(amis_path):
                             with st.expander("📄 View AMIS Screenshot"):
                                 st.image(amis_path, width=300)
+                        
+                        # ===== NOTIFICATION SECTION FOR ADVISER =====
+                        st.markdown("---")
+                        st.subheader("📬 Send Notification to Student")
+                        with st.form(key=f"notif_form_{row['student_number']}"):
+                            notif_type = st.selectbox("Notification Type", ["General Reminder", "Academic Warning", "Meeting Request", "Requirement Follow-up"])
+                            message = st.text_area("Message", height=100, placeholder="Type your message here...")
+                            send = st.form_submit_button("Send Notification")
+                            if send and message.strip():
+                                df = add_notification(df, row["student_number"], selected_advisor, message, notif_type)
+                                save_data(df)
+                                st.success(f"Notification sent to {row['name']}!")
+                                st.rerun()
+                            elif send and not message.strip():
+                                st.error("Message cannot be empty.")
+                        
+                        # Deadline alerts and warnings
                         alerts = check_deadline_alerts(row)
                         if alerts:
                             for alert in alerts:
@@ -972,16 +1048,15 @@ elif role == "Faculty Adviser":
                             st.success(warnings_text)
             else:
                 st.info("No matching students.")
-    st.info("📌 Read‑only view. For updates, contact SESAM Staff.")
+    st.info("📌 You can send notifications to your advisees. They will see them immediately when they log in.")
 
-# ==================== STUDENT VIEW (full upload/delete rights) ====================
+# ==================== STUDENT VIEW (with notification display) ====================
 elif role == "Student":
     st.subheader(f"📘 Your Academic Progress ({st.session_state.display_name})")
     # Use student_number for reliable lookup
     if st.session_state.student_number:
         student_record = df[df["student_number"] == st.session_state.student_number]
     else:
-        # Fallback to name match
         student_record = df[df["name"] == st.session_state.display_name]
     
     if len(student_record) == 0:
@@ -990,6 +1065,24 @@ elif role == "Student":
     
     student = student_record.iloc[0]
 
+    # ===== DISPLAY NOTIFICATIONS =====
+    notifications = get_notifications(student)
+    if notifications:
+        st.markdown("---")
+        st.subheader("📬 Messages from Your Adviser")
+        for i, notif in enumerate(notifications):
+            notif_type = notif.get("type", "General")
+            if notif_type == "Academic Warning":
+                st.error(f"🚨 **{notif_type}** – {notif['timestamp']}\n\n*From: {notif['from']}*\n\n{notif['message']}")
+            elif notif_type == "Meeting Request":
+                st.info(f"📅 **{notif_type}** – {notif['timestamp']}\n\n*From: {notif['from']}*\n\n{notif['message']}")
+            else:
+                st.info(f"📌 **{notif_type}** – {notif['timestamp']}\n\n*From: {notif['from']}*\n\n{notif['message']}")
+            if st.button(f"Dismiss", key=f"dismiss_{i}"):
+                df = dismiss_notification(df, student["student_number"], i)
+                save_data(df)
+                st.rerun()
+    
     # Deadline alerts & warnings
     alerts = check_deadline_alerts(student)
     if alerts:
@@ -1002,7 +1095,7 @@ elif role == "Student":
     else:
         st.success("\n".join(warnings))
 
-    # ------ PROFILE PICTURE (student can upload/delete) ------
+    # ------ PROFILE PICTURE (student upload) ------
     st.markdown("---")
     st.subheader("📸 Your Profile Picture")
     col_pic1, col_pic2 = st.columns([1, 2])
@@ -1028,7 +1121,7 @@ elif role == "Student":
                 st.success("Profile picture deleted.")
                 st.rerun()
 
-    # ------ AMIS SCREENSHOT (student can upload/delete) ------
+    # ------ AMIS SCREENSHOT (student upload) ------
     st.markdown("---")
     st.subheader("📊 Your AMIS Screenshot (Subjects, Grades, Units)")
     col_amis1, col_amis2 = st.columns([1, 2])
@@ -1050,7 +1143,7 @@ elif role == "Student":
                 st.success("AMIS screenshot deleted.")
                 st.rerun()
 
-    # ------ MANUAL GWA ENTRY (student can update) ------
+    # ------ MANUAL GWA ENTRY (student) ------
     st.markdown("---")
     st.subheader("📈 Update GWA from AMIS Screenshot")
     current_gwa = float(student["gwa"])
@@ -1118,4 +1211,4 @@ elif role == "Student":
 
 # ==================== FOOTER ====================
 st.markdown("---")
-st.caption("SESAM KMIS – Student Module V2 | Based on UPLB Graduate School Rules (2009)")
+st.caption("SESAM KMIS – Student Module V2 | Faculty-to-Student Notifications | Based on UPLB Graduate School Rules (2009)")
