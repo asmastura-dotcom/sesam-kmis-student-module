@@ -203,7 +203,6 @@ def check_gwa_warning(gwa):
         gwa = float(gwa)
     except:
         return "⚠️ GWA data error"
-    # UP Grading System: 1.00 highest, 5.00 lowest. Good standing: GWA ≤ 2.00
     if gwa > 2.00:
         return f"⚠️ GWA {gwa:.2f} is above 2.00 – may affect exam eligibility and graduation"
     return f"✅ GWA {gwa:.2f} – good standing"
@@ -266,7 +265,6 @@ def check_comprehensive_exam_deadline(row):
         total_required = float(total_required)
     except:
         return "⚠️ Units data error"
-    # Only warn if coursework is complete AND student is not brand‑new (admitted 2025 or later)
     if program == "PhD" and total_taken >= total_required and year_admitted <= 2023:
         if written_status != "Passed":
             return "⚠️ Written comprehensive exam pending after completing coursework"
@@ -473,16 +471,19 @@ if role == "SESAM Staff":
                     st.success("✅ Updated!")
                     st.rerun()
 
-        # ----- DELETE STUDENT -----
+        # ----- DELETE STUDENT WITH CONFIRMATION -----
         st.markdown("---")
         st.subheader("🗑️ Delete Student")
         with st.expander("Click to expand and delete a student record"):
             delete_id = st.selectbox("Select Student to Delete", df["student_id"])
-            if st.button("⚠️ Permanently Delete This Student"):
+            confirm = st.checkbox("⚠️ I confirm that I want to permanently delete this student. This action cannot be undone.")
+            if confirm and st.button("Yes, Delete This Student"):
                 df = df[df["student_id"] != delete_id]
                 save_data(df)
                 st.success(f"✅ Student '{delete_id}' has been deleted.")
                 st.rerun()
+            elif not confirm and st.button("Yes, Delete This Student"):
+                st.warning("Please check the confirmation box before deleting.")
 
     else:
         st.info("No students found. Use the Add Student feature below.")
@@ -561,18 +562,6 @@ if role == "SESAM Staff":
                     save_data(df)
                     st.success(f"✅ Student '{new_name}' added!")
                     st.rerun()
-
-    # ----- DOWNLOAD CSV BUTTON -----
-    st.markdown("---")
-    st.subheader("💾 Backup / Export Data")
-    csv_data = df.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="📥 Download students.csv",
-        data=csv_data,
-        file_name="students.csv",
-        mime="text/csv",
-        help="Download the current student data as a backup CSV file."
-    )
 
 # ==================== ADVISER VIEW ====================
 elif role == "Faculty Adviser":
