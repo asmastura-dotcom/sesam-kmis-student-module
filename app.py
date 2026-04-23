@@ -203,6 +203,7 @@ def check_gwa_warning(gwa):
         gwa = float(gwa)
     except:
         return "⚠️ GWA data error"
+    # UP Grading System: 1.00 highest, 5.00 lowest. Good standing: GWA ≤ 2.00
     if gwa > 2.00:
         return f"⚠️ GWA {gwa:.2f} is above 2.00 – may affect exam eligibility and graduation"
     return f"✅ GWA {gwa:.2f} – good standing"
@@ -472,10 +473,21 @@ if role == "SESAM Staff":
                     st.success("✅ Updated!")
                     st.rerun()
 
+        # ----- DELETE STUDENT -----
+        st.markdown("---")
+        st.subheader("🗑️ Delete Student")
+        with st.expander("Click to expand and delete a student record"):
+            delete_id = st.selectbox("Select Student to Delete", df["student_id"])
+            if st.button("⚠️ Permanently Delete This Student"):
+                df = df[df["student_id"] != delete_id]
+                save_data(df)
+                st.success(f"✅ Student '{delete_id}' has been deleted.")
+                st.rerun()
+
     else:
         st.info("No students found. Use the Add Student feature below.")
 
-    # ----- ADD NEW STUDENT (properly reset all progress) -----
+    # ----- ADD NEW STUDENT -----
     st.markdown("---")
     st.subheader("➕ Add New Student")
     with st.expander("Click to expand and add a new student record"):
@@ -549,6 +561,18 @@ if role == "SESAM Staff":
                     save_data(df)
                     st.success(f"✅ Student '{new_name}' added!")
                     st.rerun()
+
+    # ----- DOWNLOAD CSV BUTTON -----
+    st.markdown("---")
+    st.subheader("💾 Backup / Export Data")
+    csv_data = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="📥 Download students.csv",
+        data=csv_data,
+        file_name="students.csv",
+        mime="text/csv",
+        help="Download the current student data as a backup CSV file."
+    )
 
 # ==================== ADVISER VIEW ====================
 elif role == "Faculty Adviser":
