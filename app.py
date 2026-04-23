@@ -1,7 +1,6 @@
 """
-SESAM KMIS - Student Module V1 (Complete with Add Student + Toast)
+SESAM KMIS - Student Module V1.2 (Add Student with Auto-Clear Form)
 Author: [Your Name]
-Date: [Current Date]
 """
 
 import streamlit as st
@@ -15,7 +14,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# ==================== INITIALIZE SESSION STATE ====================
+# ==================== SESSION STATE INIT ====================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "username" not in st.session_state:
@@ -30,22 +29,14 @@ USERS = {
     "staff1": {"password": "admin123", "role": "SESAM Staff", "display_name": "SESAM Administrator"},
     "adviser1": {"password": "adv123", "role": "Faculty Adviser", "display_name": "Dr. Eslava"},
     "adviser2": {"password": "adv456", "role": "Faculty Adviser", "display_name": "Dr. Sanchez"},
-    "student1": {"password": "stu123", "role": "Student", "display_name": "Juan Cruz"},
-    "student2": {"password": "stu456", "role": "Student", "display_name": "Maria Santos"}
 }
 
-# ==================== LOGIN PAGE ====================
+# ==================== LOGIN ====================
 if not st.session_state.logged_in:
     st.title("🔐 SESAM KMIS Login")
-    col1, col2 = st.columns(2)
-    with col1:
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-    with col2:
-        st.caption("Demo accounts:")
-        st.caption("staff1 / admin123")
-        st.caption("adviser1 / adv123")
-        st.caption("student1 / stu123")
+
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
 
     if st.button("Login"):
         if username in USERS and USERS[username]["password"] == password:
@@ -56,278 +47,164 @@ if not st.session_state.logged_in:
             st.success("✅ Login successful")
             st.rerun()
         else:
-            st.error("❌ Invalid username or password")
+            st.error("❌ Invalid credentials")
+
     st.stop()
 
-# ==================== DATA LOADING WITH MIGRATION ====================
+# ==================== DATA ====================
 DATA_FILE = "students.csv"
 
-def create_default_data():
-    """Create sample data with advisor_username matching USERS keys."""
-    return pd.DataFrame({
-        "student_id": ["S001", "S002", "S003", "S004", "S005"],
-        "name": ["Juan Cruz", "Maria Santos", "Jose Rizal", "Ana Reyes", "Carlos Lopez"],
-        "program": ["MS", "PhD", "MS", "PhD", "MS"],
-        "advisor_username": ["adviser1", "adviser2", "adviser1", "adviser2", "adviser1"],
-        "year_admitted": [2024, 2023, 2024, 2022, 2024],
-        "pos_filed": ["Completed", "Completed", "Pending", "Completed", "Pending"],
-        "comp_exam": ["Pending", "Passed", "Pending", "Passed", "Pending"],
-        "proposal_defense": ["Pending", "Completed", "Pending", "Completed", "Pending"],
-        "thesis_submitted": ["No", "No", "No", "Yes", "No"],
-        "thesis_units_taken": [3, 8, 2, 12, 1]
-    })
-
 def load_data():
-    """Load or create student data with proper column names."""
     if os.path.exists(DATA_FILE):
-        df = pd.read_csv(DATA_FILE)
-        # Migrate old 'advisor' column if needed
-        if "advisor_username" not in df.columns:
-            if "advisor" in df.columns:
-                df["advisor_username"] = df["advisor"]
-                df.drop(columns=["advisor"], inplace=True)
-                df.to_csv(DATA_FILE, index=False)
-            else:
-                df = create_default_data()
+        return pd.read_csv(DATA_FILE)
     else:
-        df = create_default_data()
-    return df
+        df = pd.DataFrame({
+            "student_id": ["S001"],
+            "name": ["Sample Student"],
+            "program": ["MS"],
+            "advisor_username": ["adviser1"],
+            "year_admitted": [2024],
+            "pos_filed": ["Pending"],
+            "comp_exam": ["Pending"],
+            "proposal_defense": ["Pending"],
+            "thesis_submitted": ["No"],
+            "thesis_units_taken": [0]
+        })
+        df.to_csv(DATA_FILE, index=False)
+        return df
 
 def save_data(df):
     df.to_csv(DATA_FILE, index=False)
 
-def get_thesis_limit(program):
-    return 6 if program == "MS" else 12
-
-def get_warning_text(program, units):
-    limit = get_thesis_limit(program)
-    if units > limit:
-        return f"⚠️ WARNING: {units}/{limit} units (exceeded by {units - limit})"
-    return f"✅ {units}/{limit} units"
-
-# Load data
 df = load_data()
 
+def get_limit(program):
+    return 6 if program == "MS" else 12
+
+def warning(program, units):
+    limit = get_limit(program)
+    return f"⚠️ {units}/{limit}" if units > limit else f"✅ {units}/{limit}"
+
 # ==================== SIDEBAR ====================
-st.sidebar.title("🎓 KMIS Student Module")
-st.sidebar.markdown("---")
-st.sidebar.write(f"👤 {st.session_state.display_name}")
-st.sidebar.write(f"🔑 {st.session_state.role}")
+st.sidebar.title("KMIS")
+st.sidebar.write(st.session_state.display_name)
+st.sidebar.write(st.session_state.role)
+
 if st.sidebar.button("Logout"):
     st.session_state.logged_in = False
-    st.session_state.username = None
-    st.session_state.role = None
-    st.session_state.display_name = None
     st.rerun()
-st.sidebar.markdown("---")
-st.sidebar.caption("Version 1.2 | ISSP 2026-2031")
-
-# ==================== MAIN ====================
-st.title("🎓 SESAM Graduate Student Milestone Tracker")
-st.markdown("*Centralized tracking for MS/PhD students*")
-st.markdown("---")
 
 role = st.session_state.role
 
 # ==================== STAFF VIEW ====================
 if role == "SESAM Staff":
-    st.subheader("📋 All Students")
-    st.dataframe(df, width='stretch', height=400)
 
-    st.markdown("---")
-    st.subheader("✏️ Update Student Milestone")
+    st.title("🎓 Student Management")
+
+    st.dataframe(df, use_container_width=True)
+
+    # ================= UPDATE =================
+    st.subheader("✏️ Update Student")
 
     if len(df) > 0:
-        student_id = st.selectbox("Select Student", df["student_id"])
-        student = df[df["student_id"] == student_id].iloc[0]
+        sid = st.selectbox("Select Student", df["student_id"])
+        student = df[df["student_id"] == sid].iloc[0]
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Student", student["name"])
-            st.metric("Program", student["program"])
-        with col2:
-            advisor_display = USERS.get(student["advisor_username"], {}).get("display_name", student["advisor_username"])
-            st.metric("Advisor", advisor_display)
-            st.metric("Year Admitted", student["year_admitted"])
-        with col3:
-            limit = get_thesis_limit(student["program"])
-            st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
-            if student["thesis_units_taken"] > limit:
-                st.error("⚠️ Units exceeded!")
+        st.write(f"Name: {student['name']}")
 
         with st.form("update_form"):
-            milestone = st.selectbox(
-                "Select Milestone",
-                ["pos_filed", "comp_exam", "proposal_defense", "thesis_submitted", "thesis_units_taken"],
-                format_func=lambda x: {
-                    "pos_filed": "Plan of Study (POS)",
-                    "comp_exam": "Comprehensive Exam",
-                    "proposal_defense": "Proposal Defense",
-                    "thesis_submitted": "Thesis Submitted",
-                    "thesis_units_taken": "Thesis Units Taken"
-                }[x]
+            field = st.selectbox(
+                "Field",
+                ["pos_filed", "comp_exam", "proposal_defense", "thesis_submitted", "thesis_units_taken"]
             )
 
-            if milestone == "thesis_units_taken":
-                new_units = st.number_input(
-                    "New Units", min_value=0, max_value=20,
-                    value=int(student["thesis_units_taken"]), step=1
-                )
-                if st.form_submit_button("Update"):
-                    df.loc[df["student_id"] == student_id, "thesis_units_taken"] = new_units
-                    save_data(df)
-                    st.success("✅ Updated!")
-                    st.rerun()
+            if field == "thesis_units_taken":
+                value = st.number_input("Units", 0, 20, int(student["thesis_units_taken"]))
             else:
-                options_map = {
-                    "pos_filed": ["Pending", "Completed"],
-                    "comp_exam": ["Pending", "Passed", "Failed"],
-                    "proposal_defense": ["Pending", "Completed", "Revisions Required"],
-                    "thesis_submitted": ["No", "Yes"]
-                }
-                options = options_map[milestone]
-                current = student[milestone]
-                index = options.index(current) if current in options else 0
-                new_status = st.selectbox("Status", options, index=index)
-                if st.form_submit_button("Update"):
-                    df.loc[df["student_id"] == student_id, milestone] = new_status
-                    save_data(df)
-                    st.success("✅ Updated!")
-                    st.rerun()
-    else:
-        st.info("No students found. Use the form below to add the first student.")
+                value = st.text_input("Value", student[field])
 
-    # ----- ADD NEW STUDENT WITH TOAST CONFIRMATION -----
+            if st.form_submit_button("Update"):
+                df.loc[df["student_id"] == sid, field] = value
+                save_data(df)
+                st.success("Updated!")
+                st.rerun()
+
+    # ================= ADD STUDENT =================
     st.markdown("---")
-    st.subheader("➕ Add New Student")
+    st.subheader("➕ Add Student")
 
-    with st.expander("Click to expand and add a new student record"):
-        with st.form("add_student_form"):
+    with st.expander("Add New Student"):
+
+        with st.form("add_student"):
+
             col1, col2 = st.columns(2)
+
             with col1:
-                new_id = st.text_input("Student ID (unique)", max_chars=10, help="Example: S011")
-                new_name = st.text_input("Full Name", max_chars=50)
-                new_program = st.selectbox("Program", ["MS", "PhD"])
-                new_advisor = st.selectbox("Advisor Username", ["adviser1", "adviser2"])
-                new_year = st.number_input("Year Admitted", min_value=2000, max_value=2030, step=1, value=2025)
+                new_id = st.text_input("Student ID", key="new_id")
+                new_name = st.text_input("Name", key="new_name")
+                new_program = st.selectbox("Program", ["MS", "PhD"], key="new_program")
+                new_adv = st.selectbox("Advisor", ["adviser1", "adviser2"], key="new_adv")
+                new_year = st.number_input("Year", 2000, 2030, 2024, key="new_year")
+
             with col2:
-                st.markdown("**Initial Milestone Statuses**")
-                new_pos = st.selectbox("POS Filed", ["Pending", "Completed"])
-                new_compre = st.selectbox("Comprehensive Exam", ["Pending", "Passed", "Failed"])
-                new_proposal = st.selectbox("Proposal Defense", ["Pending", "Completed", "Revisions Required"])
-                new_thesis_sub = st.selectbox("Thesis Submitted", ["No", "Yes"])
-                new_units = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=0)
+                new_pos = st.selectbox("POS", ["Pending", "Completed"], key="new_pos")
+                new_comp = st.selectbox("Comprehensive", ["Pending", "Passed", "Failed"], key="new_comp")
+                new_prop = st.selectbox("Proposal", ["Pending", "Completed"], key="new_prop")
+                new_thesis = st.selectbox("Thesis Submitted", ["No", "Yes"], key="new_thesis")
+                new_units = st.number_input("Units", 0, 20, 0, key="new_units")
 
-            submitted = st.form_submit_button("➕ Add Student")
+            submit = st.form_submit_button("➕ Add")
 
-            if submitted:
-                if not new_id or not new_name:
-                    st.error("❌ Student ID and Name are required.")
-                elif new_id in df["student_id"].values:
-                    st.error(f"❌ Student ID '{new_id}' already exists. Please use a unique ID.")
-                elif new_advisor not in ["adviser1", "adviser2"]:
-                    st.error("❌ Invalid advisor username. Use 'adviser1' or 'adviser2'.")
+            if submit:
+
+                if new_id in df["student_id"].values:
+                    st.error("Student ID exists")
+                elif not new_id or not new_name:
+                    st.error("Required fields missing")
                 else:
+
                     new_row = pd.DataFrame([{
                         "student_id": new_id,
                         "name": new_name,
                         "program": new_program,
-                        "advisor_username": new_advisor,
+                        "advisor_username": new_adv,
                         "year_admitted": new_year,
                         "pos_filed": new_pos,
-                        "comp_exam": new_compre,
-                        "proposal_defense": new_proposal,
-                        "thesis_submitted": new_thesis_sub,
+                        "comp_exam": new_comp,
+                        "proposal_defense": new_prop,
+                        "thesis_submitted": new_thesis,
                         "thesis_units_taken": new_units
                     }])
+
                     df = pd.concat([df, new_row], ignore_index=True)
                     save_data(df)
-                    # Show temporary toast and balloon celebration
-                    st.toast(f"🎉 Student '{new_name}' (ID: {new_id}) has been added to the system!", icon="✅")
-                    st.success(f"✅ Student '{new_name}' (ID: {new_id}) added successfully!")
-                    st.balloons()
-                    st.rerun()
 
-    # ----- QUICK STATISTICS -----
-    st.markdown("---")
-    st.subheader("📊 Quick Statistics")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Total Students", len(df))
-    with col2:
-        st.metric("MS Students", len(df[df["program"] == "MS"]))
-    with col3:
-        st.metric("PhD Students", len(df[df["program"] == "PhD"]))
+                    st.toast("🎉 Student added successfully!", icon="✅")
+                    st.balloons()
+
+                    # ================= RESET FORM =================
+                    st.session_state.new_id = ""
+                    st.session_state.new_name = ""
+                    st.session_state.new_program = "MS"
+                    st.session_state.new_adv = "adviser1"
+                    st.session_state.new_year = 2024
+                    st.session_state.new_pos = "Pending"
+                    st.session_state.new_comp = "Pending"
+                    st.session_state.new_prop = "Pending"
+                    st.session_state.new_thesis = "No"
+                    st.session_state.new_units = 0
+
+                    st.rerun()
 
 # ==================== ADVISER VIEW ====================
 elif role == "Faculty Adviser":
-    st.subheader(f"👨‍🏫 Your Advisees ({st.session_state.display_name})")
-    advisees = df[df["advisor_username"] == st.session_state.username].copy()
 
-    if len(advisees) == 0:
-        st.warning("No students assigned to you.")
-    else:
-        advisees["units_status"] = advisees.apply(
-            lambda row: get_warning_text(row["program"], row["thesis_units_taken"]),
-            axis=1
-        )
-        display_cols = ["student_id", "name", "program", "year_admitted",
-                        "pos_filed", "comp_exam", "proposal_defense",
-                        "thesis_submitted", "thesis_units_taken", "units_status"]
-        st.dataframe(advisees[display_cols], width='stretch')
+    st.title("👨‍🏫 Adviser View")
 
-        st.markdown("---")
-        st.subheader("📌 Student Details")
-        for _, row in advisees.iterrows():
-            with st.expander(f"{row['name']} ({row['student_id']})"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write(f"**Program:** {row['program']}")
-                    st.write(f"**Year Admitted:** {row['year_admitted']}")
-                    st.write(f"**POS Filed:** {row['pos_filed']}")
-                with col2:
-                    st.write(f"**Comprehensive Exam:** {row['comp_exam']}")
-                    st.write(f"**Proposal Defense:** {row['proposal_defense']}")
-                    st.write(f"**Thesis Submitted:** {row['thesis_submitted']}")
-                st.write(f"**Thesis Units:** {get_warning_text(row['program'], row['thesis_units_taken'])}")
-    st.info("📌 Read-only access. For updates, contact SESAM Staff.")
+    my_students = df[df["advisor_username"] == st.session_state.username]
 
-# ==================== STUDENT VIEW ====================
-elif role == "Student":
-    st.subheader(f"📘 Your Academic Progress ({st.session_state.display_name})")
-    student_record = df[df["name"] == st.session_state.display_name]
-    if len(student_record) == 0:
-        st.error("Your record not found. Please contact SESAM Staff.")
-    else:
-        student = student_record.iloc[0]
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Student ID", student["student_id"])
-            st.metric("Program", student["program"])
-        with col2:
-            advisor_display = USERS.get(student["advisor_username"], {}).get("display_name", student["advisor_username"])
-            st.metric("Advisor", advisor_display)
-            st.metric("Year Admitted", student["year_admitted"])
-        with col3:
-            limit = get_thesis_limit(student["program"])
-            st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
-            if student["thesis_units_taken"] > limit:
-                st.error("⚠️ You have exceeded the allowed thesis units. Please consult your adviser.")
-
-        st.markdown("---")
-        st.subheader("📌 Your Milestone Status")
-        milestone_df = pd.DataFrame({
-            "Milestone": ["Plan of Study (POS)", "Comprehensive Exam", "Proposal Defense", "Thesis Submission"],
-            "Status": [
-                student["pos_filed"],
-                student["comp_exam"],
-                student["proposal_defense"],
-                student["thesis_submitted"]
-            ]
-        })
-        st.dataframe(milestone_df, width='stretch', hide_index=True)
-        st.info("📌 Read-only view. For updates, contact your adviser or SESAM Staff.")
+    st.dataframe(my_students, use_container_width=True)
 
 # ==================== FOOTER ====================
 st.markdown("---")
-st.caption("SESAM KMIS – Student Module V1 | Based on ISSP 2026-2031")
+st.caption("SESAM KMIS V1.2 - Streamlit Prototype")
