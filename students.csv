@@ -1,0 +1,11 @@
+student_id,name,program,advisor,year_admitted,pos_filed,comp_exam,proposal_defense,thesis_submitted,thesis_units_taken
+S001,Juan Cruz,MS,Dr. Eslava,2024,Completed,Pending,Pending,No,3
+S002,Maria Santos,PhD,Dr. Sanchez,2023,Completed,Passed,Completed,No,8
+S003,Jose Rizal,MS,Dr. Eslava,2024,Pending,Pending,Pending,No,2
+S004,Ana Reyes,PhD,Dr. Sanchez,2022,Completed,Passed,Completed,Yes,12
+S005,Carlos Lopez,MS,Dr. Eslava,2024,Pending,Pending,Pending,No,1
+S006,Elena Gomez,PhD,Dr. Sanchez,2023,Completed,Passed,Pending,No,10
+S007,Miguel Dela Cruz,MS,Dr. Eslava,2024,Completed,Pending,Pending,No,4
+S008,Rosa Hernandez,PhD,Dr. Sanchez,2021,Completed,Passed,Completed,Yes,13
+S009,Andres Bonifacio,MS,Dr. Eslava,2024,Pending,Pending,Pending,No,2
+S010,Gabriela Silang,PhD,Dr. Sanchez,2022,Completed,Passed,Completed,No,9
