@@ -47,9 +47,11 @@ PROGRAMS = [
 ]
 
 def is_master_program(program):
+    """Return True if program is a master's degree (thesis limit 6, residency 5 years)."""
     return program.startswith("MS") or program.startswith("Master") or program.startswith("Professional Masters")
 
 def is_phd_program(program):
+    """Return True if program is a doctoral degree (thesis limit 12, residency 7 years)."""
     return program.startswith("PhD")
 
 def get_thesis_limit_from_program(program):
@@ -87,23 +89,28 @@ if not st.session_state.logged_in:
 DATA_FILE = "students.csv"
 
 def create_default_data():
+    """Create sample data with the new program names."""
     return pd.DataFrame({
         "student_id": ["S001", "S002", "S003", "S004", "S005"],
         "name": ["Juan Cruz", "Maria Santos", "Jose Rizal", "Ana Reyes", "Carlos Lopez"],
         "program": [PROGRAMS[0], PROGRAMS[1], PROGRAMS[0], PROGRAMS[1], PROGRAMS[0]],
         "advisor_username": ["adviser1", "adviser2", "adviser1", "adviser2", "adviser1"],
         "year_admitted": [2024, 2023, 2024, 2022, 2024],
+        # Plan of Study
         "pos_status": ["Approved", "Approved", "Pending", "Approved", "Pending"],
         "pos_submitted_date": ["2024-01-15", "2023-06-10", "", "2022-09-01", ""],
         "pos_approved_date": ["2024-02-01", "2023-07-01", "", "2022-09-15", ""],
+        # Coursework
         "gwa": [1.75, 1.85, 2.10, 1.95, 2.05],
         "total_units_taken": [12, 18, 9, 24, 6],
         "total_units_required": [24, 24, 24, 24, 24],
+        # Thesis
         "thesis_units_taken": [3, 8, 2, 12, 1],
         "thesis_units_limit": [6, 12, 6, 12, 6],
         "thesis_outline_approved": ["No", "Yes", "No", "Yes", "No"],
         "thesis_outline_approved_date": ["", "2024-01-10", "", "2023-11-20", ""],
         "thesis_status": ["In Progress", "Draft with Adviser", "Not Started", "Approved", "Not Started"],
+        # Exams
         "qualifying_exam_status": ["N/A", "Passed", "N/A", "Passed", "N/A"],
         "qualifying_exam_passed_date": ["", "2023-12-01", "", "2023-10-15", ""],
         "written_comprehensive_status": ["N/A", "Passed", "N/A", "Passed", "N/A"],
@@ -114,34 +121,42 @@ def create_default_data():
         "general_exam_passed_date": ["", "", "", "", ""],
         "final_exam_status": ["Pending", "Pending", "Pending", "Pending", "Pending"],
         "final_exam_passed_date": ["", "", "", "", ""],
+        # Residency
         "residency_years_used": [1, 2, 1, 3, 1],
         "residency_max_years": [5, 7, 5, 7, 5],
         "extension_count": [0, 0, 0, 0, 0],
         "extension_end_date": ["", "", "", "", ""],
+        # Leave
         "loa_start_date": ["", "", "", "", ""],
         "loa_end_date": ["", "", "", "", ""],
         "loa_total_terms": [0, 0, 0, 0, 0],
         "awol_status": ["No", "No", "No", "No", "No"],
         "awol_lifted_date": ["", "", "", "", ""],
+        # Transfer credit
         "transfer_units_approved": [0, 0, 0, 0, 0],
+        # Graduation
         "graduation_applied": ["No", "No", "No", "No", "No"],
         "graduation_approved": ["No", "No", "No", "No", "No"],
         "graduation_date": ["", "", "", "", ""],
+        # Re-admission
         "re_admission_status": ["Not Applicable", "Not Applicable", "Not Applicable", "Not Applicable", "Not Applicable"],
         "re_admission_date": ["", "", "", "", ""]
     })
 
 def load_data():
+    """Load or create student data with proper schema and numeric conversion."""
     if os.path.exists(DATA_FILE):
         df = pd.read_csv(DATA_FILE)
     else:
         df = create_default_data()
-
+    
+    # Ensure all required columns exist
     default_df = create_default_data()
     for col in default_df.columns:
         if col not in df.columns:
             df[col] = default_df[col]
-
+    
+    # Convert numeric columns
     numeric_int_cols = [
         "thesis_units_taken", "thesis_units_limit",
         "total_units_taken", "total_units_required",
@@ -150,10 +165,11 @@ def load_data():
     ]
     for col in numeric_int_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
-
+    
     df["gwa"] = pd.to_numeric(df["gwa"], errors='coerce').fillna(2.0).astype(float)
     df["year_admitted"] = pd.to_numeric(df["year_admitted"], errors='coerce').fillna(2024).astype(int)
-
+    
+    # Fix residency max based on program and reset new students' progress
     for idx, row in df.iterrows():
         program = str(row["program"]).strip()
         if program not in PROGRAMS:
@@ -166,7 +182,7 @@ def load_data():
             df.at[idx, "program"] = program
         df.at[idx, "residency_max_years"] = get_residency_max_from_program(program)
         df.at[idx, "thesis_units_limit"] = get_thesis_limit_from_program(program)
-
+        
         if row["year_admitted"] >= 2025:
             df.at[idx, "total_units_taken"] = 0
             df.at[idx, "written_comprehensive_status"] = "N/A"
@@ -174,7 +190,7 @@ def load_data():
             df.at[idx, "qualifying_exam_status"] = "N/A"
             df.at[idx, "general_exam_status"] = "N/A"
             df.at[idx, "final_exam_status"] = "Not Taken"
-
+    
     df.to_csv(DATA_FILE, index=False)
     return df
 
@@ -346,6 +362,7 @@ def safe_index(options, value):
         return 0
 
 def format_ay(year):
+    """Convert year to Academic Year display (e.g., 2026 -> A.Y. 2026-2027 (1st Sem))."""
     return f"A.Y. {year}-{year+1} (1st Sem)"
 
 def filter_dataframe(search_term, data):
@@ -371,10 +388,12 @@ if role == "SESAM Staff":
     st.subheader("✏️ Update Student Record")
 
     if len(filtered_df) > 0:
-        # ----- SEARCHABLE STUDENT SELECTION (using the filtered list) -----
-        edit_search = st.text_input("Type part of the student's name to edit:", value="", placeholder="e.g., Juan or Maria", key="edit_search")
+        # ----- SEARCH BAR FOR STUDENT SELECTION (update dropdown) -----
+        st.subheader("🔍 Search Student to Edit")
+        edit_search = st.text_input("Type name or student ID", value="", placeholder="e.g., Juan or S001", key="edit_search")
         if edit_search:
-            edit_filtered_names = filtered_df[filtered_df["name"].str.contains(edit_search, case=False, na=False)]["name"].tolist()
+            edit_filtered = filter_dataframe(edit_search, filtered_df)
+            edit_filtered_names = edit_filtered["name"].tolist()
         else:
             edit_filtered_names = filtered_df["name"].tolist()
         
@@ -386,6 +405,7 @@ if role == "SESAM Staff":
         student = df[df["name"] == student_name].iloc[0].copy()
         student_id = student["student_id"]
 
+        # Display warnings in RED
         warnings = get_all_warnings(student)
         if any("⚠️" in w for w in warnings):
             for w in warnings:
@@ -393,7 +413,7 @@ if role == "SESAM Staff":
         else:
             st.success("\n".join(warnings))
 
-        # Basic info display
+        # Basic info display - using markdown to avoid truncation
         st.markdown("---")
         st.markdown("### Student Information")
         col1, col2, col3 = st.columns(3)
@@ -524,18 +544,24 @@ if role == "SESAM Staff":
         st.markdown("---")
         st.subheader("🗑️ Delete Student")
         with st.expander("Click to expand and delete a student record"):
-            delete_name = st.selectbox("Select Student to Delete", filtered_df["name"])
-            delete_id = df[df["name"] == delete_name]["student_id"].values[0]
-            confirm = st.checkbox("⚠️ I confirm that I want to permanently delete this student. This action cannot be undone.")
-            if confirm and st.button("Yes, Delete This Student"):
-                df = df[df["student_id"] != delete_id]
-                save_data(df)
-                st.success(f"✅ Student '{delete_name}' has been deleted.")
-                st.rerun()
-            elif not confirm and st.button("Yes, Delete This Student"):
-                st.warning("Please check the confirmation box before deleting.")
+            # Use the filtered list (current table view) for deletion selection
+            delete_search = st.text_input("Search student to delete", placeholder="name or ID", key="delete_search")
+            delete_filtered = filter_dataframe(delete_search, filtered_df) if delete_search else filtered_df
+            if len(delete_filtered) == 0:
+                st.warning("No matching students to delete.")
+            else:
+                delete_name = st.selectbox("Select Student to Delete", delete_filtered["name"])
+                delete_id = df[df["name"] == delete_name]["student_id"].values[0]
+                confirm = st.checkbox("⚠️ I confirm that I want to permanently delete this student. This action cannot be undone.")
+                if confirm and st.button("Yes, Delete This Student"):
+                    df = df[df["student_id"] != delete_id]
+                    save_data(df)
+                    st.success(f"✅ Student '{delete_name}' has been deleted.")
+                    st.rerun()
+                elif not confirm and st.button("Yes, Delete This Student"):
+                    st.warning("Please check the confirmation box before deleting.")
 
-        # ----- RESET ALL DATA BUTTON -----
+        # ----- RESET ALL DATA BUTTON (restores only S001-S005) -----
         st.markdown("---")
         st.subheader("🔄 Reset All Data")
         with st.expander("⚠️ Click to reset all student data to default samples (S001–S005). This will delete all other students."):
@@ -642,28 +668,31 @@ elif role == "Faculty Adviser":
         display_cols = ["student_id", "name", "program", "year_admitted", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status", "warnings"]
         st.dataframe(filtered_advisees[display_cols], width='stretch')
         
-        st.markdown("---")
-        st.subheader("📌 Detailed View")
-        for _, row in filtered_advisees.iterrows():
-            with st.expander(f"{row['name']} ({row['student_id']})"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown(f"**Program:** {row['program']}")
-                    st.markdown(f"**Admitted:** {format_ay(row['year_admitted'])}")
-                    st.markdown(f"**GWA:** {row['gwa']}")
-                    st.markdown(f"**POS Status:** {row['pos_status']}")
-                    st.markdown(f"**Thesis Units:** {row['thesis_units_taken']}/{row['thesis_units_limit']}")
-                with col2:
-                    st.markdown(f"**General Exam:** {row['general_exam_status']}")
-                    st.markdown(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
-                    st.markdown(f"**Final Exam:** {row['final_exam_status']}")
-                    st.markdown(f"**Residency:** {row['residency_years_used']}/{get_residency_max(row['program'])} years")
-                warnings_text = row["warnings"]
-                if any("⚠️" in w for w in warnings_text.split("\n")):
-                    for w in warnings_text.split("\n"):
-                        st.error(w)
-                else:
-                    st.success(warnings_text)
+        if len(filtered_advisees) > 0:
+            st.markdown("---")
+            st.subheader("📌 Detailed View")
+            for _, row in filtered_advisees.iterrows():
+                with st.expander(f"{row['name']} ({row['student_id']})"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"**Program:** {row['program']}")
+                        st.markdown(f"**Admitted:** {format_ay(row['year_admitted'])}")
+                        st.markdown(f"**GWA:** {row['gwa']}")
+                        st.markdown(f"**POS Status:** {row['pos_status']}")
+                        st.markdown(f"**Thesis Units:** {row['thesis_units_taken']}/{row['thesis_units_limit']}")
+                    with col2:
+                        st.markdown(f"**General Exam:** {row['general_exam_status']}")
+                        st.markdown(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
+                        st.markdown(f"**Final Exam:** {row['final_exam_status']}")
+                        st.markdown(f"**Residency:** {row['residency_years_used']}/{get_residency_max(row['program'])} years")
+                    warnings_text = row["warnings"]
+                    if any("⚠️" in w for w in warnings_text.split("\n")):
+                        for w in warnings_text.split("\n"):
+                            st.error(w)
+                    else:
+                        st.success(warnings_text)
+        else:
+            st.info("No matching students.")
     st.info("📌 Read-only view. For updates, contact SESAM Staff.")
 
 # ==================== STUDENT VIEW ====================
