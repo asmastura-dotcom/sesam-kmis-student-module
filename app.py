@@ -367,16 +367,32 @@ def format_ay(year):
     """Convert year to Academic Year display (e.g., 2026 -> A.Y. 2026-2027 (1st Sem))."""
     return f"A.Y. {year}-{year+1} (1st Sem)"
 
-# ==================== STAFF VIEW ====================
+# ==================== STAFF VIEW (WITH SEARCH BAR) ====================
 if role == "SESAM Staff":
     st.subheader("📋 All Students")
-    st.dataframe(df, width='stretch', height=400)
+
+    # ---- SEARCH BAR ----
+    search_term = st.text_input("🔍 Search by name or student ID", placeholder="e.g., Juan or S001")
+    if search_term:
+        # Case-insensitive partial match on name or student_id
+        mask = (
+            df["name"].str.contains(search_term, case=False, na=False) |
+            df["student_id"].str.contains(search_term, case=False, na=False)
+        )
+        filtered_df = df[mask].copy()
+    else:
+        filtered_df = df.copy()
+
+    # Display filtered table
+    st.dataframe(filtered_df, width='stretch', height=400)
 
     st.markdown("---")
     st.subheader("✏️ Update Student Record")
 
-    if len(df) > 0:
-        student_name = st.selectbox("Select Student", df["name"])
+    if len(filtered_df) > 0:
+        # Use filtered names for the selector
+        student_name = st.selectbox("Select Student", filtered_df["name"])
+        # Retrieve the full student record from the original df (to have latest data)
         student = df[df["name"] == student_name].iloc[0].copy()
         student_id = student["student_id"]
 
@@ -519,7 +535,8 @@ if role == "SESAM Staff":
         st.markdown("---")
         st.subheader("🗑️ Delete Student")
         with st.expander("Click to expand and delete a student record"):
-            delete_name = st.selectbox("Select Student to Delete", df["name"])
+            # Use filtered_df for delete selection as well
+            delete_name = st.selectbox("Select Student to Delete", filtered_df["name"])
             delete_id = df[df["name"] == delete_name]["student_id"].values[0]
             confirm = st.checkbox("⚠️ I confirm that I want to permanently delete this student. This action cannot be undone.")
             if confirm and st.button("Yes, Delete This Student"):
@@ -544,7 +561,7 @@ if role == "SESAM Staff":
                 st.warning("Please check the confirmation box before resetting.")
 
     else:
-        st.info("No students found. Use the Add Student feature below.")
+        st.info("No students match your search. Try a different keyword or add a new student below.")
 
     # ----- ADD NEW STUDENT -----
     st.markdown("---")
