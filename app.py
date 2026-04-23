@@ -1,16 +1,19 @@
 """
-SESAM KMIS - Student Module V1 (Complete with Add Student + Auto‑clear Fields)
-Author: Alyssa Fatmah S. Mastura
-Date: April 23, 2026
+SESAM KMIS - Student Module V2 (Graduate School Rules Integration)
+Author: [Your Name]
+Date: [Current Date]
+Description: Tracks graduate student milestones, thesis units, exams, residency, LOA/AWOL, etc.
+Based on UPLB Graduate School Policies, Rules and Regulations (2009).
 """
 
 import streamlit as st
 import pandas as pd
 import os
+from datetime import datetime, date
 
 # ==================== PAGE CONFIGURATION ====================
 st.set_page_config(
-    page_title="SESAM Student Milestone Tracker",
+    page_title="SESAM Graduate Student Tracker",
     page_icon="🎓",
     layout="wide"
 )
@@ -59,36 +62,76 @@ if not st.session_state.logged_in:
             st.error("❌ Invalid username or password")
     st.stop()
 
-# ==================== DATA LOADING WITH MIGRATION ====================
+# ==================== DATA LOADING WITH ENHANCED SCHEMA ====================
 DATA_FILE = "students.csv"
 
 def create_default_data():
-    """Create sample data with advisor_username matching USERS keys."""
+    """Create sample data with all required fields."""
+    current_year = date.today().year
     return pd.DataFrame({
         "student_id": ["S001", "S002", "S003", "S004", "S005"],
         "name": ["Juan Cruz", "Maria Santos", "Jose Rizal", "Ana Reyes", "Carlos Lopez"],
         "program": ["MS", "PhD", "MS", "PhD", "MS"],
         "advisor_username": ["adviser1", "adviser2", "adviser1", "adviser2", "adviser1"],
         "year_admitted": [2024, 2023, 2024, 2022, 2024],
-        "pos_filed": ["Completed", "Completed", "Pending", "Completed", "Pending"],
-        "comp_exam": ["Pending", "Passed", "Pending", "Passed", "Pending"],
-        "proposal_defense": ["Pending", "Completed", "Pending", "Completed", "Pending"],
-        "thesis_submitted": ["No", "No", "No", "Yes", "No"],
-        "thesis_units_taken": [3, 8, 2, 12, 1]
+        # Plan of Study
+        "pos_status": ["Approved", "Approved", "Pending", "Approved", "Pending"],
+        "pos_submitted_date": ["2024-01-15", "2023-06-10", "", "2022-09-01", ""],
+        "pos_approved_date": ["2024-02-01", "2023-07-01", "", "2022-09-15", ""],
+        # Coursework
+        "gwa": [1.75, 1.85, 2.10, 1.95, 2.05],
+        "total_units_taken": [12, 18, 9, 24, 6],
+        "total_units_required": [24, 24, 24, 24, 24],
+        # Thesis / Dissertation
+        "thesis_units_taken": [3, 8, 2, 12, 1],
+        "thesis_units_limit": [6, 12, 6, 12, 6],
+        "thesis_outline_approved": ["No", "Yes", "No", "Yes", "No"],
+        "thesis_outline_approved_date": ["", "2024-01-10", "", "2023-11-20", ""],
+        "thesis_status": ["In Progress", "Draft with Adviser", "Not Started", "Approved", "Not Started"],
+        # Exams
+        "qualifying_exam_status": ["N/A", "Passed", "N/A", "Passed", "N/A"],
+        "qualifying_exam_passed_date": ["", "2023-12-01", "", "2023-10-15", ""],
+        "written_comprehensive_status": ["N/A", "Passed", "N/A", "Passed", "N/A"],
+        "written_comprehensive_passed_date": ["", "2024-02-10", "", "2024-01-20", ""],
+        "oral_comprehensive_status": ["N/A", "Pending", "N/A", "Pending", "N/A"],
+        "oral_comprehensive_passed_date": ["", "", "", "", ""],
+        "general_exam_status": ["Pending", "N/A", "Pending", "N/A", "Pending"],
+        "general_exam_passed_date": ["", "", "", "", ""],
+        "final_exam_status": ["Pending", "Pending", "Pending", "Pending", "Pending"],
+        "final_exam_passed_date": ["", "", "", "", ""],
+        # Residency
+        "residency_years_used": [1, 2, 1, 3, 1],
+        "residency_max_years": [5, 7, 5, 7, 5],
+        "extension_count": [0, 0, 0, 0, 0],
+        "extension_end_date": ["", "", "", "", ""],
+        # Leave
+        "loa_start_date": ["", "", "", "", ""],
+        "loa_end_date": ["", "", "", "", ""],
+        "loa_total_terms": [0, 0, 0, 0, 0],
+        "awol_status": ["No", "No", "No", "No", "No"],
+        "awol_lifted_date": ["", "", "", "", ""],
+        # Transfer credit
+        "transfer_units_approved": [0, 0, 0, 0, 0],
+        # Graduation
+        "graduation_applied": ["No", "No", "No", "No", "No"],
+        "graduation_approved": ["No", "No", "No", "No", "No"],
+        "graduation_date": ["", "", "", "", ""],
+        # Re-admission
+        "re_admission_status": ["Not Applicable", "Not Applicable", "Not Applicable", "Not Applicable", "Not Applicable"],
+        "re_admission_date": ["", "", "", "", ""]
     })
 
 def load_data():
-    """Load or create student data with proper column names."""
+    """Load or create student data with proper schema."""
     if os.path.exists(DATA_FILE):
         df = pd.read_csv(DATA_FILE)
-        # Migrate old 'advisor' column if needed
-        if "advisor_username" not in df.columns:
-            if "advisor" in df.columns:
-                df["advisor_username"] = df["advisor"]
-                df.drop(columns=["advisor"], inplace=True)
-                df.to_csv(DATA_FILE, index=False)
-            else:
-                df = create_default_data()
+        # Ensure all required columns exist; add missing with defaults
+        default_df = create_default_data()
+        for col in default_df.columns:
+            if col not in df.columns:
+                df[col] = default_df[col]
+        # Save back to ensure consistency
+        df.to_csv(DATA_FILE, index=False)
     else:
         df = create_default_data()
     return df
@@ -99,11 +142,81 @@ def save_data(df):
 def get_thesis_limit(program):
     return 6 if program == "MS" else 12
 
-def get_warning_text(program, units):
+def get_residency_max(program):
+    return 5 if program == "MS" else 7
+
+# ==================== WARNING FUNCTIONS ====================
+def get_warning_text(program, units_taken):
     limit = get_thesis_limit(program)
-    if units > limit:
-        return f"⚠️ WARNING: {units}/{limit} units (exceeded by {units - limit})"
-    return f"✅ {units}/{limit} units"
+    if units_taken > limit:
+        return f"⚠️ WARNING: {units_taken}/{limit} units (exceeded by {units_taken - limit})"
+    return f"✅ {units_taken}/{limit} units"
+
+def check_residency_warning(row):
+    used = row["residency_years_used"]
+    max_years = row["residency_max_years"]
+    if used >= max_years:
+        return f"⚠️ Residency limit reached ({used}/{max_years} years). Extension required."
+    elif used >= max_years - 1:
+        return f"⚠️ Approaching residency limit ({used}/{max_years} years)."
+    return f"✅ {used}/{max_years} years used"
+
+def check_gwa_warning(gwa):
+    if gwa >= 2.0:
+        return "✅ Good standing"
+    else:
+        return "⚠️ GWA below 2.00 – may affect exam eligibility and graduation"
+
+def check_awol_warning(row):
+    if row["awol_status"] == "Yes":
+        return "⚠️ AWOL – registration privileges curtailed"
+    return "✅ No AWOL"
+
+def check_loa_warning(row):
+    total_terms = row["loa_total_terms"]
+    if total_terms > 2:
+        return f"⚠️ LOA total exceeds 2 years ({total_terms} terms). Not allowed."
+    elif total_terms > 0:
+        return f"ℹ️ LOA total: {total_terms} term(s)"
+    return "✅ No LOA"
+
+def check_thesis_outline_deadline(row):
+    if row["program"] == "MS" and row["thesis_units_taken"] > 0:
+        # MS: outline must be approved not later than second semester of thesis enrollment
+        # Simplified: if thesis units taken >= 4 and not approved, warn
+        if row["thesis_units_taken"] >= 4 and row["thesis_outline_approved"] != "Yes":
+            return "⚠️ Thesis outline approval overdue (should be approved by 2nd thesis semester)"
+    elif row["program"] == "PhD" and row["thesis_units_taken"] > 0:
+        # PhD: outline must be approved not later than third semester of dissertation enrollment
+        if row["thesis_units_taken"] >= 8 and row["thesis_outline_approved"] != "Yes":
+            return "⚠️ Dissertation outline approval overdue (should be approved by 3rd dissertation semester)"
+    return "✅ Outline on track"
+
+def check_qualifying_exam_deadline(row):
+    if row["program"] == "PhD" and row["residency_years_used"] >= 1:
+        # Qualifying exam should be taken before registration for second semester of residence
+        if row["qualifying_exam_status"] not in ["Passed", "N/A"]:
+            return "⚠️ Qualifying exam should be taken before 2nd semester of residence"
+    return "✅ Qualifying exam on track"
+
+def check_comprehensive_exam_deadline(row):
+    if row["program"] == "PhD" and row["total_units_taken"] >= row["total_units_required"]:
+        if row["written_comprehensive_status"] != "Passed":
+            return "⚠️ Written comprehensive exam pending after completing coursework"
+    return "✅ Comprehensive exam on track"
+
+def get_all_warnings(row):
+    warnings = []
+    warnings.append(get_warning_text(row["program"], row["thesis_units_taken"]))
+    warnings.append(check_residency_warning(row))
+    warnings.append(check_gwa_warning(row["gwa"]))
+    warnings.append(check_awol_warning(row))
+    warnings.append(check_loa_warning(row))
+    warnings.append(check_thesis_outline_deadline(row))
+    warnings.append(check_qualifying_exam_deadline(row))
+    warnings.append(check_comprehensive_exam_deadline(row))
+    # Filter out duplicates and empty
+    return [w for w in warnings if w and "✅" not in w] or ["✅ All rules satisfied"]
 
 # Load data
 df = load_data()
@@ -120,27 +233,32 @@ if st.sidebar.button("Logout"):
     st.session_state.display_name = None
     st.rerun()
 st.sidebar.markdown("---")
-st.sidebar.caption("Version 1.2 | ISSP 2026-2031")
+st.sidebar.caption("Version 2.0 | ISSP 2026-2031 | Graduate School Rules")
 
 # ==================== MAIN ====================
 st.title("🎓 SESAM Graduate Student Milestone Tracker")
-st.markdown("*Centralized tracking for MS/PhD students*")
+st.markdown("*Centralized tracking for MS/PhD students based on UPLB Graduate School Policies*")
 st.markdown("---")
 
 role = st.session_state.role
 
-# ==================== STAFF VIEW ====================
+# ==================== STAFF VIEW (Full Edit) ====================
 if role == "SESAM Staff":
     st.subheader("📋 All Students")
     st.dataframe(df, width='stretch', height=400)
 
     st.markdown("---")
-    st.subheader("✏️ Update Student Milestone")
+    st.subheader("✏️ Update Student Record")
 
     if len(df) > 0:
         student_id = st.selectbox("Select Student", df["student_id"])
-        student = df[df["student_id"] == student_id].iloc[0]
+        student = df[df["student_id"] == student_id].iloc[0].copy()
 
+        # Display warnings
+        warnings = get_all_warnings(student)
+        st.warning("\n".join(warnings)) if any("⚠️" in w for w in warnings) else st.success("\n".join(warnings))
+
+        # Basic info display
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Student", student["name"])
@@ -155,148 +273,157 @@ if role == "SESAM Staff":
             if student["thesis_units_taken"] > limit:
                 st.error("⚠️ Units exceeded!")
 
-        with st.form("update_form"):
-            milestone = st.selectbox(
-                "Select Milestone",
-                ["pos_filed", "comp_exam", "proposal_defense", "thesis_submitted", "thesis_units_taken"],
-                format_func=lambda x: {
-                    "pos_filed": "Plan of Study (POS)",
-                    "comp_exam": "Comprehensive Exam",
-                    "proposal_defense": "Proposal Defense",
-                    "thesis_submitted": "Thesis Submitted",
-                    "thesis_units_taken": "Thesis Units Taken"
-                }[x]
-            )
+        # Editable fields organized in tabs
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["Coursework & Thesis", "Exams", "Residency & Leave", "Graduation", "Other"])
 
-            if milestone == "thesis_units_taken":
-                new_units = st.number_input(
-                    "New Units", min_value=0, max_value=20,
-                    value=int(student["thesis_units_taken"]), step=1
-                )
-                if st.form_submit_button("Update"):
-                    df.loc[df["student_id"] == student_id, "thesis_units_taken"] = new_units
+        with tab1:
+            with st.form("coursework_form"):
+                st.subheader("Plan of Study (POS)")
+                pos_status = st.selectbox("POS Status", ["Not Filed", "Pending", "Approved"], index=["Not Filed","Pending","Approved"].index(student["pos_status"]))
+                pos_submitted = st.text_input("POS Submitted Date (YYYY-MM-DD)", student["pos_submitted_date"])
+                pos_approved = st.text_input("POS Approved Date (YYYY-MM-DD)", student["pos_approved_date"])
+
+                st.subheader("Coursework")
+                gwa = st.number_input("GWA", min_value=1.0, max_value=5.0, step=0.01, value=float(student["gwa"]))
+                total_units_taken = st.number_input("Total Units Taken", min_value=0, max_value=60, step=1, value=int(student["total_units_taken"]))
+                total_units_required = st.number_input("Total Units Required", min_value=0, max_value=60, step=1, value=int(student["total_units_required"]))
+
+                st.subheader("Thesis/Dissertation")
+                thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=int(student["thesis_units_taken"]))
+                thesis_outline_approved = st.selectbox("Thesis Outline Approved", ["Yes","No"], index=0 if student["thesis_outline_approved"]=="Yes" else 1)
+                thesis_outline_date = st.text_input("Outline Approval Date", student["thesis_outline_approved_date"])
+                thesis_status = st.selectbox("Thesis Status", ["Not Started","In Progress","Draft with Adviser","For Committee Review","Approved","Submitted"], index=["Not Started","In Progress","Draft with Adviser","For Committee Review","Approved","Submitted"].index(student["thesis_status"]))
+
+                if st.form_submit_button("Update Coursework & Thesis"):
+                    df.loc[df["student_id"] == student_id, ["pos_status","pos_submitted_date","pos_approved_date","gwa","total_units_taken","total_units_required","thesis_units_taken","thesis_outline_approved","thesis_outline_approved_date","thesis_status"]] = [pos_status, pos_submitted, pos_approved, gwa, total_units_taken, total_units_required, thesis_units_taken, thesis_outline_approved, thesis_outline_date, thesis_status]
                     save_data(df)
                     st.success("✅ Updated!")
                     st.rerun()
-            else:
-                options_map = {
-                    "pos_filed": ["Pending", "Completed"],
-                    "comp_exam": ["Pending", "Passed", "Failed"],
-                    "proposal_defense": ["Pending", "Completed", "Revisions Required"],
-                    "thesis_submitted": ["No", "Yes"]
-                }
-                options = options_map[milestone]
-                current = student[milestone]
-                index = options.index(current) if current in options else 0
-                new_status = st.selectbox("Status", options, index=index)
-                if st.form_submit_button("Update"):
-                    df.loc[df["student_id"] == student_id, milestone] = new_status
+
+        with tab2:
+            with st.form("exams_form"):
+                st.subheader("Examinations")
+                # PhD exams
+                qualifying = st.selectbox("Qualifying Exam Status (PhD)", ["N/A","Not Taken","Passed","Failed","Re-exam Scheduled"], index=["N/A","Not Taken","Passed","Failed","Re-exam Scheduled"].index(student["qualifying_exam_status"]))
+                qualifying_date = st.text_input("Qualifying Exam Passed Date", student["qualifying_exam_passed_date"])
+                written_comp = st.selectbox("Written Comprehensive Status", ["N/A","Not Taken","Passed","Failed"], index=["N/A","Not Taken","Passed","Failed"].index(student["written_comprehensive_status"]))
+                written_comp_date = st.text_input("Written Comprehensive Passed Date", student["written_comprehensive_passed_date"])
+                oral_comp = st.selectbox("Oral Comprehensive Status", ["N/A","Not Taken","Passed","Failed"], index=["N/A","Not Taken","Passed","Failed"].index(student["oral_comprehensive_status"]))
+                oral_comp_date = st.text_input("Oral Comprehensive Passed Date", student["oral_comprehensive_passed_date"])
+                # MS general exam
+                general = st.selectbox("General Exam Status (MS)", ["N/A","Not Taken","Passed","Failed"], index=["N/A","Not Taken","Passed","Failed"].index(student["general_exam_status"]))
+                general_date = st.text_input("General Exam Passed Date", student["general_exam_passed_date"])
+                # Final exam
+                final = st.selectbox("Final Exam Status", ["Not Taken","Passed","Failed","Re-exam Scheduled"], index=["Not Taken","Passed","Failed","Re-exam Scheduled"].index(student["final_exam_status"]))
+                final_date = st.text_input("Final Exam Passed Date", student["final_exam_passed_date"])
+
+                if st.form_submit_button("Update Exams"):
+                    df.loc[df["student_id"] == student_id, ["qualifying_exam_status","qualifying_exam_passed_date","written_comprehensive_status","written_comprehensive_passed_date","oral_comprehensive_status","oral_comprehensive_passed_date","general_exam_status","general_exam_passed_date","final_exam_status","final_exam_passed_date"]] = [qualifying, qualifying_date, written_comp, written_comp_date, oral_comp, oral_comp_date, general, general_date, final, final_date]
                     save_data(df)
                     st.success("✅ Updated!")
                     st.rerun()
+
+        with tab3:
+            with st.form("residency_form"):
+                st.subheader("Residency")
+                residency_used = st.number_input("Years of Residence Used", min_value=0, max_value=10, step=1, value=int(student["residency_years_used"]))
+                max_years = get_residency_max(student["program"])
+                st.info(f"Maximum allowed: {max_years} years")
+                extension_count = st.number_input("Number of Extensions Granted", min_value=0, max_value=3, step=1, value=int(student["extension_count"]))
+                extension_end = st.text_input("Extension End Date (if applicable)", student["extension_end_date"])
+
+                st.subheader("Leave of Absence (LOA)")
+                loa_start = st.text_input("LOA Start Date", student["loa_start_date"])
+                loa_end = st.text_input("LOA End Date", student["loa_end_date"])
+                loa_terms = st.number_input("Total LOA Terms (each term = 0.5 year)", min_value=0, max_value=4, step=1, value=int(student["loa_total_terms"]))
+
+                st.subheader("AWOL")
+                awol = st.selectbox("AWOL Status", ["No","Yes"], index=0 if student["awol_status"]=="No" else 1)
+                awol_lifted = st.text_input("AWOL Lifted Date", student["awol_lifted_date"])
+
+                if st.form_submit_button("Update Residency & Leave"):
+                    df.loc[df["student_id"] == student_id, ["residency_years_used","extension_count","extension_end_date","loa_start_date","loa_end_date","loa_total_terms","awol_status","awol_lifted_date"]] = [residency_used, extension_count, extension_end, loa_start, loa_end, loa_terms, awol, awol_lifted]
+                    save_data(df)
+                    st.success("✅ Updated!")
+                    st.rerun()
+
+        with tab4:
+            with st.form("graduation_form"):
+                st.subheader("Graduation")
+                grad_applied = st.selectbox("Graduation Applied", ["No","Yes"], index=0 if student["graduation_applied"]=="No" else 1)
+                grad_approved = st.selectbox("Graduation Approved", ["No","Yes"], index=0 if student["graduation_approved"]=="No" else 1)
+                grad_date = st.text_input("Graduation Date (YYYY-MM-DD)", student["graduation_date"])
+
+                st.subheader("Transfer Credit")
+                transfer_units = st.number_input("Transfer Credits Approved (max 9 units)", min_value=0, max_value=9, step=1, value=int(student["transfer_units_approved"]))
+
+                if st.form_submit_button("Update Graduation & Transfer"):
+                    df.loc[df["student_id"] == student_id, ["graduation_applied","graduation_approved","graduation_date","transfer_units_approved"]] = [grad_applied, grad_approved, grad_date, transfer_units]
+                    save_data(df)
+                    st.success("✅ Updated!")
+                    st.rerun()
+
+        with tab5:
+            with st.form("other_form"):
+                st.subheader("Re-admission (for students who exceeded time limit)")
+                re_status = st.selectbox("Re-admission Status", ["Not Applicable","Applied","Approved","Denied"], index=["Not Applicable","Applied","Approved","Denied"].index(student["re_admission_status"]))
+                re_date = st.text_input("Re-admission Date", student["re_admission_date"])
+
+                if st.form_submit_button("Update Re-admission"):
+                    df.loc[df["student_id"] == student_id, ["re_admission_status","re_admission_date"]] = [re_status, re_date]
+                    save_data(df)
+                    st.success("✅ Updated!")
+                    st.rerun()
+
     else:
-        st.info("No students found. Use the form below to add the first student.")
+        st.info("No students found. Use the Add Student feature below.")
 
-    # ==================== ADD NEW STUDENT WITH AUTO-CLEAR ====================
+    # ----- ADD NEW STUDENT (simplified but includes essential fields) -----
     st.markdown("---")
     st.subheader("➕ Add New Student")
-
-    # Initialize session state variables for the add form if not already present
-    if "new_id" not in st.session_state:
-        st.session_state.new_id = ""
-    if "new_name" not in st.session_state:
-        st.session_state.new_name = ""
-    if "new_program" not in st.session_state:
-        st.session_state.new_program = "MS"
-    if "new_advisor" not in st.session_state:
-        st.session_state.new_advisor = "adviser1"
-    if "new_year" not in st.session_state:
-        st.session_state.new_year = 2025
-    if "new_pos" not in st.session_state:
-        st.session_state.new_pos = "Pending"
-    if "new_compre" not in st.session_state:
-        st.session_state.new_compre = "Pending"
-    if "new_proposal" not in st.session_state:
-        st.session_state.new_proposal = "Pending"
-    if "new_thesis_sub" not in st.session_state:
-        st.session_state.new_thesis_sub = "No"
-    if "new_units" not in st.session_state:
-        st.session_state.new_units = 0
-
     with st.expander("Click to expand and add a new student record"):
         with st.form("add_student_form"):
             col1, col2 = st.columns(2)
             with col1:
-                new_id = st.text_input("Student ID (unique)", max_chars=10, value=st.session_state.new_id, key="new_id_widget", help="Example: S011")
-                new_name = st.text_input("Full Name", max_chars=50, value=st.session_state.new_name, key="new_name_widget")
-                new_program = st.selectbox("Program", ["MS", "PhD"], index=0 if st.session_state.new_program == "MS" else 1, key="new_program_widget")
-                new_advisor = st.selectbox("Advisor Username", ["adviser1", "adviser2"], index=0 if st.session_state.new_advisor == "adviser1" else 1, key="new_advisor_widget")
-                new_year = st.number_input("Year Admitted", min_value=2000, max_value=2030, step=1, value=st.session_state.new_year, key="new_year_widget")
+                new_id = st.text_input("Student ID (unique)", max_chars=10)
+                new_name = st.text_input("Full Name", max_chars=50)
+                new_program = st.selectbox("Program", ["MS", "PhD"])
+                new_advisor = st.selectbox("Advisor Username", ["adviser1", "adviser2"])
+                new_year = st.number_input("Year Admitted", min_value=2000, max_value=2030, step=1, value=2025)
             with col2:
-                st.markdown("**Initial Milestone Statuses**")
-                new_pos = st.selectbox("POS Filed", ["Pending", "Completed"], index=0 if st.session_state.new_pos == "Pending" else 1, key="new_pos_widget")
-                new_compre = st.selectbox("Comprehensive Exam", ["Pending", "Passed", "Failed"], index=["Pending","Passed","Failed"].index(st.session_state.new_compre), key="new_compre_widget")
-                new_proposal = st.selectbox("Proposal Defense", ["Pending", "Completed", "Revisions Required"], index=["Pending","Completed","Revisions Required"].index(st.session_state.new_proposal), key="new_proposal_widget")
-                new_thesis_sub = st.selectbox("Thesis Submitted", ["No", "Yes"], index=0 if st.session_state.new_thesis_sub == "No" else 1, key="new_thesis_sub_widget")
-                new_units = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=st.session_state.new_units, key="new_units_widget")
+                st.markdown("**Initial Status**")
+                new_pos = st.selectbox("POS Status", ["Not Filed", "Pending", "Approved"])
+                new_gwa = st.number_input("Initial GWA", min_value=1.0, max_value=5.0, step=0.01, value=2.0)
+                new_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=0)
 
             submitted = st.form_submit_button("➕ Add Student")
-
             if submitted:
-                # Validation
                 if not new_id or not new_name:
                     st.error("❌ Student ID and Name are required.")
                 elif new_id in df["student_id"].values:
-                    st.error(f"❌ Student ID '{new_id}' already exists. Please use a unique ID.")
-                elif new_advisor not in ["adviser1", "adviser2"]:
-                    st.error("❌ Invalid advisor username. Use 'adviser1' or 'adviser2'.")
+                    st.error(f"❌ Student ID '{new_id}' already exists.")
                 else:
-                    # Add the new student
-                    new_row = pd.DataFrame([{
+                    # Create a new row with defaults from create_default_data, then override
+                    new_row = create_default_data().iloc[0].to_dict()
+                    new_row.update({
                         "student_id": new_id,
                         "name": new_name,
                         "program": new_program,
                         "advisor_username": new_advisor,
                         "year_admitted": new_year,
-                        "pos_filed": new_pos,
-                        "comp_exam": new_compre,
-                        "proposal_defense": new_proposal,
-                        "thesis_submitted": new_thesis_sub,
-                        "thesis_units_taken": new_units
-                    }])
-                    df = pd.concat([df, new_row], ignore_index=True)
+                        "pos_status": new_pos,
+                        "gwa": new_gwa,
+                        "thesis_units_taken": new_units_taken,
+                        "thesis_units_limit": 6 if new_program == "MS" else 12,
+                        "residency_max_years": 5 if new_program == "MS" else 7
+                    })
+                    new_df = pd.DataFrame([new_row])
+                    df = pd.concat([df, new_df], ignore_index=True)
                     save_data(df)
-
-                    # Clear all form fields in session state
-                    st.session_state.new_id = ""
-                    st.session_state.new_name = ""
-                    st.session_state.new_program = "MS"
-                    st.session_state.new_advisor = "adviser1"
-                    st.session_state.new_year = 2025
-                    st.session_state.new_pos = "Pending"
-                    st.session_state.new_compre = "Pending"
-                    st.session_state.new_proposal = "Pending"
-                    st.session_state.new_thesis_sub = "No"
-                    st.session_state.new_units = 0
-
-                    # Show success messages
-                    st.toast(f"🎉 Student '{new_name}' (ID: {new_id}) has been added to the system!", icon="✅")
-                    st.success(f"✅ Student '{new_name}' (ID: {new_id}) added successfully! The form has been cleared for the next entry.")
-                    st.balloons()
+                    st.success(f"✅ Student '{new_name}' added!")
                     st.rerun()
 
-    # ----- QUICK STATISTICS -----
-    st.markdown("---")
-    st.subheader("📊 Quick Statistics")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Total Students", len(df))
-    with col2:
-        st.metric("MS Students", len(df[df["program"] == "MS"]))
-    with col3:
-        st.metric("PhD Students", len(df[df["program"] == "PhD"]))
-
-# ==================== ADVISER VIEW ====================
+# ==================== ADVISER VIEW (Read-only) ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees ({st.session_state.display_name})")
     advisees = df[df["advisor_username"] == st.session_state.username].copy()
@@ -304,32 +431,31 @@ elif role == "Faculty Adviser":
     if len(advisees) == 0:
         st.warning("No students assigned to you.")
     else:
-        advisees["units_status"] = advisees.apply(
-            lambda row: get_warning_text(row["program"], row["thesis_units_taken"]),
-            axis=1
-        )
-        display_cols = ["student_id", "name", "program", "year_admitted",
-                        "pos_filed", "comp_exam", "proposal_defense",
-                        "thesis_submitted", "thesis_units_taken", "units_status"]
+        # Add warning column
+        advisees["warnings"] = advisees.apply(lambda row: "\n".join(get_all_warnings(row)), axis=1)
+        display_cols = ["student_id", "name", "program", "year_admitted", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status", "warnings"]
         st.dataframe(advisees[display_cols], width='stretch')
 
         st.markdown("---")
-        st.subheader("📌 Student Details")
+        st.subheader("📌 Detailed View")
         for _, row in advisees.iterrows():
             with st.expander(f"{row['name']} ({row['student_id']})"):
                 col1, col2 = st.columns(2)
                 with col1:
                     st.write(f"**Program:** {row['program']}")
-                    st.write(f"**Year Admitted:** {row['year_admitted']}")
-                    st.write(f"**POS Filed:** {row['pos_filed']}")
+                    st.write(f"**Admitted:** {row['year_admitted']}")
+                    st.write(f"**GWA:** {row['gwa']}")
+                    st.write(f"**POS Status:** {row['pos_status']}")
+                    st.write(f"**Thesis Units:** {row['thesis_units_taken']}/{row['thesis_units_limit']}")
                 with col2:
-                    st.write(f"**Comprehensive Exam:** {row['comp_exam']}")
-                    st.write(f"**Proposal Defense:** {row['proposal_defense']}")
-                    st.write(f"**Thesis Submitted:** {row['thesis_submitted']}")
-                st.write(f"**Thesis Units:** {get_warning_text(row['program'], row['thesis_units_taken'])}")
-    st.info("📌 Read-only access. For updates, contact SESAM Staff.")
+                    st.write(f"**General Exam:** {row['general_exam_status']}")
+                    st.write(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
+                    st.write(f"**Final Exam:** {row['final_exam_status']}")
+                    st.write(f"**Residency:** {row['residency_years_used']}/{row['residency_max_years']} years")
+                st.warning(row["warnings"]) if any("⚠️" in row["warnings"] for _ in [1]) else st.success(row["warnings"])
+    st.info("📌 Read-only view. For updates, contact SESAM Staff.")
 
-# ==================== STUDENT VIEW ====================
+# ==================== STUDENT VIEW (Read-only) ====================
 elif role == "Student":
     st.subheader(f"📘 Your Academic Progress ({st.session_state.display_name})")
     student_record = df[df["name"] == st.session_state.display_name]
@@ -337,34 +463,49 @@ elif role == "Student":
         st.error("Your record not found. Please contact SESAM Staff.")
     else:
         student = student_record.iloc[0]
+        warnings = get_all_warnings(student)
+        st.warning("\n".join(warnings)) if any("⚠️" in w for w in warnings) else st.success("\n".join(warnings))
+
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Student ID", student["student_id"])
             st.metric("Program", student["program"])
+            st.metric("Year Admitted", student["year_admitted"])
         with col2:
             advisor_display = USERS.get(student["advisor_username"], {}).get("display_name", student["advisor_username"])
             st.metric("Advisor", advisor_display)
-            st.metric("Year Admitted", student["year_admitted"])
+            st.metric("GWA", f"{student['gwa']:.2f}")
+            st.metric("POS Status", student["pos_status"])
         with col3:
             limit = get_thesis_limit(student["program"])
             st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
-            if student["thesis_units_taken"] > limit:
-                st.error("⚠️ You have exceeded the allowed thesis units. Please consult your adviser.")
+            st.metric("Residency", f"{student['residency_years_used']} / {student['residency_max_years']} years")
+            st.metric("Final Exam", student["final_exam_status"])
 
         st.markdown("---")
-        st.subheader("📌 Your Milestone Status")
+        st.subheader("📌 Milestone Status")
         milestone_df = pd.DataFrame({
-            "Milestone": ["Plan of Study (POS)", "Comprehensive Exam", "Proposal Defense", "Thesis Submission"],
+            "Milestone": [
+                "Plan of Study (POS)",
+                "General Exam (MS) / Qualifying Exam (PhD)",
+                "Written Comprehensive (PhD)",
+                "Oral Comprehensive (PhD)",
+                "Thesis/Dissertation Outline",
+                "Final Examination"
+            ],
             "Status": [
-                student["pos_filed"],
-                student["comp_exam"],
-                student["proposal_defense"],
-                student["thesis_submitted"]
+                student["pos_status"],
+                student["general_exam_status"] if student["program"]=="MS" else student["qualifying_exam_status"],
+                student["written_comprehensive_status"] if student["program"]=="PhD" else "N/A",
+                student["oral_comprehensive_status"] if student["program"]=="PhD" else "N/A",
+                student["thesis_outline_approved"],
+                student["final_exam_status"]
             ]
         })
         st.dataframe(milestone_df, width='stretch', hide_index=True)
+
         st.info("📌 Read-only view. For updates, contact your adviser or SESAM Staff.")
 
 # ==================== FOOTER ====================
 st.markdown("---")
-st.caption("SESAM KMIS – Student Module V1 | Based on ISSP 2026-2031")
+st.caption("SESAM KMIS – Student Module V2 | Based on UPLB Graduate School Rules (2009)")
