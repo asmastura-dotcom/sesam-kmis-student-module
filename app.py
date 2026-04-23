@@ -864,7 +864,6 @@ if role == "SESAM Staff":
                 ay_start = int(selected_ay_range.split("-")[0])
             with col7:
                 semester = st.selectbox("Semester *", options=SEMESTERS)
-            st.caption(f"📅 {format_ay(ay_start, semester)}")
             
             col8, col9 = st.columns(2)
             with col8:
@@ -873,15 +872,6 @@ if role == "SESAM Staff":
                 st.empty()
             
             st.markdown("---")
-            st.markdown("### Initial Milestone Status (optional)")
-            col10, col11, col12 = st.columns(3)
-            with col10:
-                gwa = st.number_input("Initial GWA", min_value=1.0, max_value=5.0, step=0.01, value=2.0, help="1.0 best, 5.0 failing")
-            with col11:
-                thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=0)
-                st.caption(get_thesis_pattern_description(program))
-            with col12:
-                pos_status = st.selectbox("POS Status", ["Not Filed", "Pending", "Approved"])
             
             col13, col14, col15 = st.columns(3)
             with col13:
@@ -1001,10 +991,10 @@ elif role == "Faculty Adviser":
                     col1, col2 = st.columns(2)
                     with col1:
                         st.markdown(f"**Program:** {row['program']}")
-                        st.markdown(f"**Academic Year:** {format_ay(row['ay_start'], row['semester'])}")
+                        st.markdown(f"**Academic Year Admitted:** {format_ay(row['ay_start'], row['semester'])}")
                         st.markdown(f"**GWA:** {row['gwa']}")
                         st.markdown(f"**POS Status:** {row['pos_status']}")
-                        st.markdown(f"**Thesis Units:** {row['thesis_units_taken']}/{row['thesis_units_limit']}")
+                        st.markdown(f"**Thesis Units Taken:** {row['thesis_units_taken']}/{row['thesis_units_limit']}")
                     with col2:
                         st.markdown(f"**General Exam:** {row['general_exam_status']}")
                         st.markdown(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
