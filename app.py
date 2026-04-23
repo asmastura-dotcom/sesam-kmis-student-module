@@ -1,7 +1,7 @@
 """
 SESAM KMIS - Student Module V2 (Graduate School Rules Integration)
-Author: [Your Name]
-Date: [Current Date]
+Author: Alyssa Fatmah S. Mastura
+Date: April 23, 2026
 Description: Tracks graduate student milestones, thesis units, exams, residency, LOA/AWOL, etc.
 Based on UPLB Graduate School Policies, Rules and Regulations (2009).
 """
