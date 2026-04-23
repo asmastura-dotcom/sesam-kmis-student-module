@@ -10,6 +10,8 @@ import streamlit as st
 import pandas as pd
 import os
 from datetime import date
+from PIL import Image
+import io
 
 # ==================== PAGE CONFIGURATION ====================
 st.set_page_config(
@@ -47,11 +49,9 @@ PROGRAMS = [
 ]
 
 def is_master_program(program):
-    """Return True if program is a master's degree (thesis limit 6, residency 5 years)."""
     return program.startswith("MS") or program.startswith("Master") or program.startswith("Professional Masters")
 
 def is_phd_program(program):
-    """Return True if program is a doctoral degree (thesis limit 12, residency 7 years)."""
     return program.startswith("PhD")
 
 def get_thesis_limit_from_program(program):
@@ -59,6 +59,41 @@ def get_thesis_limit_from_program(program):
 
 def get_residency_max_from_program(program):
     return 5 if is_master_program(program) else 7
+
+# ==================== PROFILE PICTURE HELPER ====================
+PIC_FOLDER = "profile_pics"
+if not os.path.exists(PIC_FOLDER):
+    os.makedirs(PIC_FOLDER)
+
+def save_profile_picture(student_id, uploaded_file):
+    """Save uploaded image to profile_pics folder. Returns filename."""
+    if uploaded_file is None:
+        return None
+    # Get file extension
+    ext = uploaded_file.name.split('.')[-1].lower()
+    if ext not in ['jpg', 'jpeg', 'png', 'gif']:
+        st.error("Unsupported file format. Use JPG, PNG, or GIF.")
+        return None
+    filename = f"{student_id}.{ext}"
+    filepath = os.path.join(PIC_FOLDER, filename)
+    with open(filepath, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    return filename
+
+def delete_profile_picture(student_id):
+    """Remove all picture files for a given student (any extension)."""
+    for f in os.listdir(PIC_FOLDER):
+        if f.startswith(student_id + "."):
+            os.remove(os.path.join(PIC_FOLDER, f))
+            return True
+    return False
+
+def get_profile_picture_path(student_id):
+    """Return file path to profile picture if exists, else None."""
+    for f in os.listdir(PIC_FOLDER):
+        if f.startswith(student_id + "."):
+            return os.path.join(PIC_FOLDER, f)
+    return None
 
 # ==================== LOGIN PAGE ====================
 if not st.session_state.logged_in:
@@ -96,6 +131,7 @@ def create_default_data():
         "program": [PROGRAMS[0], PROGRAMS[1], PROGRAMS[0], PROGRAMS[1], PROGRAMS[0]],
         "advisor_username": ["adviser1", "adviser2", "adviser1", "adviser2", "adviser1"],
         "year_admitted": [2024, 2023, 2024, 2022, 2024],
+        "profile_pic": ["", "", "", "", ""],
         # Plan of Study
         "pos_status": ["Approved", "Approved", "Pending", "Approved", "Pending"],
         "pos_submitted_date": ["2024-01-15", "2023-06-10", "", "2022-09-01", ""],
@@ -362,11 +398,9 @@ def safe_index(options, value):
         return 0
 
 def format_ay(year):
-    """Convert year to Academic Year display (e.g., 2026 -> A.Y. 2026-2027 (1st Sem))."""
     return f"A.Y. {year}-{year+1} (1st Sem)"
 
 def filter_dataframe(search_term, data):
-    """Filter dataframe by name or student_id, case‑insensitive, partial match."""
     if not search_term:
         return data
     mask = (
@@ -379,22 +413,63 @@ def filter_dataframe(search_term, data):
 if role == "SESAM Staff":
     st.subheader("📋 All Students")
     
-    # ----- SEARCH BAR FOR THE TABLE -----
+    # ----- CUSTOM FILTERS SECTION -----
+    with st.expander("🔍 Advanced Filters (click to expand)"):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            program_options = sorted(df["program"].unique())
+            selected_programs = st.multiselect("Program", program_options, default=program_options)
+            advisor_names = [USERS.get(u, {}).get("display_name", u) for u in df["advisor_username"].unique()]
+            advisor_username_map = {USERS.get(u, {}).get("display_name", u): u for u in df["advisor_username"].unique()}
+            selected_advisor_display = st.multiselect("Advisor", advisor_names, default=advisor_names)
+            selected_advisors = [advisor_username_map[name] for name in selected_advisor_display]
+            min_year = int(df["year_admitted"].min())
+            max_year = int(df["year_admitted"].max())
+            year_range = st.slider("Year Admitted", min_year, max_year, (min_year, max_year))
+        with col2:
+            pos_options = df["pos_status"].unique().tolist()
+            selected_pos = st.multiselect("POS Status", pos_options, default=pos_options)
+            final_options = df["final_exam_status"].unique().tolist()
+            selected_final = st.multiselect("Final Exam Status", final_options, default=final_options)
+            gwa_min = float(df["gwa"].min())
+            gwa_max = float(df["gwa"].max())
+            gwa_range = st.slider("GWA", gwa_min, gwa_max, (gwa_min, gwa_max), step=0.05)
+        with col3:
+            thesis_min = int(df["thesis_units_taken"].min())
+            thesis_max = int(df["thesis_units_taken"].max())
+            thesis_range = st.slider("Thesis Units Taken", thesis_min, thesis_max, (thesis_min, thesis_max))
+            if st.button("Reset All Filters"):
+                st.session_state.clear()
+                st.rerun()
+    
+    # Apply filters
+    filtered = df.copy()
+    filtered = filtered[filtered["program"].isin(selected_programs)]
+    filtered = filtered[filtered["advisor_username"].isin(selected_advisors)]
+    filtered = filtered[(filtered["year_admitted"] >= year_range[0]) & (filtered["year_admitted"] <= year_range[1])]
+    filtered = filtered[filtered["pos_status"].isin(selected_pos)]
+    filtered = filtered[filtered["final_exam_status"].isin(selected_final)]
+    filtered = filtered[(filtered["gwa"] >= gwa_range[0]) & (filtered["gwa"] <= gwa_range[1])]
+    filtered = filtered[(filtered["thesis_units_taken"] >= thesis_range[0]) & (filtered["thesis_units_taken"] <= thesis_range[1])]
+    
+    # ----- SEARCH BAR FOR THE TABLE (name/ID) -----
     search = st.text_input("🔍 Search by name or student ID", placeholder="e.g., Juan or S001")
-    filtered_df = filter_dataframe(search, df)
-    st.dataframe(filtered_df, width='stretch', height=400)
+    filtered = filter_dataframe(search, filtered)
+    
+    st.dataframe(filtered, width='stretch', height=400)
 
     st.markdown("---")
     st.subheader("✏️ Update Student Record")
 
-    if len(filtered_df) > 0:
-        # ----- SEARCHABLE STUDENT SELECTION (using the filtered list) -----
+    if len(filtered) > 0:
+        # ----- SEARCHABLE STUDENT SELECTION -----
         st.subheader("🔍 Search Student to Edit")
-        edit_search = st.text_input("Type part of the student's name:", value="", placeholder="e.g., Juan or Maria", key="edit_search")
+        edit_search = st.text_input("Type name or student ID", value="", placeholder="e.g., Juan or S001", key="edit_search")
         if edit_search:
-            edit_filtered_names = filtered_df[filtered_df["name"].str.contains(edit_search, case=False, na=False)]["name"].tolist()
+            edit_filtered = filter_dataframe(edit_search, filtered)
+            edit_filtered_names = edit_filtered["name"].tolist()
         else:
-            edit_filtered_names = filtered_df["name"].tolist()
+            edit_filtered_names = filtered["name"].tolist()
         
         if not edit_filtered_names:
             st.warning("No matching students found.")
@@ -403,6 +478,35 @@ if role == "SESAM Staff":
         student_name = st.selectbox("Select Student", edit_filtered_names)
         student = df[df["name"] == student_name].iloc[0].copy()
         student_id = student["student_id"]
+
+        # ----- PROFILE PICTURE SECTION -----
+        st.markdown("---")
+        st.subheader("📸 Student Profile Picture")
+        col_pic1, col_pic2 = st.columns([1, 2])
+        with col_pic1:
+            pic_path = get_profile_picture_path(student_id)
+            if pic_path and os.path.exists(pic_path):
+                st.image(pic_path, width=150, caption="Current Picture")
+            else:
+                st.info("No profile picture uploaded.")
+        with col_pic2:
+            uploaded_file = st.file_uploader("Upload new profile picture (JPG, PNG, GIF)", type=["jpg", "jpeg", "png", "gif"], key=f"pic_{student_id}")
+            if uploaded_file:
+                new_filename = save_profile_picture(student_id, uploaded_file)
+                if new_filename:
+                    # Update CSV
+                    df.loc[df["student_id"] == student_id, "profile_pic"] = new_filename
+                    save_data(df)
+                    st.success("Profile picture updated!")
+                    st.rerun()
+            if st.button("🗑️ Delete current picture", key=f"del_pic_{student_id}"):
+                if delete_profile_picture(student_id):
+                    df.loc[df["student_id"] == student_id, "profile_pic"] = ""
+                    save_data(df)
+                    st.success("Profile picture deleted.")
+                    st.rerun()
+                else:
+                    st.warning("No picture to delete.")
 
         # Display warnings in RED
         warnings = get_all_warnings(student)
@@ -430,6 +534,7 @@ if role == "SESAM Staff":
             if student["thesis_units_taken"] > limit:
                 st.error("⚠️ Units exceeded!")
 
+        # Existing edit tabs
         tab1, tab2, tab3, tab4, tab5 = st.tabs(["Coursework & Thesis", "Exams", "Residency & Leave", "Graduation", "Other"])
 
         with tab1:
@@ -543,23 +648,33 @@ if role == "SESAM Staff":
         st.markdown("---")
         st.subheader("🗑️ Delete Student")
         with st.expander("Click to expand and delete a student record"):
-            delete_name = st.selectbox("Select Student to Delete", filtered_df["name"])
-            delete_id = df[df["name"] == delete_name]["student_id"].values[0]
-            confirm = st.checkbox("⚠️ I confirm that I want to permanently delete this student. This action cannot be undone.")
-            if confirm and st.button("Yes, Delete This Student"):
-                df = df[df["student_id"] != delete_id]
-                save_data(df)
-                st.success(f"✅ Student '{delete_name}' has been deleted.")
-                st.rerun()
-            elif not confirm and st.button("Yes, Delete This Student"):
-                st.warning("Please check the confirmation box before deleting.")
+            delete_search = st.text_input("Search student to delete", placeholder="name or ID", key="delete_search")
+            delete_filtered = filter_dataframe(delete_search, filtered) if delete_search else filtered
+            if len(delete_filtered) == 0:
+                st.warning("No matching students to delete.")
+            else:
+                delete_name = st.selectbox("Select Student to Delete", delete_filtered["name"])
+                delete_id = df[df["name"] == delete_name]["student_id"].values[0]
+                confirm = st.checkbox("⚠️ I confirm that I want to permanently delete this student. This action cannot be undone.")
+                if confirm and st.button("Yes, Delete This Student"):
+                    # Also delete profile picture
+                    delete_profile_picture(delete_id)
+                    df = df[df["student_id"] != delete_id]
+                    save_data(df)
+                    st.success(f"✅ Student '{delete_name}' has been deleted.")
+                    st.rerun()
+                elif not confirm and st.button("Yes, Delete This Student"):
+                    st.warning("Please check the confirmation box before deleting.")
 
         # ----- RESET ALL DATA BUTTON (restores only S001-S005) -----
         st.markdown("---")
         st.subheader("🔄 Reset All Data")
-        with st.expander("⚠️ Click to reset all student data to default samples (S001–S005). This will delete all other students."):
+        with st.expander("⚠️ Click to reset all student data to default samples (S001–S005). This will delete all other students and their pictures."):
             reset_confirm = st.checkbox("I understand that this will permanently delete ALL current student data and restore only the sample records (S001–S005).")
             if reset_confirm and st.button("Yes, Reset All Data"):
+                # Delete all profile pictures
+                for f in os.listdir(PIC_FOLDER):
+                    os.remove(os.path.join(PIC_FOLDER, f))
                 df = create_default_data()
                 save_data(df)
                 st.success("✅ Data has been reset to the default sample students (S001–S005).")
@@ -568,7 +683,7 @@ if role == "SESAM Staff":
                 st.warning("Please check the confirmation box before resetting.")
 
     else:
-        st.info("No students found. Use the Add Student feature below.")
+        st.info("No students match the current filters. Adjust filters or add a new student below.")
 
     # ----- ADD NEW STUDENT -----
     st.markdown("---")
@@ -637,7 +752,8 @@ if role == "SESAM Staff":
                         "graduation_approved": "No",
                         "graduation_date": "",
                         "re_admission_status": "Not Applicable",
-                        "re_admission_date": ""
+                        "re_admission_date": "",
+                        "profile_pic": ""
                     })
                     new_df = pd.DataFrame([new_row])
                     df = pd.concat([df, new_df], ignore_index=True)
@@ -653,7 +769,6 @@ elif role == "Faculty Adviser":
     if len(advisees) == 0:
         st.warning("No students assigned to you.")
     else:
-        # ----- SEARCH BAR FOR ADVISER TABLE -----
         search_adv = st.text_input("🔍 Search by name or student ID", placeholder="e.g., Juan or S001")
         filtered_advisees = filter_dataframe(search_adv, advisees)
         
@@ -661,28 +776,35 @@ elif role == "Faculty Adviser":
         display_cols = ["student_id", "name", "program", "year_admitted", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status", "warnings"]
         st.dataframe(filtered_advisees[display_cols], width='stretch')
         
-        st.markdown("---")
-        st.subheader("📌 Detailed View")
-        for _, row in filtered_advisees.iterrows():
-            with st.expander(f"{row['name']} ({row['student_id']})"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.markdown(f"**Program:** {row['program']}")
-                    st.markdown(f"**Admitted:** {format_ay(row['year_admitted'])}")
-                    st.markdown(f"**GWA:** {row['gwa']}")
-                    st.markdown(f"**POS Status:** {row['pos_status']}")
-                    st.markdown(f"**Thesis Units:** {row['thesis_units_taken']}/{row['thesis_units_limit']}")
-                with col2:
-                    st.markdown(f"**General Exam:** {row['general_exam_status']}")
-                    st.markdown(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
-                    st.markdown(f"**Final Exam:** {row['final_exam_status']}")
-                    st.markdown(f"**Residency:** {row['residency_years_used']}/{get_residency_max(row['program'])} years")
-                warnings_text = row["warnings"]
-                if any("⚠️" in w for w in warnings_text.split("\n")):
-                    for w in warnings_text.split("\n"):
-                        st.error(w)
-                else:
-                    st.success(warnings_text)
+        if len(filtered_advisees) > 0:
+            st.markdown("---")
+            st.subheader("📌 Detailed View")
+            for _, row in filtered_advisees.iterrows():
+                with st.expander(f"{row['name']} ({row['student_id']})"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.markdown(f"**Program:** {row['program']}")
+                        st.markdown(f"**Admitted:** {format_ay(row['year_admitted'])}")
+                        st.markdown(f"**GWA:** {row['gwa']}")
+                        st.markdown(f"**POS Status:** {row['pos_status']}")
+                        st.markdown(f"**Thesis Units:** {row['thesis_units_taken']}/{row['thesis_units_limit']}")
+                    with col2:
+                        st.markdown(f"**General Exam:** {row['general_exam_status']}")
+                        st.markdown(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
+                        st.markdown(f"**Final Exam:** {row['final_exam_status']}")
+                        st.markdown(f"**Residency:** {row['residency_years_used']}/{get_residency_max(row['program'])} years")
+                    # Show profile picture if exists
+                    pic_path = get_profile_picture_path(row["student_id"])
+                    if pic_path and os.path.exists(pic_path):
+                        st.image(pic_path, width=100, caption="Profile Picture")
+                    warnings_text = row["warnings"]
+                    if any("⚠️" in w for w in warnings_text.split("\n")):
+                        for w in warnings_text.split("\n"):
+                            st.error(w)
+                    else:
+                        st.success(warnings_text)
+        else:
+            st.info("No matching students.")
     st.info("📌 Read-only view. For updates, contact SESAM Staff.")
 
 # ==================== STUDENT VIEW ====================
@@ -700,21 +822,45 @@ elif role == "Student":
         else:
             st.success("\n".join(warnings))
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Student ID", student["student_id"])
-            st.metric("Program", student["program"])
-            st.metric("Year Admitted", format_ay(student["year_admitted"]))
-        with col2:
-            advisor_display = USERS.get(student["advisor_username"], {}).get("display_name", student["advisor_username"])
-            st.metric("Advisor", advisor_display)
-            st.metric("GWA", f"{student['gwa']:.2f}")
-            st.metric("POS Status", student["pos_status"])
-        with col3:
-            limit = get_thesis_limit(student["program"])
-            st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
-            st.metric("Residency", f"{student['residency_years_used']} / {get_residency_max(student['program'])} years")
-            st.metric("Final Exam", student["final_exam_status"])
+        # Show profile picture if exists
+        pic_path = get_profile_picture_path(student["student_id"])
+        if pic_path and os.path.exists(pic_path):
+            col_pic, col_info = st.columns([1, 2])
+            with col_pic:
+                st.image(pic_path, width=150, caption="Your Profile Picture")
+            with col_info:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Student ID", student["student_id"])
+                    st.metric("Program", student["program"])
+                    st.metric("Year Admitted", format_ay(student["year_admitted"]))
+                with col2:
+                    advisor_display = USERS.get(student["advisor_username"], {}).get("display_name", student["advisor_username"])
+                    st.metric("Advisor", advisor_display)
+                    st.metric("GWA", f"{student['gwa']:.2f}")
+                    st.metric("POS Status", student["pos_status"])
+                with col3:
+                    limit = get_thesis_limit(student["program"])
+                    st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
+                    st.metric("Residency", f"{student['residency_years_used']} / {get_residency_max(student['program'])} years")
+                    st.metric("Final Exam", student["final_exam_status"])
+        else:
+            # No picture, show normally
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Student ID", student["student_id"])
+                st.metric("Program", student["program"])
+                st.metric("Year Admitted", format_ay(student["year_admitted"]))
+            with col2:
+                advisor_display = USERS.get(student["advisor_username"], {}).get("display_name", student["advisor_username"])
+                st.metric("Advisor", advisor_display)
+                st.metric("GWA", f"{student['gwa']:.2f}")
+                st.metric("POS Status", student["pos_status"])
+            with col3:
+                limit = get_thesis_limit(student["program"])
+                st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
+                st.metric("Residency", f"{student['residency_years_used']} / {get_residency_max(student['program'])} years")
+                st.metric("Final Exam", student["final_exam_status"])
 
         st.markdown("---")
         st.subheader("📌 Milestone Status")
