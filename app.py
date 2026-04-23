@@ -62,11 +62,11 @@ if not st.session_state.logged_in:
             st.error("❌ Invalid username or password")
     st.stop()
 
-# ==================== DATA LOADING WITH ENHANCED SCHEMA ====================
+# ==================== DATA LOADING ====================
 DATA_FILE = "students.csv"
 
 def create_default_data():
-    """Create sample data with all required fields, using correct numeric types."""
+    """Create sample data with all required fields."""
     return pd.DataFrame({
         "student_id": ["S001", "S002", "S003", "S004", "S005"],
         "name": ["Juan Cruz", "Maria Santos", "Jose Rizal", "Ana Reyes", "Carlos Lopez"],
@@ -81,7 +81,7 @@ def create_default_data():
         "gwa": [1.75, 1.85, 2.10, 1.95, 2.05],
         "total_units_taken": [12, 18, 9, 24, 6],
         "total_units_required": [24, 24, 24, 24, 24],
-        # Thesis / Dissertation
+        # Thesis
         "thesis_units_taken": [3, 8, 2, 12, 1],
         "thesis_units_limit": [6, 12, 6, 12, 6],
         "thesis_outline_approved": ["No", "Yes", "No", "Yes", "No"],
@@ -127,13 +127,13 @@ def load_data():
     else:
         df = create_default_data()
     
-    # Ensure all required columns exist (add missing with defaults)
+    # Ensure all required columns exist
     default_df = create_default_data()
     for col in default_df.columns:
         if col not in df.columns:
             df[col] = default_df[col]
     
-    # Convert numeric columns, replacing NaN with 0
+    # Convert numeric columns
     numeric_int_cols = [
         "thesis_units_taken", "thesis_units_limit",
         "total_units_taken", "total_units_required",
@@ -143,23 +143,14 @@ def load_data():
     for col in numeric_int_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
     
-    # GWA is float
     df["gwa"] = pd.to_numeric(df["gwa"], errors='coerce').fillna(2.0).astype(float)
-    
-    # Year admitted as int
     df["year_admitted"] = pd.to_numeric(df["year_admitted"], errors='coerce').fillna(2024).astype(int)
     
-    # Force residency_max_years based on program (fix any invalid values)
+    # Force correct residency max based on program
     for idx, row in df.iterrows():
         program = str(row["program"]).strip()
-        if program == "MS":
-            df.at[idx, "residency_max_years"] = 5
-        elif program == "PhD":
-            df.at[idx, "residency_max_years"] = 7
-        else:
-            df.at[idx, "residency_max_years"] = 5  # default
+        df.at[idx, "residency_max_years"] = 5 if program == "MS" else 7
     
-    # Save the cleaned data back to CSV
     df.to_csv(DATA_FILE, index=False)
     return df
 
@@ -172,7 +163,7 @@ def get_thesis_limit(program):
 def get_residency_max(program):
     return 5 if program == "MS" else 7
 
-# ==================== WARNING FUNCTIONS (FIXED) ====================
+# ==================== WARNING FUNCTIONS ====================
 def get_warning_text(program, units_taken):
     limit = 6 if program == "MS" else 12
     try:
@@ -187,15 +178,11 @@ def get_warning_text(program, units_taken):
 def check_residency_warning(row):
     used = row.get("residency_years_used", 0)
     program = str(row.get("program", "MS")).strip()
-    
     try:
         used = float(used)
     except:
         return "⚠️ Residency data error"
-    
-    # Always derive max_years from program (ignore stored value)
     max_years = 5 if program == "MS" else 7
-    
     if used >= max_years:
         return f"⚠️ Residency limit reached ({used}/{max_years} years). Extension required."
     elif used >= max_years - 1:
@@ -207,9 +194,6 @@ def check_gwa_warning(gwa):
         gwa = float(gwa)
     except:
         return "⚠️ GWA data error"
-    # UP Grading System: 1.00 highest, 5.00 lowest
-    # Good standing: GWA ≤ 2.00
-    # Problematic: GWA > 2.00
     if gwa > 2.00:
         return f"⚠️ GWA {gwa:.2f} is above 2.00 – may affect exam eligibility and graduation"
     return f"✅ GWA {gwa:.2f} – good standing"
@@ -277,41 +261,31 @@ def check_comprehensive_exam_deadline(row):
     return "✅ Comprehensive exam on track"
 
 def get_all_warnings(row):
-    """Return list of warnings (only the problematic ones, no ✅ lines)"""
     warnings = []
-    # Thesis units warning
     thesis_warn = get_warning_text(row["program"], row["thesis_units_taken"])
     if "⚠️" in thesis_warn:
         warnings.append(thesis_warn)
-    # Residency warning
     res_warn = check_residency_warning(row)
     if "⚠️" in res_warn:
         warnings.append(res_warn)
-    # GWA warning
     gwa_warn = check_gwa_warning(row["gwa"])
     if "⚠️" in gwa_warn:
         warnings.append(gwa_warn)
-    # AWOL warning
     awol_warn = check_awol_warning(row)
     if "⚠️" in awol_warn:
         warnings.append(awol_warn)
-    # LOA warning
     loa_warn = check_loa_warning(row)
     if "⚠️" in loa_warn:
         warnings.append(loa_warn)
-    # Outline deadline
     outline_warn = check_thesis_outline_deadline(row)
     if "⚠️" in outline_warn:
         warnings.append(outline_warn)
-    # Qualifying exam deadline
     qual_warn = check_qualifying_exam_deadline(row)
     if "⚠️" in qual_warn:
         warnings.append(qual_warn)
-    # Comprehensive exam deadline
     comp_warn = check_comprehensive_exam_deadline(row)
     if "⚠️" in comp_warn:
         warnings.append(comp_warn)
-    
     if not warnings:
         return ["✅ All rules satisfied"]
     return warnings
@@ -340,14 +314,13 @@ st.markdown("---")
 
 role = st.session_state.role
 
-# Helper to safely get index for selectbox
 def safe_index(options, value):
     try:
         return options.index(value)
     except ValueError:
         return 0
 
-# ==================== STAFF VIEW (Full Edit) ====================
+# ==================== STAFF VIEW ====================
 if role == "SESAM Staff":
     st.subheader("📋 All Students")
     st.dataframe(df, width='stretch', height=400)
@@ -359,14 +332,12 @@ if role == "SESAM Staff":
         student_id = st.selectbox("Select Student", df["student_id"])
         student = df[df["student_id"] == student_id].iloc[0].copy()
 
-        # Display warnings
         warnings = get_all_warnings(student)
         if any("⚠️" in w for w in warnings):
             st.warning("\n".join(warnings))
         else:
             st.success("\n".join(warnings))
 
-        # Basic info display
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Student", student["name"])
@@ -381,7 +352,6 @@ if role == "SESAM Staff":
             if student["thesis_units_taken"] > limit:
                 st.error("⚠️ Units exceeded!")
 
-        # Editable fields organized in tabs
         tab1, tab2, tab3, tab4, tab5 = st.tabs(["Coursework & Thesis", "Exams", "Residency & Leave", "Graduation", "Other"])
 
         with tab1:
@@ -414,23 +384,18 @@ if role == "SESAM Staff":
         with tab2:
             with st.form("exams_form"):
                 st.subheader("Examinations")
-                # Qualifying exam
                 qual_options = ["N/A", "Not Taken", "Passed", "Failed", "Re-exam Scheduled"]
                 qualifying = st.selectbox("Qualifying Exam Status (PhD)", qual_options, index=safe_index(qual_options, student["qualifying_exam_status"]))
                 qualifying_date = st.text_input("Qualifying Exam Passed Date", student["qualifying_exam_passed_date"])
-                # Written comprehensive
                 wcomp_options = ["N/A", "Not Taken", "Passed", "Failed"]
                 written_comp = st.selectbox("Written Comprehensive Status", wcomp_options, index=safe_index(wcomp_options, student["written_comprehensive_status"]))
                 written_comp_date = st.text_input("Written Comprehensive Passed Date", student["written_comprehensive_passed_date"])
-                # Oral comprehensive
                 ocomp_options = ["N/A", "Not Taken", "Passed", "Failed"]
                 oral_comp = st.selectbox("Oral Comprehensive Status", ocomp_options, index=safe_index(ocomp_options, student["oral_comprehensive_status"]))
                 oral_comp_date = st.text_input("Oral Comprehensive Passed Date", student["oral_comprehensive_passed_date"])
-                # General exam (MS)
                 gen_options = ["N/A", "Not Taken", "Passed", "Failed"]
                 general = st.selectbox("General Exam Status (MS)", gen_options, index=safe_index(gen_options, student["general_exam_status"]))
                 general_date = st.text_input("General Exam Passed Date", student["general_exam_passed_date"])
-                # Final exam
                 final_options = ["Not Taken", "Passed", "Failed", "Re-exam Scheduled"]
                 final = st.selectbox("Final Exam Status", final_options, index=safe_index(final_options, student["final_exam_status"]))
                 final_date = st.text_input("Final Exam Passed Date", student["final_exam_passed_date"])
@@ -445,7 +410,6 @@ if role == "SESAM Staff":
             with st.form("residency_form"):
                 st.subheader("Residency")
                 residency_used = st.number_input("Years of Residence Used", min_value=0, max_value=10, step=1, value=int(student["residency_years_used"]))
-                # Always show the correct max from program (not from stored value)
                 max_years = get_residency_max(student["program"])
                 st.info(f"Maximum allowed: {max_years} years")
                 extension_count = st.number_input("Number of Extensions Granted", min_value=0, max_value=3, step=1, value=int(student["extension_count"]))
@@ -500,7 +464,7 @@ if role == "SESAM Staff":
     else:
         st.info("No students found. Use the Add Student feature below.")
 
-    # ----- ADD NEW STUDENT (simplified but includes essential fields) -----
+    # ----- ADD NEW STUDENT (FIXED: resets all progress) -----
     st.markdown("---")
     st.subheader("➕ Add New Student")
     with st.expander("Click to expand and add a new student record"):
@@ -514,8 +478,7 @@ if role == "SESAM Staff":
                 new_year = st.number_input("Year Admitted", min_value=2000, max_value=2030, step=1, value=2025)
             with col2:
                 st.markdown("**Initial Status**")
-                pos_options = ["Not Filed", "Pending", "Approved"]
-                new_pos = st.selectbox("POS Status", pos_options)
+                new_pos = st.selectbox("POS Status", ["Not Filed", "Pending", "Approved"])
                 new_gwa = st.number_input("Initial GWA", min_value=1.0, max_value=5.0, step=0.01, value=2.0)
                 new_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=0)
 
@@ -526,8 +489,8 @@ if role == "SESAM Staff":
                 elif new_id in df["student_id"].values:
                     st.error(f"❌ Student ID '{new_id}' already exists.")
                 else:
-                    # Create a new row with defaults from create_default_data, then override
                     new_row = create_default_data().iloc[0].to_dict()
+                    # Reset all progress fields
                     new_row.update({
                         "student_id": new_id,
                         "name": new_name,
@@ -535,10 +498,41 @@ if role == "SESAM Staff":
                         "advisor_username": new_advisor,
                         "year_admitted": new_year,
                         "pos_status": new_pos,
+                        "pos_submitted_date": "",
+                        "pos_approved_date": "",
                         "gwa": new_gwa,
+                        "total_units_taken": 0,
+                        "total_units_required": 24,
                         "thesis_units_taken": new_units_taken,
                         "thesis_units_limit": 6 if new_program == "MS" else 12,
-                        "residency_max_years": 5 if new_program == "MS" else 7
+                        "thesis_outline_approved": "No",
+                        "thesis_outline_approved_date": "",
+                        "thesis_status": "Not Started",
+                        "qualifying_exam_status": "N/A",
+                        "qualifying_exam_passed_date": "",
+                        "written_comprehensive_status": "N/A",
+                        "written_comprehensive_passed_date": "",
+                        "oral_comprehensive_status": "N/A",
+                        "oral_comprehensive_passed_date": "",
+                        "general_exam_status": "N/A",
+                        "general_exam_passed_date": "",
+                        "final_exam_status": "Not Taken",
+                        "final_exam_passed_date": "",
+                        "residency_years_used": 0,
+                        "residency_max_years": 5 if new_program == "MS" else 7,
+                        "extension_count": 0,
+                        "extension_end_date": "",
+                        "loa_start_date": "",
+                        "loa_end_date": "",
+                        "loa_total_terms": 0,
+                        "awol_status": "No",
+                        "awol_lifted_date": "",
+                        "transfer_units_approved": 0,
+                        "graduation_applied": "No",
+                        "graduation_approved": "No",
+                        "graduation_date": "",
+                        "re_admission_status": "Not Applicable",
+                        "re_admission_date": ""
                     })
                     new_df = pd.DataFrame([new_row])
                     df = pd.concat([df, new_df], ignore_index=True)
@@ -546,19 +540,16 @@ if role == "SESAM Staff":
                     st.success(f"✅ Student '{new_name}' added!")
                     st.rerun()
 
-# ==================== ADVISER VIEW (Read-only) ====================
+# ==================== ADVISER VIEW ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees ({st.session_state.display_name})")
     advisees = df[df["advisor_username"] == st.session_state.username].copy()
-
     if len(advisees) == 0:
         st.warning("No students assigned to you.")
     else:
-        # Add warning column
         advisees["warnings"] = advisees.apply(lambda row: "\n".join(get_all_warnings(row)), axis=1)
         display_cols = ["student_id", "name", "program", "year_admitted", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status", "warnings"]
         st.dataframe(advisees[display_cols], width='stretch')
-
         st.markdown("---")
         st.subheader("📌 Detailed View")
         for _, row in advisees.iterrows():
@@ -582,7 +573,7 @@ elif role == "Faculty Adviser":
                     st.success(warnings_text)
     st.info("📌 Read-only view. For updates, contact SESAM Staff.")
 
-# ==================== STUDENT VIEW (Read-only) ====================
+# ==================== STUDENT VIEW ====================
 elif role == "Student":
     st.subheader(f"📘 Your Academic Progress ({st.session_state.display_name})")
     student_record = df[df["name"] == st.session_state.display_name]
@@ -633,7 +624,6 @@ elif role == "Student":
             ]
         })
         st.dataframe(milestone_df, width='stretch', hide_index=True)
-
         st.info("📌 Read-only view. For updates, contact your adviser or SESAM Staff.")
 
 # ==================== FOOTER ====================
