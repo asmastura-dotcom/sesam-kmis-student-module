@@ -1,141 +1,158 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SESAM Student Module – Name Format: Last, First Middle</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
-        .container { max-width: 700px; margin: auto; background: white; padding: 25px; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-        h2, h3 { color: #2c7da0; }
-        label { font-weight: bold; display: block; margin-top: 12px; }
-        input, select, button { width: 100%; padding: 8px; margin-top: 5px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; }
-        .name-row { display: flex; gap: 10px; }
-        .name-row div { flex: 1; }
-        button { background-color: #2c7da0; color: white; border: none; cursor: pointer; font-size: 16px; }
-        button:hover { background-color: #1f5e7a; }
-        .student-card { background: #f9f9f9; border-left: 4px solid #2c7da0; padding: 10px; margin: 10px 0; border-radius: 5px; }
-        .student-name { font-size: 1.1em; font-weight: bold; color: #1f5e7a; }
-        hr { margin: 20px 0; }
-    </style>
-</head>
-<body>
-<div class="container">
-    <h2>SESAM Student Module – Program Selection</h2>
-    <form id="studentForm">
-        <div class="name-row">
-            <div>
-                <label>Last Name</label>
-                <input type="text" id="lastName" placeholder="Dela Cruz" required>
-            </div>
-            <div>
-                <label>First Name</label>
-                <input type="text" id="firstName" placeholder="Juan" required>
-            </div>
-            <div>
-                <label>Middle Name</label>
-                <input type="text" id="middleName" placeholder="Santos (optional)">
-            </div>
-        </div>
+import streamlit as st
+import pandas as pd
+from datetime import datetime
 
-        <label>Student Number</label>
-        <input type="text" id="studentNumber" placeholder="2025-00123" required>
+# ==================== PAGE CONFIG ====================
+st.set_page_config(page_title="SESAM Student Module", page_icon="🎓", layout="wide")
 
-        <label>Select Program</label>
-        <select id="programSelect" required>
-            <option value="">-- Choose a program --</option>
-            <option value="MS Environmental Science">MS Environmental Science</option>
-            <option value="PhD Environmental Science">PhD Environmental Science</option>
-            <option value="PhD Environmental Diplomacy and Negotiations">PhD Environmental Diplomacy and Negotiations</option>
-            <option value="Master in Resilience Studies (M-ReS)">Master in Resilience Studies (M-ReS)</option>
-            <option value="Professional Masters in Tropical Marine Ecosystems Management (PM-TMEM)">Professional Masters in Tropical Marine Ecosystems Management (PM-TMEM)</option>
-        </select>
+# ==================== INITIALIZE SESSION STATE ====================
+if "students" not in st.session_state:
+    st.session_state.students = []  # list of dicts
 
-        <label>Year Admitted</label>
-        <input type="number" id="yearAdmitted" value="2026" required>
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = True  # skip login for prototype
 
-        <button type="submit">Register Student</button>
-    </form>
+# ==================== PROGRAM LIST (from ISSP) ====================
+PROGRAMS = [
+    "MS Environmental Science",
+    "PhD Environmental Science",
+    "PhD Environmental Diplomacy and Negotiations",
+    "Master in Resilience Studies (M-ReS)",
+    "Professional Masters in Tropical Marine Ecosystems Management (PM-TMEM)"
+]
 
-    <hr>
-    <h3>Registered Students (Lastname, Firstname Middlename)</h3>
-    <div id="studentList" class="student-list"></div>
-</div>
+def get_thesis_limit(program):
+    """Return thesis units limit based on program"""
+    if "MS" in program:
+        return 6
+    elif "PhD" in program:
+        return 12
+    else:
+        return 0  # other programs may have capstone
 
-<script>
-    // Load existing students from browser's local storage
-    let students = JSON.parse(localStorage.getItem('sesamStudents')) || [];
+# ==================== SIDEBAR ====================
+st.sidebar.title("SESAM KMIS")
+st.sidebar.markdown("### Student Module")
+st.sidebar.info(
+    "**ISSP 2026-2031**\n\n"
+    "Knowledge Management Information System\n"
+    "Student Lifecycle Management"
+)
+st.sidebar.markdown("---")
+st.sidebar.caption("Version 1.2 | Prototype for SESAM")
 
-    // Helper: format name as "Lastname, Firstname Middlename"
-    function formatName(last, first, middle) {
-        let full = `${last}, ${first}`;
-        if (middle && middle.trim() !== "") {
-            full += ` ${middle.trim()}`;
-        }
-        return full;
-    }
+# ==================== MAIN TITLE ====================
+st.title("🎓 SESAM Student Module")
+st.markdown("Register and track graduate students – name format: **Last, First Middle**")
 
-    // Program-specific thesis units (from ISSP document)
-    function getMilestones(program) {
-        if (program.includes('MS')) return 'Thesis units: 6 | Comprehensive exam: required';
-        if (program.includes('PhD Environmental Science')) return 'Thesis units: 12 | Comprehensive exam: required';
-        if (program.includes('PhD Environmental Diplomacy')) return 'Thesis units: 12 | Diplomacy practicum required';
-        if (program.includes('Resilience')) return 'Capstone project required';
-        if (program.includes('Tropical Marine')) return 'Professional thesis / case study';
-        return 'Consult advisor for milestone details';
-    }
+# ==================== FORM TO ADD STUDENT ====================
+with st.expander("➕ Register New Student", expanded=True):
+    with st.form(key="add_student_form"):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            last_name = st.text_input("Last Name *", placeholder="Dela Cruz")
+        with col2:
+            first_name = st.text_input("First Name *", placeholder="Juan")
+        with col3:
+            middle_name = st.text_input("Middle Name", placeholder="Santos (optional)")
+        
+        col4, col5 = st.columns(2)
+        with col4:
+            student_number = st.text_input("Student Number *", placeholder="2025-00123")
+        with col5:
+            program = st.selectbox("Program *", options=PROGRAMS)
+        
+        col6, col7 = st.columns(2)
+        with col6:
+            year_admitted = st.number_input("Year Admitted", min_value=2000, max_value=2030, value=2026, step=1)
+        with col7:
+            advisor = st.text_input("Advisor (optional)", placeholder="Dr. Faustino-Eslava")
+        
+        submitted = st.form_submit_button("Register Student")
+        
+        if submitted:
+            if not last_name or not first_name or not student_number or not program:
+                st.error("Please fill all required fields (*).")
+            else:
+                # Create student record
+                new_student = {
+                    "id": len(st.session_state.students) + 1,
+                    "last_name": last_name.strip(),
+                    "first_name": first_name.strip(),
+                    "middle_name": middle_name.strip() if middle_name else "",
+                    "student_number": student_number.strip(),
+                    "program": program,
+                    "year_admitted": year_admitted,
+                    "advisor": advisor.strip() if advisor else "Not assigned",
+                    "registered_on": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                st.session_state.students.append(new_student)
+                st.success(f"✅ Student {last_name}, {first_name} registered successfully!")
+                st.rerun()
 
-    function displayStudents() {
-        const container = document.getElementById('studentList');
-        if (!container) return;
-        if (students.length === 0) {
-            container.innerHTML = '<p>No students registered yet.</p>';
-            return;
-        }
-        container.innerHTML = students.map((s, idx) => `
-            <div class="student-card">
-                <div class="student-name">${formatName(s.lastName, s.firstName, s.middleName)}</div>
-                <div>Student #: ${s.studentNumber}</div>
-                <div>Program: ${s.program}</div>
-                <div>Admitted: ${s.year}</div>
-                <div><small>${getMilestones(s.program)}</small></div>
-            </div>
-        `).join('');
-    }
+# ==================== DISPLAY STUDENT LIST ====================
+st.markdown("---")
+st.subheader(f"📋 Registered Students ({len(st.session_state.students)})")
 
-    // Handle form submission
-    document.getElementById('studentForm').addEventListener('submit', function(e) {
-        e.preventDefault();
-        const lastName = document.getElementById('lastName').value.trim();
-        const firstName = document.getElementById('firstName').value.trim();
-        const middleName = document.getElementById('middleName').value.trim();
-        const studentNumber = document.getElementById('studentNumber').value.trim();
-        const program = document.getElementById('programSelect').value;
-        const year = document.getElementById('yearAdmitted').value;
+if len(st.session_state.students) == 0:
+    st.info("No students registered yet. Use the form above to add students.")
+else:
+    # Convert to DataFrame for display
+    df = pd.DataFrame(st.session_state.students)
+    
+    # Create formatted name column
+    df["full_name"] = df.apply(
+        lambda row: f"{row['last_name']}, {row['first_name']}" + 
+                    (f" {row['middle_name']}" if row['middle_name'] else ""),
+        axis=1
+    )
+    
+    # Add thesis limit column
+    df["thesis_units_limit"] = df["program"].apply(get_thesis_limit)
+    
+    # Select columns to display
+    display_cols = ["full_name", "student_number", "program", "year_admitted", "advisor", "thesis_units_limit", "registered_on"]
+    display_df = df[display_cols].rename(columns={
+        "full_name": "Name (Last, First Middle)",
+        "student_number": "Student No.",
+        "program": "Program",
+        "year_admitted": "Year",
+        "advisor": "Advisor",
+        "thesis_units_limit": "Thesis Units Limit",
+        "registered_on": "Registered"
+    })
+    
+    st.dataframe(display_df, use_container_width=True)
+    
+    # Optional: individual cards
+    if st.checkbox("Show as cards instead"):
+        for _, student in df.iterrows():
+            with st.container():
+                st.markdown(f"""
+                <div style="border-left: 4px solid #2c7da0; padding: 10px; margin: 10px 0; background: #f9f9f9;">
+                    <strong>{student['full_name']}</strong><br>
+                    📚 {student['program']} | 🆔 {student['student_number']}<br>
+                    🗓️ Admitted: {student['year_admitted']} | 👨‍🏫 Advisor: {student['advisor']}<br>
+                    📖 Thesis units limit: {get_thesis_limit(student['program'])}
+                </div>
+                """, unsafe_allow_html=True)
 
-        if (!lastName || !firstName || !studentNumber || !program) {
-            alert('Please fill all required fields (Last Name, First Name, Student Number, Program).');
-            return;
-        }
-
-        const newStudent = {
-            id: Date.now(),
-            lastName: lastName,
-            firstName: firstName,
-            middleName: middleName,
-            studentNumber: studentNumber,
-            program: program,
-            year: year,
-            registeredOn: new Date().toISOString()
-        };
-        students.push(newStudent);
-        localStorage.setItem('sesamStudents', JSON.stringify(students));
-        displayStudents();
-        document.getElementById('studentForm').reset();
-    });
-
-    // Show existing students on page load
-    displayStudents();
-</script>
-</body>
-</html>
+# ==================== OPTIONS TO MANAGE DATA ====================
+with st.expander("⚙️ Data Management"):
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🗑️ Clear All Students", type="primary"):
+            st.session_state.students = []
+            st.success("All students cleared.")
+            st.rerun()
+    with col2:
+        if len(st.session_state.students) > 0:
+            # Download as CSV
+            df_download = pd.DataFrame(st.session_state.students)
+            csv = df_download.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download CSV",
+                data=csv,
+                file_name=f"sesam_students_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
