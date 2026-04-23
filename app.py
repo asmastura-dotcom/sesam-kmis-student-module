@@ -146,10 +146,19 @@ def load_data():
     df["gwa"] = pd.to_numeric(df["gwa"], errors='coerce').fillna(2.0).astype(float)
     df["year_admitted"] = pd.to_numeric(df["year_admitted"], errors='coerce').fillna(2024).astype(int)
     
-    # Force correct residency max based on program
+    # Fix residency max based on program and reset new students' progress
     for idx, row in df.iterrows():
         program = str(row["program"]).strip()
         df.at[idx, "residency_max_years"] = 5 if program == "MS" else 7
+        
+        # Reset total_units_taken and exam statuses for students admitted in 2025 or later
+        if row["year_admitted"] >= 2025:
+            df.at[idx, "total_units_taken"] = 0
+            df.at[idx, "written_comprehensive_status"] = "N/A"
+            df.at[idx, "oral_comprehensive_status"] = "N/A"
+            df.at[idx, "qualifying_exam_status"] = "N/A"
+            df.at[idx, "general_exam_status"] = "N/A"
+            df.at[idx, "final_exam_status"] = "Not Taken"
     
     df.to_csv(DATA_FILE, index=False)
     return df
@@ -250,12 +259,14 @@ def check_comprehensive_exam_deadline(row):
     total_taken = row.get("total_units_taken", 0)
     total_required = row.get("total_units_required", 24)
     written_status = str(row.get("written_comprehensive_status", "N/A")).strip()
+    year_admitted = row.get("year_admitted", 2026)
     try:
         total_taken = float(total_taken)
         total_required = float(total_required)
     except:
         return "⚠️ Units data error"
-    if program == "PhD" and total_taken >= total_required:
+    # Only warn if coursework is complete AND student is not brand‑new (admitted 2025 or later)
+    if program == "PhD" and total_taken >= total_required and year_admitted <= 2023:
         if written_status != "Passed":
             return "⚠️ Written comprehensive exam pending after completing coursework"
     return "✅ Comprehensive exam on track"
@@ -464,7 +475,7 @@ if role == "SESAM Staff":
     else:
         st.info("No students found. Use the Add Student feature below.")
 
-    # ----- ADD NEW STUDENT (FIXED: resets all progress) -----
+    # ----- ADD NEW STUDENT (properly reset all progress) -----
     st.markdown("---")
     st.subheader("➕ Add New Student")
     with st.expander("Click to expand and add a new student record"):
@@ -490,7 +501,6 @@ if role == "SESAM Staff":
                     st.error(f"❌ Student ID '{new_id}' already exists.")
                 else:
                     new_row = create_default_data().iloc[0].to_dict()
-                    # Reset all progress fields
                     new_row.update({
                         "student_id": new_id,
                         "name": new_name,
