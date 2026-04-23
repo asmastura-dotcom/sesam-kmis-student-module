@@ -123,7 +123,6 @@ def check_deadline_alerts(row):
     return alerts
 
 # ==================== IMAGE HELPER FUNCTIONS ====================
-# Folders
 PROFILE_FOLDER = "profile_pics"
 ENROLLMENT_FOLDER = "enrollment_pics"
 GRADES_FOLDER = "grades_pics"
@@ -146,7 +145,6 @@ def save_image(student_number, uploaded_file, folder, prefix):
     return filename
 
 def delete_image(student_number, folder, column_name, df, student_number_col):
-    """Delete image file and clear the corresponding CSV column."""
     old_filename = df.loc[df[student_number_col] == student_number, column_name].iloc[0]
     if old_filename and pd.notna(old_filename):
         filepath = os.path.join(folder, old_filename)
@@ -171,7 +169,6 @@ def show_image(student_number, folder, column_name, df, student_number_col, capt
 
 # ==================== COURSE & GWA HELPER ====================
 def compute_gwa_from_courses(courses_json):
-    """courses_json is a string encoding a list of dicts with fields: units, grade."""
     try:
         courses = json.loads(courses_json) if courses_json else []
     except:
@@ -189,23 +186,18 @@ def compute_gwa_from_courses(courses_json):
     return round(total_weighted / total_units, 2)
 
 def display_course_table(courses_json, editable=False, key_prefix=""):
-    """Show a dataframe of courses. If editable, return the updated JSON."""
     try:
         courses = json.loads(courses_json) if courses_json else []
     except:
         courses = []
     if not courses:
         st.info("No courses added yet.")
-        if editable:
-            return courses_json
-        else:
-            return courses_json
+        return courses_json
     df_courses = pd.DataFrame(courses)
     st.dataframe(df_courses, use_container_width=True)
     return courses_json
 
 def edit_courses_form(courses_json, key):
-    """Form to add/edit courses. Returns new JSON string."""
     try:
         courses = json.loads(courses_json) if courses_json else []
     except:
@@ -223,7 +215,6 @@ def edit_courses_form(courses_json, key):
             if st.form_submit_button("➕ Add Course"):
                 if code and units > 0:
                     courses.append({"code": code, "units": units, "grade": grade})
-        # Display current courses with delete option
         if courses:
             st.markdown("**Current Courses**")
             for i, c in enumerate(courses):
@@ -405,7 +396,7 @@ def get_thesis_limit(program):
 def get_residency_max(program):
     return get_residency_max_from_program(program)
 
-# ==================== WARNING FUNCTIONS (same as before) ====================
+# ==================== WARNING FUNCTIONS ====================
 def get_warning_text(program, units_taken):
     limit = get_thesis_limit(program)
     try:
@@ -642,7 +633,6 @@ if role == "SESAM Staff":
             with col_pic3:
                 st.markdown("**Grades Screenshot**")
                 show_image(student_number, GRADES_FOLDER, "grades_pic", df, "student_number", "Grades")
-            # Delete buttons (optional)
             if st.button("🗑️ Delete Profile Picture", key=f"del_prof_{student_number}"):
                 df = delete_image(student_number, PROFILE_FOLDER, "profile_pic", df, "student_number")
                 save_data(df)
@@ -663,26 +653,21 @@ if role == "SESAM Staff":
         with st.expander("📚 Courses and GWA (manual entry)"):
             st.markdown("**Current Course List**")
             display_course_table(student.get("courses_json", "[]"), editable=False)
-            
-            # Option to override courses
             if st.checkbox("Edit student's courses", key=f"edit_courses_{student_number}"):
                 new_courses = edit_courses_form(student.get("courses_json", "[]"), key=f"staff_{student_number}")
                 if new_courses != student.get("courses_json", "[]"):
                     df.loc[df["student_number"] == student_number, "courses_json"] = new_courses
-                    # Optionally update the main GWA field from computed GWA
                     computed_gwa = compute_gwa_from_courses(new_courses)
                     if computed_gwa:
                         df.loc[df["student_number"] == student_number, "gwa"] = computed_gwa
                     save_data(df)
                     st.success("Courses updated and GWA recomputed.")
                     st.rerun()
-            
-            # Show computed GWA
             computed = compute_gwa_from_courses(student.get("courses_json", "[]"))
             st.info(f"**Computed GWA from courses:** {computed if computed else 'No courses yet'}")
             st.caption("The official GWA (above) may come from the Graduate School; this is a student‑entered estimate.")
 
-        # ----- EDIT TABS (unchanged, same as before) -----
+        # ----- EDIT TABS -----
         tabs = st.tabs(["Coursework & Thesis", "Exams", "Residency & Leave", "Graduation", "Committee", "Other"])
         
         with tabs[0]:
@@ -796,7 +781,7 @@ if role == "SESAM Staff":
     else:
         st.info("No students match the current search. Try a different name/number or add a new student below.")
 
-    # ----- ADD NEW STUDENT (with all new fields) -----
+    # ----- ADD NEW STUDENT -----
     st.markdown("---")
     st.subheader("➕ Add New Student")
     with st.expander("Register New Student", expanded=True):
@@ -855,7 +840,6 @@ if role == "SESAM Staff":
                 final_exam = st.selectbox("Final Exam Status", ["Not Taken", "Passed", "Failed"])
             
             submitted = st.form_submit_button("Register Student")
-            
             if submitted:
                 errors = []
                 if not last_name:
@@ -974,19 +958,14 @@ elif role == "Faculty Adviser":
                             st.markdown(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
                             st.markdown(f"**Final Exam:** {row['final_exam_status']}")
                             st.markdown(f"**Residency:** {row['residency_years_used']}/{get_residency_max(row['program'])} years")
-                        
-                        # Show images in adviser view (optional)
                         with st.expander("View Documents"):
                             show_image(row["student_number"], PROFILE_FOLDER, "profile_pic", df, "student_number", "Profile Picture")
                             show_image(row["student_number"], ENROLLMENT_FOLDER, "enrollment_pic", df, "student_number", "Enrollment")
                             show_image(row["student_number"], GRADES_FOLDER, "grades_pic", df, "student_number", "Grades")
-                        
-                        # Show courses and computed GWA
                         with st.expander("View Courses & GWA"):
                             display_course_table(row.get("courses_json", "[]"), editable=False)
                             computed = compute_gwa_from_courses(row.get("courses_json", "[]"))
                             st.caption(f"Computed GWA from courses: {computed if computed else 'No courses'}")
-                        
                         alerts = check_deadline_alerts(row)
                         if alerts:
                             for alert in alerts:
@@ -1001,166 +980,181 @@ elif role == "Faculty Adviser":
                 st.info("No matching students.")
     st.info("📌 Read-only view. For updates, contact SESAM Staff.")
 
-# ==================== STUDENT VIEW ====================
+# ==================== STUDENT VIEW (FIXED) ====================
 elif role == "Student":
     st.subheader(f"📘 Your Academic Progress ({st.session_state.display_name})")
+    
+    # Try to find student by name first
     student_record = df[df["name"] == st.session_state.display_name]
+    
     if len(student_record) == 0:
-        st.error("Your record not found. Please contact SESAM Staff.")
+        # Name not found – let the student select their record manually
+        st.warning("Your record could not be automatically identified. Please select your record from the list below.")
+        student_names = df["name"].tolist()
+        if not student_names:
+            st.error("No student records exist. Please contact SESAM Staff.")
+            st.stop()
+        selected_name = st.selectbox("Select your name", student_names)
+        student_record = df[df["name"] == selected_name]
+        if len(student_record) == 0:
+            st.error("Still no matching record. Please contact SESAM Staff.")
+            st.stop()
+    
+    student = student_record.iloc[0]
+    
+    # ----- DEADLINE ALERTS -----
+    alerts = check_deadline_alerts(student)
+    if alerts:
+        for alert in alerts:
+            st.error(alert)
+    
+    # ----- STANDARD WARNINGS -----
+    warnings = get_all_warnings(student)
+    if any("⚠️" in w for w in warnings):
+        for w in warnings:
+            st.error(w)
     else:
-        student = student_record.iloc[0]
-        alerts = check_deadline_alerts(student)
-        if alerts:
-            for alert in alerts:
-                st.error(alert)
-        warnings = get_all_warnings(student)
-        if any("⚠️" in w for w in warnings):
-            for w in warnings:
-                st.error(w)
-        else:
-            st.success("\n".join(warnings))
-
-        # ----- PROFILE PICTURE SECTION (Student can upload/delete) -----
-        st.markdown("---")
-        st.subheader("📸 Your Profile Picture")
-        col_pic1, col_pic2 = st.columns([1, 2])
-        with col_pic1:
-            show_image(student["student_number"], PROFILE_FOLDER, "profile_pic", df, "student_number", "Your Picture")
-        with col_pic2:
-            uploaded_profile = st.file_uploader("Change profile picture (JPG, PNG, GIF)", type=["jpg", "jpeg", "png", "gif"], key="profile_upload")
-            if uploaded_profile:
-                new_file = save_image(student["student_number"], uploaded_profile, PROFILE_FOLDER, "profile")
-                if new_file:
-                    df.loc[df["student_number"] == student["student_number"], "profile_pic"] = new_file
-                    save_data(df)
-                    st.success("Profile picture updated!")
-                    st.rerun()
-            if st.button("Remove profile picture"):
-                df = delete_image(student["student_number"], PROFILE_FOLDER, "profile_pic", df, "student_number")
+        st.success("\n".join(warnings))
+    
+    # ----- PROFILE PICTURE SECTION -----
+    st.markdown("---")
+    st.subheader("📸 Your Profile Picture")
+    col_pic1, col_pic2 = st.columns([1, 2])
+    with col_pic1:
+        show_image(student["student_number"], PROFILE_FOLDER, "profile_pic", df, "student_number", "Your Picture")
+    with col_pic2:
+        uploaded_profile = st.file_uploader("Change profile picture (JPG, PNG, GIF)", type=["jpg", "jpeg", "png", "gif"], key="profile_upload")
+        if uploaded_profile:
+            new_file = save_image(student["student_number"], uploaded_profile, PROFILE_FOLDER, "profile")
+            if new_file:
+                df.loc[df["student_number"] == student["student_number"], "profile_pic"] = new_file
                 save_data(df)
-                st.success("Profile picture removed.")
+                st.success("Profile picture updated!")
                 st.rerun()
-
-        # ----- ENROLLMENT PICTURE (start of semester) -----
-        st.markdown("---")
-        st.subheader("📚 Enrolled Subjects (Start of Semester)")
-        col_enr1, col_enr2 = st.columns([1, 2])
-        with col_enr1:
-            show_image(student["student_number"], ENROLLMENT_FOLDER, "enrollment_pic", df, "student_number", "Enrollment Screenshot")
-        with col_enr2:
-            uploaded_enr = st.file_uploader("Upload a screenshot of your enrolled subjects (JPG/PNG)", type=["jpg", "jpeg", "png"], key="enrollment_upload")
-            if uploaded_enr:
-                new_file = save_image(student["student_number"], uploaded_enr, ENROLLMENT_FOLDER, "enrollment")
-                if new_file:
-                    df.loc[df["student_number"] == student["student_number"], "enrollment_pic"] = new_file
-                    save_data(df)
-                    st.success("Enrollment screenshot uploaded!")
-                    st.rerun()
-            if st.button("Remove enrollment screenshot"):
-                df = delete_image(student["student_number"], ENROLLMENT_FOLDER, "enrollment_pic", df, "student_number")
-                save_data(df)
-                st.success("Enrollment screenshot removed.")
-                st.rerun()
-
-        # ----- GRADES PICTURE (end of semester) -----
-        st.markdown("---")
-        st.subheader("📊 Semester Grades (End of Semester)")
-        col_gr1, col_gr2 = st.columns([1, 2])
-        with col_gr1:
-            show_image(student["student_number"], GRADES_FOLDER, "grades_pic", df, "student_number", "Grades Screenshot")
-        with col_gr2:
-            uploaded_gr = st.file_uploader("Upload a screenshot of your grades (JPG/PNG)", type=["jpg", "jpeg", "png"], key="grades_upload")
-            if uploaded_gr:
-                new_file = save_image(student["student_number"], uploaded_gr, GRADES_FOLDER, "grades")
-                if new_file:
-                    df.loc[df["student_number"] == student["student_number"], "grades_pic"] = new_file
-                    save_data(df)
-                    st.success("Grades screenshot uploaded!")
-                    st.rerun()
-            if st.button("Remove grades screenshot"):
-                df = delete_image(student["student_number"], GRADES_FOLDER, "grades_pic", df, "student_number")
-                save_data(df)
-                st.success("Grades screenshot removed.")
-                st.rerun()
-
-        # ----- COURSE & GWA SECTION (Student can add/edit their own courses) -----
-        st.markdown("---")
-        st.subheader("📘 My Courses and GWA")
-        new_courses = edit_courses_form(student.get("courses_json", "[]"), key=f"student_{student['student_number']}")
-        if new_courses != student.get("courses_json", "[]"):
-            df.loc[df["student_number"] == student["student_number"], "courses_json"] = new_courses
-            # Update the main GWA with computed value (optional)
-            computed_gwa = compute_gwa_from_courses(new_courses)
-            if computed_gwa:
-                df.loc[df["student_number"] == student["student_number"], "gwa"] = computed_gwa
+        if st.button("Remove profile picture"):
+            df = delete_image(student["student_number"], PROFILE_FOLDER, "profile_pic", df, "student_number")
             save_data(df)
-            st.success("Courses updated and GWA recomputed.")
+            st.success("Profile picture removed.")
             st.rerun()
-        
-        # Show computed GWA
-        computed = compute_gwa_from_courses(student.get("courses_json", "[]"))
-        st.info(f"**Your computed GWA from entered courses:** {computed if computed else 'No courses entered yet'}")
-        st.caption("If you enter all your courses with grades, the system will calculate your GWA automatically.")
 
-        # ----- OTHER STUDENT INFO (metrics) -----
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Student Number", student["student_number"])
-            st.metric("Program", student["program"])
-            st.metric("Academic Year", format_ay(student["ay_start"], student["semester"]))
-        with col2:
-            st.metric("Advisor", student["advisor"])
-            st.metric("GWA", f"{student['gwa']:.2f}")
-            st.metric("POS Status", student["pos_status"])
-        with col3:
-            limit = get_thesis_limit(student["program"])
-            st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
-            st.metric("Residency", f"{student['residency_years_used']} / {get_residency_max(student['program'])} years")
-            st.metric("Final Exam", student["final_exam_status"])
+    # ----- ENROLLMENT PICTURE -----
+    st.markdown("---")
+    st.subheader("📚 Enrolled Subjects (Start of Semester)")
+    col_enr1, col_enr2 = st.columns([1, 2])
+    with col_enr1:
+        show_image(student["student_number"], ENROLLMENT_FOLDER, "enrollment_pic", df, "student_number", "Enrollment Screenshot")
+    with col_enr2:
+        uploaded_enr = st.file_uploader("Upload a screenshot of your enrolled subjects (JPG/PNG)", type=["jpg", "jpeg", "png"], key="enrollment_upload")
+        if uploaded_enr:
+            new_file = save_image(student["student_number"], uploaded_enr, ENROLLMENT_FOLDER, "enrollment")
+            if new_file:
+                df.loc[df["student_number"] == student["student_number"], "enrollment_pic"] = new_file
+                save_data(df)
+                st.success("Enrollment screenshot uploaded!")
+                st.rerun()
+        if st.button("Remove enrollment screenshot"):
+            df = delete_image(student["student_number"], ENROLLMENT_FOLDER, "enrollment_pic", df, "student_number")
+            save_data(df)
+            st.success("Enrollment screenshot removed.")
+            st.rerun()
 
-        # Coursework progress
-        st.markdown("---")
-        st.subheader("📚 Coursework Progress")
-        prog = compute_coursework_progress(student)
-        st.progress(prog / 100, text=f"{prog}% completed ({student['total_units_taken']} of {student['total_units_required']} units)")
-        st.caption(f"Remaining units: {max(0, student['total_units_required'] - student['total_units_taken'])}")
-        
-        # Committee display
-        if student.get("committee_members"):
-            with st.expander("📋 Your Guidance/Advisory Committee"):
-                members = student["committee_members"].strip().split('\n')
-                if members and members[0]:
-                    for m in members:
-                        if m.strip():
-                            st.markdown(f"- {m.strip()}")
-                else:
-                    st.info("Committee members not yet listed.")
-                if student.get("committee_approval_date"):
-                    st.caption(f"Approved on: {student['committee_approval_date']}")
+    # ----- GRADES PICTURE -----
+    st.markdown("---")
+    st.subheader("📊 Semester Grades (End of Semester)")
+    col_gr1, col_gr2 = st.columns([1, 2])
+    with col_gr1:
+        show_image(student["student_number"], GRADES_FOLDER, "grades_pic", df, "student_number", "Grades Screenshot")
+    with col_gr2:
+        uploaded_gr = st.file_uploader("Upload a screenshot of your grades (JPG/PNG)", type=["jpg", "jpeg", "png"], key="grades_upload")
+        if uploaded_gr:
+            new_file = save_image(student["student_number"], uploaded_gr, GRADES_FOLDER, "grades")
+            if new_file:
+                df.loc[df["student_number"] == student["student_number"], "grades_pic"] = new_file
+                save_data(df)
+                st.success("Grades screenshot uploaded!")
+                st.rerun()
+        if st.button("Remove grades screenshot"):
+            df = delete_image(student["student_number"], GRADES_FOLDER, "grades_pic", df, "student_number")
+            save_data(df)
+            st.success("Grades screenshot removed.")
+            st.rerun()
 
-        # Milestone status
-        st.markdown("---")
-        st.subheader("📌 Milestone Status")
-        milestone_df = pd.DataFrame({
-            "Milestone": [
-                "Plan of Study (POS)",
-                "General Exam (MS) / Qualifying Exam (PhD)",
-                "Written Comprehensive (PhD)",
-                "Oral Comprehensive (PhD)",
-                "Thesis/Dissertation Outline",
-                "Final Examination"
-            ],
-            "Status": [
-                student["pos_status"],
-                student["general_exam_status"] if is_master_program(student["program"]) else student["qualifying_exam_status"],
-                student["written_comprehensive_status"] if is_phd_program(student["program"]) else "N/A",
-                student["oral_comprehensive_status"] if is_phd_program(student["program"]) else "N/A",
-                student["thesis_outline_approved"],
-                student["final_exam_status"]
-            ]
-        })
-        st.dataframe(milestone_df, width='stretch', hide_index=True)
-        st.info("📌 Read-only view. For updates, contact your adviser or SESAM Staff.")
+    # ----- COURSE & GWA SECTION -----
+    st.markdown("---")
+    st.subheader("📘 My Courses and GWA")
+    new_courses = edit_courses_form(student.get("courses_json", "[]"), key=f"student_{student['student_number']}")
+    if new_courses != student.get("courses_json", "[]"):
+        df.loc[df["student_number"] == student["student_number"], "courses_json"] = new_courses
+        computed_gwa = compute_gwa_from_courses(new_courses)
+        if computed_gwa:
+            df.loc[df["student_number"] == student["student_number"], "gwa"] = computed_gwa
+        save_data(df)
+        st.success("Courses updated and GWA recomputed.")
+        st.rerun()
+    
+    computed = compute_gwa_from_courses(student.get("courses_json", "[]"))
+    st.info(f"**Your computed GWA from entered courses:** {computed if computed else 'No courses entered yet'}")
+    st.caption("If you enter all your courses with grades, the system will calculate your GWA automatically.")
+
+    # ----- OTHER STUDENT INFO -----
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Student Number", student["student_number"])
+        st.metric("Program", student["program"])
+        st.metric("Academic Year", format_ay(student["ay_start"], student["semester"]))
+    with col2:
+        st.metric("Advisor", student["advisor"])
+        st.metric("GWA", f"{student['gwa']:.2f}")
+        st.metric("POS Status", student["pos_status"])
+    with col3:
+        limit = get_thesis_limit(student["program"])
+        st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
+        st.metric("Residency", f"{student['residency_years_used']} / {get_residency_max(student['program'])} years")
+        st.metric("Final Exam", student["final_exam_status"])
+
+    # ----- COURSEWORK PROGRESS -----
+    st.markdown("---")
+    st.subheader("📚 Coursework Progress")
+    prog = compute_coursework_progress(student)
+    st.progress(prog / 100, text=f"{prog}% completed ({student['total_units_taken']} of {student['total_units_required']} units)")
+    st.caption(f"Remaining units: {max(0, student['total_units_required'] - student['total_units_taken'])}")
+    
+    # ----- COMMITTEE DISPLAY -----
+    if student.get("committee_members"):
+        with st.expander("📋 Your Guidance/Advisory Committee"):
+            members = student["committee_members"].strip().split('\n')
+            if members and members[0]:
+                for m in members:
+                    if m.strip():
+                        st.markdown(f"- {m.strip()}")
+            else:
+                st.info("Committee members not yet listed.")
+            if student.get("committee_approval_date"):
+                st.caption(f"Approved on: {student['committee_approval_date']}")
+
+    # ----- MILESTONE STATUS -----
+    st.markdown("---")
+    st.subheader("📌 Milestone Status")
+    milestone_df = pd.DataFrame({
+        "Milestone": [
+            "Plan of Study (POS)",
+            "General Exam (MS) / Qualifying Exam (PhD)",
+            "Written Comprehensive (PhD)",
+            "Oral Comprehensive (PhD)",
+            "Thesis/Dissertation Outline",
+            "Final Examination"
+        ],
+        "Status": [
+            student["pos_status"],
+            student["general_exam_status"] if is_master_program(student["program"]) else student["qualifying_exam_status"],
+            student["written_comprehensive_status"] if is_phd_program(student["program"]) else "N/A",
+            student["oral_comprehensive_status"] if is_phd_program(student["program"]) else "N/A",
+            student["thesis_outline_approved"],
+            student["final_exam_status"]
+        ]
+    })
+    st.dataframe(milestone_df, width='stretch', hide_index=True)
+    st.info("📌 Read-only view. For updates, contact your adviser or SESAM Staff.")
 
 st.markdown("---")
 st.caption("SESAM KMIS – Student Module V2 | Based on UPLB Graduate School Rules (2009)")
