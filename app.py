@@ -66,8 +66,7 @@ if not st.session_state.logged_in:
 DATA_FILE = "students.csv"
 
 def create_default_data():
-    """Create sample data with all required fields."""
-    current_year = date.today().year
+    """Create sample data with all required fields, using correct numeric types."""
     return pd.DataFrame({
         "student_id": ["S001", "S002", "S003", "S004", "S005"],
         "name": ["Juan Cruz", "Maria Santos", "Jose Rizal", "Ana Reyes", "Carlos Lopez"],
@@ -122,18 +121,36 @@ def create_default_data():
     })
 
 def load_data():
-    """Load or create student data with proper schema."""
+    """Load or create student data with proper schema and numeric conversion."""
     if os.path.exists(DATA_FILE):
         df = pd.read_csv(DATA_FILE)
-        # Ensure all required columns exist; add missing with defaults
-        default_df = create_default_data()
-        for col in default_df.columns:
-            if col not in df.columns:
-                df[col] = default_df[col]
-        # Save back to ensure consistency
-        df.to_csv(DATA_FILE, index=False)
     else:
         df = create_default_data()
+    
+    # Ensure all required columns exist (add missing with defaults)
+    default_df = create_default_data()
+    for col in default_df.columns:
+        if col not in df.columns:
+            df[col] = default_df[col]
+    
+    # Convert numeric columns, replacing NaN with 0 (or 2.0 for GWA)
+    numeric_int_cols = [
+        "thesis_units_taken", "thesis_units_limit",
+        "total_units_taken", "total_units_required",
+        "residency_years_used", "residency_max_years",
+        "extension_count", "loa_total_terms", "transfer_units_approved"
+    ]
+    for col in numeric_int_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
+    
+    # GWA is float
+    df["gwa"] = pd.to_numeric(df["gwa"], errors='coerce').fillna(2.0).astype(float)
+    
+    # Year admitted as int
+    df["year_admitted"] = pd.to_numeric(df["year_admitted"], errors='coerce').fillna(2024).astype(int)
+    
+    # Save the cleaned data back to CSV
+    df.to_csv(DATA_FILE, index=False)
     return df
 
 def save_data(df):
