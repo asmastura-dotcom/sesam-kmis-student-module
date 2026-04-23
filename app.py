@@ -162,35 +162,53 @@ def get_thesis_limit(program):
 def get_residency_max(program):
     return 5 if program == "MS" else 7
 
-# ==================== WARNING FUNCTIONS ====================
+# ==================== WARNING FUNCTIONS (FIXED) ====================
 def get_warning_text(program, units_taken):
-    limit = get_thesis_limit(program)
+    limit = 6 if program == "MS" else 12
+    try:
+        units_taken = float(units_taken)
+        limit = float(limit)
+    except:
+        return "⚠️ Thesis units data error"
     if units_taken > limit:
-        return f"⚠️ WARNING: {units_taken}/{limit} units (exceeded by {units_taken - limit})"
-    return f"✅ {units_taken}/{limit} units"
+        return f"⚠️ Thesis units exceeded: {units_taken}/{limit} (exceeded by {units_taken - limit})"
+    return f"✅ Thesis units: {units_taken}/{limit}"
 
 def check_residency_warning(row):
-    used = row["residency_years_used"]
-    max_years = row["residency_max_years"]
+    used = row.get("residency_years_used", 0)
+    max_years = row.get("residency_max_years", 5)
+    try:
+        used = float(used)
+        max_years = float(max_years)
+    except:
+        return "⚠️ Residency data error"
     if used >= max_years:
         return f"⚠️ Residency limit reached ({used}/{max_years} years). Extension required."
     elif used >= max_years - 1:
         return f"⚠️ Approaching residency limit ({used}/{max_years} years)."
-    return f"✅ {used}/{max_years} years used"
+    return f"✅ Residency: {used}/{max_years} years used"
 
 def check_gwa_warning(gwa):
-    if gwa >= 2.0:
-        return "✅ Good standing"
-    else:
-        return "⚠️ GWA below 2.00 – may affect exam eligibility and graduation"
+    try:
+        gwa = float(gwa)
+    except:
+        return "⚠️ GWA data error"
+    if gwa < 2.0:
+        return f"⚠️ GWA {gwa:.2f} is below 2.00 – may affect exam eligibility and graduation"
+    return f"✅ GWA {gwa:.2f} – good standing"
 
 def check_awol_warning(row):
-    if row["awol_status"] == "Yes":
+    status = str(row.get("awol_status", "No")).strip()
+    if status == "Yes":
         return "⚠️ AWOL – registration privileges curtailed"
     return "✅ No AWOL"
 
 def check_loa_warning(row):
-    total_terms = row["loa_total_terms"]
+    total_terms = row.get("loa_total_terms", 0)
+    try:
+        total_terms = float(total_terms)
+    except:
+        return "⚠️ LOA data error"
     if total_terms > 2:
         return f"⚠️ LOA total exceeds 2 years ({total_terms} terms). Not allowed."
     elif total_terms > 0:
@@ -198,39 +216,88 @@ def check_loa_warning(row):
     return "✅ No LOA"
 
 def check_thesis_outline_deadline(row):
-    if row["program"] == "MS" and row["thesis_units_taken"] > 0:
-        if row["thesis_units_taken"] >= 4 and row["thesis_outline_approved"] != "Yes":
+    program = str(row.get("program", "MS"))
+    units_taken = row.get("thesis_units_taken", 0)
+    outline_approved = str(row.get("thesis_outline_approved", "No")).strip()
+    try:
+        units_taken = float(units_taken)
+    except:
+        return "⚠️ Thesis units data error"
+    if program == "MS" and units_taken > 0:
+        if units_taken >= 4 and outline_approved != "Yes":
             return "⚠️ Thesis outline approval overdue (should be approved by 2nd thesis semester)"
-    elif row["program"] == "PhD" and row["thesis_units_taken"] > 0:
-        if row["thesis_units_taken"] >= 8 and row["thesis_outline_approved"] != "Yes":
+    elif program == "PhD" and units_taken > 0:
+        if units_taken >= 8 and outline_approved != "Yes":
             return "⚠️ Dissertation outline approval overdue (should be approved by 3rd dissertation semester)"
     return "✅ Outline on track"
 
 def check_qualifying_exam_deadline(row):
-    if row["program"] == "PhD" and row["residency_years_used"] >= 1:
-        if row["qualifying_exam_status"] not in ["Passed", "N/A"]:
+    program = str(row.get("program", "MS"))
+    residency_used = row.get("residency_years_used", 0)
+    exam_status = str(row.get("qualifying_exam_status", "N/A")).strip()
+    try:
+        residency_used = float(residency_used)
+    except:
+        return "⚠️ Residency data error"
+    if program == "PhD" and residency_used >= 1:
+        if exam_status not in ["Passed", "N/A"]:
             return "⚠️ Qualifying exam should be taken before 2nd semester of residence"
     return "✅ Qualifying exam on track"
 
 def check_comprehensive_exam_deadline(row):
-    if row["program"] == "PhD" and row["total_units_taken"] >= row["total_units_required"]:
-        if row["written_comprehensive_status"] != "Passed":
+    program = str(row.get("program", "MS"))
+    total_taken = row.get("total_units_taken", 0)
+    total_required = row.get("total_units_required", 24)
+    written_status = str(row.get("written_comprehensive_status", "N/A")).strip()
+    try:
+        total_taken = float(total_taken)
+        total_required = float(total_required)
+    except:
+        return "⚠️ Units data error"
+    if program == "PhD" and total_taken >= total_required:
+        if written_status != "Passed":
             return "⚠️ Written comprehensive exam pending after completing coursework"
     return "✅ Comprehensive exam on track"
 
 def get_all_warnings(row):
+    """Return list of warnings (only the problematic ones, no ✅ lines)"""
     warnings = []
-    warnings.append(get_warning_text(row["program"], row["thesis_units_taken"]))
-    warnings.append(check_residency_warning(row))
-    warnings.append(check_gwa_warning(row["gwa"]))
-    warnings.append(check_awol_warning(row))
-    warnings.append(check_loa_warning(row))
-    warnings.append(check_thesis_outline_deadline(row))
-    warnings.append(check_qualifying_exam_deadline(row))
-    warnings.append(check_comprehensive_exam_deadline(row))
-    # Filter out duplicates and empty
-    result = [w for w in warnings if w and "✅" not in w]
-    return result if result else ["✅ All rules satisfied"]
+    # Thesis units warning
+    thesis_warn = get_warning_text(row["program"], row["thesis_units_taken"])
+    if "⚠️" in thesis_warn:
+        warnings.append(thesis_warn)
+    # Residency warning
+    res_warn = check_residency_warning(row)
+    if "⚠️" in res_warn:
+        warnings.append(res_warn)
+    # GWA warning
+    gwa_warn = check_gwa_warning(row["gwa"])
+    if "⚠️" in gwa_warn:
+        warnings.append(gwa_warn)
+    # AWOL warning
+    awol_warn = check_awol_warning(row)
+    if "⚠️" in awol_warn:
+        warnings.append(awol_warn)
+    # LOA warning
+    loa_warn = check_loa_warning(row)
+    if "⚠️" in loa_warn:
+        warnings.append(loa_warn)
+    # Outline deadline
+    outline_warn = check_thesis_outline_deadline(row)
+    if "⚠️" in outline_warn:
+        warnings.append(outline_warn)
+    # Qualifying exam deadline
+    qual_warn = check_qualifying_exam_deadline(row)
+    if "⚠️" in qual_warn:
+        warnings.append(qual_warn)
+    # Comprehensive exam deadline
+    comp_warn = check_comprehensive_exam_deadline(row)
+    if "⚠️" in comp_warn:
+        warnings.append(comp_warn)
+    
+    if not warnings:
+        return ["✅ All rules satisfied"]
+    return warnings
 
 # Load data
 df = load_data()
