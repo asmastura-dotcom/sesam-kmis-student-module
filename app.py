@@ -9,7 +9,7 @@ Based on UPLB Graduate School Policies, Rules and Regulations (2009).
 import streamlit as st
 import pandas as pd
 import os
-from datetime import date
+from datetime import date, datetime
 
 # ==================== PAGE CONFIGURATION ====================
 st.set_page_config(
@@ -48,7 +48,7 @@ PROGRAMS = [
 
 SEMESTERS = ["1st Sem", "2nd Sem", "Summer"]
 
-# Generate academic year ranges for dropdown (current year - 5 to current year + 5)
+# Generate academic year ranges for dropdown (current year -5 to current year +5)
 current_year = date.today().year
 ACADEMIC_YEARS = [f"{year}-{year+1}" for year in range(current_year-5, current_year+6)]
 
@@ -65,8 +65,83 @@ def get_residency_max_from_program(program):
     return 5 if is_master_program(program) else 7
 
 def format_ay(ay_start, semester):
-    """Format academic year and semester, e.g., A.Y. 2024-2025 (1st Sem)"""
     return f"A.Y. {ay_start}-{ay_start+1} ({semester})"
+
+def get_thesis_pattern_description(program):
+    """Return a readable description of how thesis/dissertation units are typically taken."""
+    if is_master_program(program):
+        return "💡 MS students: thesis units (6 total) can be taken as 2-2-2 (three terms) or 3-3 (two terms)."
+    else:
+        return "💡 PhD students: dissertation units (12 total) can be taken as 3-3-3-3 (four terms) or 4-4-4 (three terms)."
+
+def compute_coursework_progress(row):
+    taken = row.get("total_units_taken", 0)
+    required = row.get("total_units_required", 24)
+    if required <= 0:
+        return 0
+    return min(100, int((taken / required) * 100))
+
+def check_deadline_alerts(row):
+    """Return list of deadline‑related warnings."""
+    alerts = []
+    program = row["program"]
+    thesis_units = row["thesis_units_taken"]
+    outline_approved = row["thesis_outline_approved"]
+    pos_status = row["pos_status"]
+    residency_used = row.get("residency_years_used", 0)
+    
+    # POS deadline
+    if program.startswith("MS") and residency_used >= 1 and pos_status not in ["Approved", "Completed"]:
+        alerts.append("⚠️ Plan of Study (POS) should be approved by 2nd semester of residence.")
+    elif program.startswith("PhD") and row.get("qualifying_exam_status") == "Passed" and pos_status != "Approved":
+        alerts.append("⚠️ Plan of Study (POS) pending approval after qualifying exam.")
+    
+    # Thesis outline deadline
+    if program.startswith("MS") and thesis_units >= 4 and outline_approved != "Yes":
+        alerts.append("⚠️ Thesis outline approval overdue (must be approved by 2nd thesis semester).")
+    if program.startswith("PhD") and thesis_units >= 8 and outline_approved != "Yes":
+        alerts.append("⚠️ Dissertation outline approval overdue (must be approved by 3rd dissertation semester).")
+    
+    # Qualifying exam deadline
+    if program.startswith("PhD") and residency_used >= 1 and row["qualifying_exam_status"] not in ["Passed", "N/A"]:
+        alerts.append("⚠️ Qualifying exam should be taken before 2nd semester of residence.")
+    
+    # Comprehensive exam deadline
+    if program.startswith("PhD") and row["total_units_taken"] >= row["total_units_required"] and row["written_comprehensive_status"] != "Passed":
+        alerts.append("⚠️ Written comprehensive exam pending after completing all coursework.")
+    
+    return alerts
+
+# ==================== PROFILE PICTURE HELPER ====================
+PIC_FOLDER = "profile_pics"
+if not os.path.exists(PIC_FOLDER):
+    os.makedirs(PIC_FOLDER)
+
+def save_profile_picture(student_number, uploaded_file):
+    if uploaded_file is None:
+        return None
+    ext = uploaded_file.name.split('.')[-1].lower()
+    if ext not in ['jpg', 'jpeg', 'png', 'gif']:
+        st.error("Unsupported file format. Use JPG, PNG, or GIF.")
+        return None
+    filename = f"{student_number}.{ext}"
+    filepath = os.path.join(PIC_FOLDER, filename)
+    with open(filepath, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    return filename
+
+def delete_profile_picture(student_number):
+    for f in os.listdir(PIC_FOLDER):
+        if f.startswith(str(student_number) + "."):
+            os.remove(os.path.join(PIC_FOLDER, f))
+            return True
+    return False
+
+def get_profile_picture_path(student_number):
+    for f in os.listdir(PIC_FOLDER):
+        if f.startswith(str(student_number) + "."):
+            return os.path.join(PIC_FOLDER, f)
+    return None
 
 # ==================== LOGIN PAGE ====================
 if not st.session_state.logged_in:
@@ -105,12 +180,15 @@ def create_default_data():
         "middle_name": ["M.", "L.", "P.", "C.", "R."],
         "program": [PROGRAMS[0], PROGRAMS[1], PROGRAMS[0], PROGRAMS[1], PROGRAMS[0]],
         "advisor": ["Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava"],
-        "AY": [2024-2025, 2023-2024, 2024-2025, 2022-2023, 2024-2025],
+        "ay_start": [2024, 2023, 2024, 2022, 2024],
         "semester": ["1st Sem", "1st Sem", "2nd Sem", "1st Sem", "1st Sem"],
-        "POS_status": ["Approved", "Approved", "Pending", "Approved", "Pending"],
-        "POS_submitted_date": ["2024-01-15", "2023-06-10", "", "2022-09-01", ""],
-        "POS_approved_date": ["2024-02-01", "2023-07-01", "", "2022-09-15", ""],
-        "GWA": [1.75, 1.85, 2.10, 1.95, 2.05],
+        "profile_pic": ["", "", "", "", ""],
+        "committee_members": ["Dr. Eslava, Dr. Sanchez", "Dr. Sanchez, Dr. Eslava", "Dr. Eslava", "Dr. Sanchez, Dr. Eslava", "Dr. Eslava"],
+        "committee_approval_date": ["2024-02-01", "2023-07-01", "", "2022-09-15", ""],
+        "pos_status": ["Approved", "Approved", "Pending", "Approved", "Pending"],
+        "pos_submitted_date": ["2024-01-15", "2023-06-10", "", "2022-09-01", ""],
+        "pos_approved_date": ["2024-02-01", "2023-07-01", "", "2022-09-15", ""],
+        "gwa": [1.75, 1.85, 2.10, 1.95, 2.05],
         "total_units_taken": [12, 18, 9, 24, 6],
         "total_units_required": [24, 24, 24, 24, 24],
         "thesis_units_taken": [3, 8, 2, 12, 1],
@@ -162,11 +240,14 @@ def load_data():
         df["semester"] = "1st Sem"
         df = df.drop(columns=["year_admitted"])
     
-    # Ensure ay_start and semester exist
     if "ay_start" not in df.columns:
         df["ay_start"] = 2024
     if "semester" not in df.columns:
         df["semester"] = "1st Sem"
+    if "committee_members" not in df.columns:
+        df["committee_members"] = ""
+    if "committee_approval_date" not in df.columns:
+        df["committee_approval_date"] = ""
     
     # Convert numeric columns
     numeric_int_cols = [
@@ -194,7 +275,6 @@ def load_data():
         df.at[idx, "residency_max_years"] = get_residency_max_from_program(program)
         df.at[idx, "thesis_units_limit"] = get_thesis_limit_from_program(program)
         
-        # Reset progress for very new students (ay_start >= 2025)
         if row["ay_start"] >= 2025:
             df.at[idx, "total_units_taken"] = 0
             df.at[idx, "written_comprehensive_status"] = "N/A"
@@ -387,7 +467,6 @@ if role == "SESAM Staff":
     st.subheader("📋 All Students")
     search = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001")
     filtered_df = filter_dataframe(search, df)
-    # Add formatted academic year column for display
     filtered_df["academic_year"] = filtered_df.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
     display_cols = ["student_number", "name", "program", "academic_year", "advisor", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status"]
     st.dataframe(filtered_df[display_cols], width='stretch', height=400)
@@ -412,7 +491,41 @@ if role == "SESAM Staff":
         student = df[df["name"] == student_name].iloc[0].copy()
         student_number = student["student_number"]
 
-        # Warnings
+        # ----- PROFILE PICTURE -----
+        st.markdown("---")
+        st.subheader("📸 Student Profile Picture")
+        col_pic1, col_pic2 = st.columns([1, 2])
+        with col_pic1:
+            pic_path = get_profile_picture_path(student_number)
+            if pic_path and os.path.exists(pic_path):
+                st.image(pic_path, width=150, caption="Current Picture")
+            else:
+                st.info("No profile picture uploaded.")
+        with col_pic2:
+            uploaded_file = st.file_uploader("Upload new profile picture (JPG, PNG, GIF)", type=["jpg", "jpeg", "png", "gif"], key=f"pic_{student_number}")
+            if uploaded_file:
+                new_filename = save_profile_picture(student_number, uploaded_file)
+                if new_filename:
+                    df.loc[df["student_number"] == student_number, "profile_pic"] = new_filename
+                    save_data(df)
+                    st.success("Profile picture updated!")
+                    st.rerun()
+            if st.button("🗑️ Delete current picture", key=f"del_pic_{student_number}"):
+                if delete_profile_picture(student_number):
+                    df.loc[df["student_number"] == student_number, "profile_pic"] = ""
+                    save_data(df)
+                    st.success("Profile picture deleted.")
+                    st.rerun()
+                else:
+                    st.warning("No picture to delete.")
+
+        # ----- DEADLINE ALERTS -----
+        deadline_alerts = check_deadline_alerts(student)
+        if deadline_alerts:
+            for alert in deadline_alerts:
+                st.error(alert)
+
+        # ----- STANDARD WARNINGS -----
         warnings = get_all_warnings(student)
         if any("⚠️" in w for w in warnings):
             for w in warnings:
@@ -420,7 +533,7 @@ if role == "SESAM Staff":
         else:
             st.success("\n".join(warnings))
 
-        # Student info
+        # ----- STUDENT INFO -----
         st.markdown("---")
         st.markdown("### Student Information")
         col1, col2, col3 = st.columns(3)
@@ -437,8 +550,9 @@ if role == "SESAM Staff":
             if student["thesis_units_taken"] > limit:
                 st.error("⚠️ Units exceeded!")
 
-        # Edit tabs (same as before)
-        tabs = st.tabs(["Coursework & Thesis", "Exams", "Residency & Leave", "Graduation", "Other"])
+        # ----- EDIT TABS (6 tabs now) -----
+        tabs = st.tabs(["Coursework & Thesis", "Exams", "Residency & Leave", "Graduation", "Committee", "Other"])
+        
         with tabs[0]:
             with st.form("coursework_form"):
                 st.subheader("Plan of Study (POS)")
@@ -450,8 +564,13 @@ if role == "SESAM Staff":
                 gwa = st.number_input("GWA", min_value=1.0, max_value=5.0, step=0.01, value=float(student["gwa"]))
                 total_units_taken = st.number_input("Total Units Taken", min_value=0, max_value=60, step=1, value=int(student["total_units_taken"]))
                 total_units_required = st.number_input("Total Units Required", min_value=0, max_value=60, step=1, value=int(student["total_units_required"]))
+                # Progress bar
+                progress = compute_coursework_progress(student)
+                st.progress(progress / 100, text=f"Coursework completion: {progress}% ({student['total_units_taken']} of {student['total_units_required']} units)")
+                st.caption(f"Remaining units: {max(0, student['total_units_required'] - student['total_units_taken'])}")
                 st.subheader("Thesis/Dissertation")
                 thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=int(student["thesis_units_taken"]))
+                st.caption(get_thesis_pattern_description(student["program"]))
                 outline_options = ["Yes", "No"]
                 thesis_outline_approved = st.selectbox("Thesis Outline Approved", outline_options, index=safe_index(outline_options, student["thesis_outline_approved"]))
                 thesis_outline_date = st.text_input("Outline Approval Date", student["thesis_outline_approved_date"])
@@ -520,7 +639,19 @@ if role == "SESAM Staff":
                     save_data(df)
                     st.success("✅ Updated!")
                     st.rerun()
-        with tabs[4]:
+        with tabs[4]:   # COMMITTEE TAB
+            with st.form("committee_form"):
+                st.subheader("Guidance / Advisory Committee")
+                committee_members = st.text_area("Committee Members (one per line)", value=student.get("committee_members", ""), height=150,
+                                                 help="List names of major professor/adviser and other committee members.")
+                committee_approval_date = st.text_input("Committee Approval Date (YYYY-MM-DD)", student.get("committee_approval_date", ""))
+                if st.form_submit_button("Update Committee"):
+                    df.loc[df["student_number"] == student_number, "committee_members"] = committee_members
+                    df.loc[df["student_number"] == student_number, "committee_approval_date"] = committee_approval_date
+                    save_data(df)
+                    st.success("Committee information updated!")
+                    st.rerun()
+        with tabs[5]:
             with st.form("other_form"):
                 st.subheader("Re-admission (for students who exceeded time limit)")
                 readmit_options = ["Not Applicable", "Applied", "Approved", "Denied"]
@@ -535,7 +666,7 @@ if role == "SESAM Staff":
     else:
         st.info("No students match the current search. Try a different name/number or add a new student below.")
 
-    # ----- ADD NEW STUDENT (with Academic Year dropdown and Semester) -----
+    # ----- ADD NEW STUDENT -----
     st.markdown("---")
     st.subheader("➕ Add New Student")
     with st.expander("Register New Student", expanded=True):
@@ -556,12 +687,11 @@ if role == "SESAM Staff":
             
             col6, col7 = st.columns(2)
             with col6:
-                # Academic Year dropdown with ranges like "2026-2027"
                 selected_ay_range = st.selectbox("Academic Year *", options=ACADEMIC_YEARS, index=ACADEMIC_YEARS.index(f"{current_year}-{current_year+1}") if f"{current_year}-{current_year+1}" in ACADEMIC_YEARS else 0)
-                # Extract start year from selected range (e.g., "2026-2027" -> 2026)
                 ay_start = int(selected_ay_range.split("-")[0])
             with col7:
                 semester = st.selectbox("Semester *", options=SEMESTERS)
+            st.caption(f"📅 {format_ay(ay_start, semester)}")
             
             col8, col9 = st.columns(2)
             with col8:
@@ -576,6 +706,7 @@ if role == "SESAM Staff":
                 gwa = st.number_input("Initial GWA", min_value=1.0, max_value=5.0, step=0.01, value=2.0, help="1.0 best, 5.0 failing")
             with col11:
                 thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=0)
+                st.caption(get_thesis_pattern_description(program))
             with col12:
                 pos_status = st.selectbox("POS Status", ["Not Filed", "Pending", "Approved"])
             
@@ -605,7 +736,6 @@ if role == "SESAM Staff":
                 else:
                     middle = f" {middle_name.strip()}" if middle_name.strip() else ""
                     full_name = f"{last_name.strip()}, {first_name.strip()}{middle}"
-                    
                     new_row = create_default_data().iloc[0].to_dict()
                     new_row.update({
                         "student_number": student_number.strip(),
@@ -622,7 +752,8 @@ if role == "SESAM Staff":
                         "thesis_units_taken": thesis_units_taken,
                         "thesis_units_limit": get_thesis_limit(program),
                         "residency_max_years": get_residency_max(program),
-                        # Reset all other fields
+                        "committee_members": "",
+                        "committee_approval_date": "",
                         "profile_pic": "",
                         "pos_submitted_date": "",
                         "pos_approved_date": "",
@@ -678,6 +809,8 @@ elif role == "Faculty Adviser":
             filtered_advisees = filter_dataframe(search_adv, advisees)
             filtered_advisees["academic_year"] = filtered_advisees.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
             filtered_advisees["warnings"] = filtered_advisees.apply(lambda row: "\n".join(get_all_warnings(row)), axis=1)
+            # Also add deadline alerts to the table
+            filtered_advisees["deadline_alerts"] = filtered_advisees.apply(lambda row: "\n".join(check_deadline_alerts(row)), axis=1)
             display_cols = ["student_number", "name", "program", "academic_year", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status", "warnings"]
             st.dataframe(filtered_advisees[display_cols], width='stretch')
             if len(filtered_advisees) > 0:
@@ -700,6 +833,11 @@ elif role == "Faculty Adviser":
                         pic_path = get_profile_picture_path(row["student_number"])
                         if pic_path and os.path.exists(pic_path):
                             st.image(pic_path, width=100, caption="Profile Picture")
+                        # Show deadline alerts
+                        alerts = check_deadline_alerts(row)
+                        if alerts:
+                            for alert in alerts:
+                                st.error(alert)
                         warnings_text = row["warnings"]
                         if any("⚠️" in w for w in warnings_text.split("\n")):
                             for w in warnings_text.split("\n"):
@@ -718,6 +856,12 @@ elif role == "Student":
         st.error("Your record not found. Please contact SESAM Staff.")
     else:
         student = student_record.iloc[0]
+        # Deadline alerts
+        alerts = check_deadline_alerts(student)
+        if alerts:
+            for alert in alerts:
+                st.error(alert)
+        # Standard warnings
         warnings = get_all_warnings(student)
         if any("⚠️" in w for w in warnings):
             for w in warnings:
@@ -761,6 +905,21 @@ elif role == "Student":
                 st.metric("Residency", f"{student['residency_years_used']} / {get_residency_max(student['program'])} years")
                 st.metric("Final Exam", student["final_exam_status"])
 
+        # Coursework progress bar
+        st.markdown("---")
+        st.subheader("📚 Coursework Progress")
+        progress = compute_coursework_progress(student)
+        st.progress(progress / 100, text=f"{progress}% completed ({student['total_units_taken']} of {student['total_units_required']} units)")
+        st.caption(f"Remaining units: {max(0, student['total_units_required'] - student['total_units_taken'])}")
+        
+        # Committee information
+        if student.get("committee_members"):
+            with st.expander("📋 Your Guidance/Advisory Committee"):
+                st.text_area("Committee Members", value=student["committee_members"], height=120, disabled=True)
+                if student.get("committee_approval_date"):
+                    st.caption(f"Approved on: {student['committee_approval_date']}")
+
+        # Milestone status
         st.markdown("---")
         st.subheader("📌 Milestone Status")
         milestone_df = pd.DataFrame({
