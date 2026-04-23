@@ -1,7 +1,7 @@
 """
 SESAM KMIS - Student Module V2 (Graduate School Rules Integration)
-Author: Alyssa Fatmah S. Mastura
-Date: April 23, 2026
+Author: [Your Name]
+Date: [Current Date]
 Description: Tracks graduate student milestones, thesis units, exams, residency, LOA/AWOL, etc.
 Based on UPLB Graduate School Policies, Rules and Regulations (2009).
 """
@@ -9,7 +9,7 @@ Based on UPLB Graduate School Policies, Rules and Regulations (2009).
 import streamlit as st
 import pandas as pd
 import os
-from datetime import datetime, date
+from datetime import date
 
 # ==================== PAGE CONFIGURATION ====================
 st.set_page_config(
@@ -182,19 +182,15 @@ def check_loa_warning(row):
 
 def check_thesis_outline_deadline(row):
     if row["program"] == "MS" and row["thesis_units_taken"] > 0:
-        # MS: outline must be approved not later than second semester of thesis enrollment
-        # Simplified: if thesis units taken >= 4 and not approved, warn
         if row["thesis_units_taken"] >= 4 and row["thesis_outline_approved"] != "Yes":
             return "⚠️ Thesis outline approval overdue (should be approved by 2nd thesis semester)"
     elif row["program"] == "PhD" and row["thesis_units_taken"] > 0:
-        # PhD: outline must be approved not later than third semester of dissertation enrollment
         if row["thesis_units_taken"] >= 8 and row["thesis_outline_approved"] != "Yes":
             return "⚠️ Dissertation outline approval overdue (should be approved by 3rd dissertation semester)"
     return "✅ Outline on track"
 
 def check_qualifying_exam_deadline(row):
     if row["program"] == "PhD" and row["residency_years_used"] >= 1:
-        # Qualifying exam should be taken before registration for second semester of residence
         if row["qualifying_exam_status"] not in ["Passed", "N/A"]:
             return "⚠️ Qualifying exam should be taken before 2nd semester of residence"
     return "✅ Qualifying exam on track"
@@ -216,7 +212,8 @@ def get_all_warnings(row):
     warnings.append(check_qualifying_exam_deadline(row))
     warnings.append(check_comprehensive_exam_deadline(row))
     # Filter out duplicates and empty
-    return [w for w in warnings if w and "✅" not in w] or ["✅ All rules satisfied"]
+    result = [w for w in warnings if w and "✅" not in w]
+    return result if result else ["✅ All rules satisfied"]
 
 # Load data
 df = load_data()
@@ -242,6 +239,13 @@ st.markdown("---")
 
 role = st.session_state.role
 
+# Helper to safely get index for selectbox
+def safe_index(options, value):
+    try:
+        return options.index(value)
+    except ValueError:
+        return 0
+
 # ==================== STAFF VIEW (Full Edit) ====================
 if role == "SESAM Staff":
     st.subheader("📋 All Students")
@@ -256,7 +260,10 @@ if role == "SESAM Staff":
 
         # Display warnings
         warnings = get_all_warnings(student)
-        st.warning("\n".join(warnings)) if any("⚠️" in w for w in warnings) else st.success("\n".join(warnings))
+        if any("⚠️" in w for w in warnings):
+            st.warning("\n".join(warnings))
+        else:
+            st.success("\n".join(warnings))
 
         # Basic info display
         col1, col2, col3 = st.columns(3)
@@ -279,7 +286,8 @@ if role == "SESAM Staff":
         with tab1:
             with st.form("coursework_form"):
                 st.subheader("Plan of Study (POS)")
-                pos_status = st.selectbox("POS Status", ["Not Filed", "Pending", "Approved"], index=["Not Filed","Pending","Approved"].index(student["pos_status"]))
+                pos_options = ["Not Filed", "Pending", "Approved"]
+                pos_status = st.selectbox("POS Status", pos_options, index=safe_index(pos_options, student["pos_status"]))
                 pos_submitted = st.text_input("POS Submitted Date (YYYY-MM-DD)", student["pos_submitted_date"])
                 pos_approved = st.text_input("POS Approved Date (YYYY-MM-DD)", student["pos_approved_date"])
 
@@ -290,9 +298,11 @@ if role == "SESAM Staff":
 
                 st.subheader("Thesis/Dissertation")
                 thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=int(student["thesis_units_taken"]))
-                thesis_outline_approved = st.selectbox("Thesis Outline Approved", ["Yes","No"], index=0 if student["thesis_outline_approved"]=="Yes" else 1)
+                outline_options = ["Yes", "No"]
+                thesis_outline_approved = st.selectbox("Thesis Outline Approved", outline_options, index=safe_index(outline_options, student["thesis_outline_approved"]))
                 thesis_outline_date = st.text_input("Outline Approval Date", student["thesis_outline_approved_date"])
-                thesis_status = st.selectbox("Thesis Status", ["Not Started","In Progress","Draft with Adviser","For Committee Review","Approved","Submitted"], index=["Not Started","In Progress","Draft with Adviser","For Committee Review","Approved","Submitted"].index(student["thesis_status"]))
+                status_options = ["Not Started", "In Progress", "Draft with Adviser", "For Committee Review", "Approved", "Submitted"]
+                thesis_status = st.selectbox("Thesis Status", status_options, index=safe_index(status_options, student["thesis_status"]))
 
                 if st.form_submit_button("Update Coursework & Thesis"):
                     df.loc[df["student_id"] == student_id, ["pos_status","pos_submitted_date","pos_approved_date","gwa","total_units_taken","total_units_required","thesis_units_taken","thesis_outline_approved","thesis_outline_approved_date","thesis_status"]] = [pos_status, pos_submitted, pos_approved, gwa, total_units_taken, total_units_required, thesis_units_taken, thesis_outline_approved, thesis_outline_date, thesis_status]
@@ -303,18 +313,25 @@ if role == "SESAM Staff":
         with tab2:
             with st.form("exams_form"):
                 st.subheader("Examinations")
-                # PhD exams
-                qualifying = st.selectbox("Qualifying Exam Status (PhD)", ["N/A","Not Taken","Passed","Failed","Re-exam Scheduled"], index=["N/A","Not Taken","Passed","Failed","Re-exam Scheduled"].index(student["qualifying_exam_status"]))
+                # Qualifying exam
+                qual_options = ["N/A", "Not Taken", "Passed", "Failed", "Re-exam Scheduled"]
+                qualifying = st.selectbox("Qualifying Exam Status (PhD)", qual_options, index=safe_index(qual_options, student["qualifying_exam_status"]))
                 qualifying_date = st.text_input("Qualifying Exam Passed Date", student["qualifying_exam_passed_date"])
-                written_comp = st.selectbox("Written Comprehensive Status", ["N/A","Not Taken","Passed","Failed"], index=["N/A","Not Taken","Passed","Failed"].index(student["written_comprehensive_status"]))
+                # Written comprehensive
+                wcomp_options = ["N/A", "Not Taken", "Passed", "Failed"]
+                written_comp = st.selectbox("Written Comprehensive Status", wcomp_options, index=safe_index(wcomp_options, student["written_comprehensive_status"]))
                 written_comp_date = st.text_input("Written Comprehensive Passed Date", student["written_comprehensive_passed_date"])
-                oral_comp = st.selectbox("Oral Comprehensive Status", ["N/A","Not Taken","Passed","Failed"], index=["N/A","Not Taken","Passed","Failed"].index(student["oral_comprehensive_status"]))
+                # Oral comprehensive
+                ocomp_options = ["N/A", "Not Taken", "Passed", "Failed"]
+                oral_comp = st.selectbox("Oral Comprehensive Status", ocomp_options, index=safe_index(ocomp_options, student["oral_comprehensive_status"]))
                 oral_comp_date = st.text_input("Oral Comprehensive Passed Date", student["oral_comprehensive_passed_date"])
-                # MS general exam
-                general = st.selectbox("General Exam Status (MS)", ["N/A","Not Taken","Passed","Failed"], index=["N/A","Not Taken","Passed","Failed"].index(student["general_exam_status"]))
+                # General exam (MS)
+                gen_options = ["N/A", "Not Taken", "Passed", "Failed"]
+                general = st.selectbox("General Exam Status (MS)", gen_options, index=safe_index(gen_options, student["general_exam_status"]))
                 general_date = st.text_input("General Exam Passed Date", student["general_exam_passed_date"])
                 # Final exam
-                final = st.selectbox("Final Exam Status", ["Not Taken","Passed","Failed","Re-exam Scheduled"], index=["Not Taken","Passed","Failed","Re-exam Scheduled"].index(student["final_exam_status"]))
+                final_options = ["Not Taken", "Passed", "Failed", "Re-exam Scheduled"]
+                final = st.selectbox("Final Exam Status", final_options, index=safe_index(final_options, student["final_exam_status"]))
                 final_date = st.text_input("Final Exam Passed Date", student["final_exam_passed_date"])
 
                 if st.form_submit_button("Update Exams"):
@@ -338,7 +355,8 @@ if role == "SESAM Staff":
                 loa_terms = st.number_input("Total LOA Terms (each term = 0.5 year)", min_value=0, max_value=4, step=1, value=int(student["loa_total_terms"]))
 
                 st.subheader("AWOL")
-                awol = st.selectbox("AWOL Status", ["No","Yes"], index=0 if student["awol_status"]=="No" else 1)
+                awol_options = ["No", "Yes"]
+                awol = st.selectbox("AWOL Status", awol_options, index=safe_index(awol_options, student["awol_status"]))
                 awol_lifted = st.text_input("AWOL Lifted Date", student["awol_lifted_date"])
 
                 if st.form_submit_button("Update Residency & Leave"):
@@ -350,8 +368,9 @@ if role == "SESAM Staff":
         with tab4:
             with st.form("graduation_form"):
                 st.subheader("Graduation")
-                grad_applied = st.selectbox("Graduation Applied", ["No","Yes"], index=0 if student["graduation_applied"]=="No" else 1)
-                grad_approved = st.selectbox("Graduation Approved", ["No","Yes"], index=0 if student["graduation_approved"]=="No" else 1)
+                yn_options = ["No", "Yes"]
+                grad_applied = st.selectbox("Graduation Applied", yn_options, index=safe_index(yn_options, student["graduation_applied"]))
+                grad_approved = st.selectbox("Graduation Approved", yn_options, index=safe_index(yn_options, student["graduation_approved"]))
                 grad_date = st.text_input("Graduation Date (YYYY-MM-DD)", student["graduation_date"])
 
                 st.subheader("Transfer Credit")
@@ -366,7 +385,8 @@ if role == "SESAM Staff":
         with tab5:
             with st.form("other_form"):
                 st.subheader("Re-admission (for students who exceeded time limit)")
-                re_status = st.selectbox("Re-admission Status", ["Not Applicable","Applied","Approved","Denied"], index=["Not Applicable","Applied","Approved","Denied"].index(student["re_admission_status"]))
+                readmit_options = ["Not Applicable", "Applied", "Approved", "Denied"]
+                re_status = st.selectbox("Re-admission Status", readmit_options, index=safe_index(readmit_options, student["re_admission_status"]))
                 re_date = st.text_input("Re-admission Date", student["re_admission_date"])
 
                 if st.form_submit_button("Update Re-admission"):
@@ -392,7 +412,8 @@ if role == "SESAM Staff":
                 new_year = st.number_input("Year Admitted", min_value=2000, max_value=2030, step=1, value=2025)
             with col2:
                 st.markdown("**Initial Status**")
-                new_pos = st.selectbox("POS Status", ["Not Filed", "Pending", "Approved"])
+                pos_options = ["Not Filed", "Pending", "Approved"]
+                new_pos = st.selectbox("POS Status", pos_options)
                 new_gwa = st.number_input("Initial GWA", min_value=1.0, max_value=5.0, step=0.01, value=2.0)
                 new_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=0)
 
@@ -452,7 +473,11 @@ elif role == "Faculty Adviser":
                     st.write(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
                     st.write(f"**Final Exam:** {row['final_exam_status']}")
                     st.write(f"**Residency:** {row['residency_years_used']}/{row['residency_max_years']} years")
-                st.warning(row["warnings"]) if any("⚠️" in row["warnings"] for _ in [1]) else st.success(row["warnings"])
+                warnings_text = row["warnings"]
+                if any("⚠️" in w for w in warnings_text.split("\n")):
+                    st.warning(warnings_text)
+                else:
+                    st.success(warnings_text)
     st.info("📌 Read-only view. For updates, contact SESAM Staff.")
 
 # ==================== STUDENT VIEW (Read-only) ====================
@@ -464,7 +489,10 @@ elif role == "Student":
     else:
         student = student_record.iloc[0]
         warnings = get_all_warnings(student)
-        st.warning("\n".join(warnings)) if any("⚠️" in w for w in warnings) else st.success("\n".join(warnings))
+        if any("⚠️" in w for w in warnings):
+            st.warning("\n".join(warnings))
+        else:
+            st.success("\n".join(warnings))
 
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -495,9 +523,9 @@ elif role == "Student":
             ],
             "Status": [
                 student["pos_status"],
-                student["general_exam_status"] if student["program"]=="MS" else student["qualifying_exam_status"],
-                student["written_comprehensive_status"] if student["program"]=="PhD" else "N/A",
-                student["oral_comprehensive_status"] if student["program"]=="PhD" else "N/A",
+                student["general_exam_status"] if student["program"] == "MS" else student["qualifying_exam_status"],
+                student["written_comprehensive_status"] if student["program"] == "PhD" else "N/A",
+                student["oral_comprehensive_status"] if student["program"] == "PhD" else "N/A",
                 student["thesis_outline_approved"],
                 student["final_exam_status"]
             ]
