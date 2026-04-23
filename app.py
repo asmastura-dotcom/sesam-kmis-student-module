@@ -125,7 +125,7 @@ def create_default_data():
         "first_name": ["Juan", "Maria", "Jose", "Ana", "Carlos"],
         "middle_name": ["M.", "L.", "P.", "C.", "R."],
         "program": [PROGRAMS[0], PROGRAMS[1], PROGRAMS[0], PROGRAMS[1], PROGRAMS[0]],
-        "advisor_username": ["adviser1", "adviser2", "adviser1", "adviser2", "adviser1"],
+        "advisor": ["Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava"],
         "year_admitted": [2024, 2023, 2024, 2022, 2024],
         "profile_pic": ["", "", "", "", ""],
         "pos_status": ["Approved", "Approved", "Pending", "Approved", "Pending"],
@@ -459,13 +459,12 @@ if role == "SESAM Staff":
         st.markdown("---")
         st.markdown("### Student Information")
         col1, col2, col3 = st.columns(3)
-        advisor_display = USERS.get(student["advisor_username"], {}).get("display_name", student["advisor_username"])
         with col1:
             st.markdown(f"**Student Number:** {student['student_number']}")
             st.markdown(f"**Name:** {student['name']}")
         with col2:
             st.markdown(f"**Program:** {student['program']}")
-            st.markdown(f"**Advisor:** {advisor_display}")
+            st.markdown(f"**Advisor:** {student['advisor']}")
         with col3:
             limit = get_thesis_limit(student["program"])
             st.markdown(f"**Thesis Units:** {student['thesis_units_taken']} / {limit}")
@@ -570,59 +569,87 @@ if role == "SESAM Staff":
     else:
         st.info("No students match the current search. Try a different name/number or add a new student below.")
 
-    # ----- ADD NEW STUDENT (with new name fields) -----
+    # ----- ADD NEW STUDENT (simple format from image) -----
     st.markdown("---")
     st.subheader("➕ Add New Student")
-    with st.expander("Click to expand and add a new student record"):
-        with st.form("add_student_form"):
-            col1, col2 = st.columns(2)
+    with st.expander("Register New Student", expanded=True):
+        with st.form(key="add_student_form"):
+            col1, col2, col3 = st.columns(3)
             with col1:
-                new_student_number = st.text_input("Student Number (unique)", max_chars=20, help="e.g., S006 or 2025-001")
-                new_last_name = st.text_input("Last Name")
-                new_first_name = st.text_input("First Name")
-                new_middle_name = st.text_input("Middle Name (optional)", placeholder="e.g., M. or leave empty")
-                new_program = st.selectbox("Program", PROGRAMS)
+                last_name = st.text_input("Last Name *", placeholder="Dela Cruz")
             with col2:
-                new_advisor = st.selectbox("Advisor Username", ["adviser1", "adviser2"])
-                new_year = st.number_input("Year Admitted", min_value=2000, max_value=2030, step=1, value=2025)
-                thesis_limit = get_thesis_limit(new_program)
-                st.info(f"📘 Thesis units required for this program: **{thesis_limit}**")
-                new_pos = st.selectbox("Initial POS Status", ["Not Filed", "Pending", "Approved"])
-                new_gwa = st.number_input("Initial GWA", min_value=1.0, max_value=5.0, step=0.01, value=2.0)
-                new_units_taken = st.number_input("Initial Thesis Units Taken", min_value=0, max_value=20, step=1, value=0)
-
-            submitted = st.form_submit_button("➕ Add Student")
+                first_name = st.text_input("First Name *", placeholder="Juan")
+            with col3:
+                middle_name = st.text_input("Middle Name", placeholder="Santos (optional)")
+            
+            col4, col5 = st.columns(2)
+            with col4:
+                student_number = st.text_input("Student Number *", placeholder="2025-00123")
+            with col5:
+                program = st.selectbox("Program *", options=PROGRAMS)
+            
+            col6, col7 = st.columns(2)
+            with col6:
+                year_admitted = st.number_input("Year Admitted", min_value=2000, max_value=2030, value=2026, step=1)
+            with col7:
+                advisor = st.text_input("Advisor (optional)", placeholder="Dr. Faustino-Eslava")
+            
+            st.markdown("---")
+            st.markdown("### Initial Milestone Status (optional)")
+            col8, col9, col10 = st.columns(3)
+            with col8:
+                gwa = st.number_input("Initial GWA", min_value=1.0, max_value=5.0, step=0.01, value=2.0, help="1.0 best, 5.0 failing")
+            with col9:
+                thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=0)
+            with col10:
+                pos_status = st.selectbox("POS Status", ["Not Filed", "Pending", "Approved"])
+            
+            col11, col12, col13 = st.columns(3)
+            with col11:
+                comp_exam = st.selectbox("Comprehensive Exam (PhD)", ["N/A", "Not Taken", "Passed", "Failed"])
+            with col12:
+                general_exam = st.selectbox("General Exam (MS)", ["N/A", "Not Taken", "Passed", "Failed"])
+            with col13:
+                final_exam = st.selectbox("Final Exam Status", ["Not Taken", "Passed", "Failed"])
+            
+            submitted = st.form_submit_button("Register Student")
+            
             if submitted:
                 errors = []
-                if not new_student_number:
-                    errors.append("Student Number is required.")
-                if not new_last_name:
+                if not last_name:
                     errors.append("Last Name is required.")
-                if not new_first_name:
+                if not first_name:
                     errors.append("First Name is required.")
-                if new_student_number in df["student_number"].values:
-                    errors.append(f"Student Number '{new_student_number}' already exists.")
+                if not student_number:
+                    errors.append("Student Number is required.")
+                if student_number in df["student_number"].values:
+                    errors.append("Student number already exists. Please use a unique number.")
                 if errors:
                     for err in errors:
                         st.error(err)
                 else:
-                    middle = f" {new_middle_name}" if new_middle_name else ""
-                    full_name = f"{new_last_name}, {new_first_name}{middle}"
+                    # Construct full name
+                    middle = f" {middle_name.strip()}" if middle_name.strip() else ""
+                    full_name = f"{last_name.strip()}, {first_name.strip()}{middle}"
+                    
+                    # Create new student record (match DataFrame columns)
                     new_row = create_default_data().iloc[0].to_dict()
                     new_row.update({
-                        "student_number": new_student_number,
+                        "student_number": student_number.strip(),
                         "name": full_name,
-                        "last_name": new_last_name,
-                        "first_name": new_first_name,
-                        "middle_name": new_middle_name,
-                        "program": new_program,
-                        "advisor_username": new_advisor,
-                        "year_admitted": new_year,
-                        "pos_status": new_pos,
-                        "gwa": new_gwa,
-                        "thesis_units_taken": new_units_taken,
-                        "thesis_units_limit": thesis_limit,
-                        "residency_max_years": get_residency_max(new_program),
+                        "last_name": last_name.strip(),
+                        "first_name": first_name.strip(),
+                        "middle_name": middle_name.strip(),
+                        "program": program,
+                        "advisor": advisor.strip() if advisor else "Not assigned",
+                        "year_admitted": year_admitted,
+                        "pos_status": pos_status,
+                        "gwa": gwa,
+                        "thesis_units_taken": thesis_units_taken,
+                        "thesis_units_limit": get_thesis_limit(program),
+                        "residency_max_years": get_residency_max(program),
+                        # Reset all other fields to initial values
+                        "profile_pic": "",
                         "pos_submitted_date": "",
                         "pos_approved_date": "",
                         "total_units_taken": 0,
@@ -630,15 +657,15 @@ if role == "SESAM Staff":
                         "thesis_outline_approved": "No",
                         "thesis_outline_approved_date": "",
                         "thesis_status": "Not Started",
-                        "qualifying_exam_status": "N/A",
+                        "qualifying_exam_status": comp_exam if program.startswith("PhD") else "N/A",
                         "qualifying_exam_passed_date": "",
                         "written_comprehensive_status": "N/A",
                         "written_comprehensive_passed_date": "",
                         "oral_comprehensive_status": "N/A",
                         "oral_comprehensive_passed_date": "",
-                        "general_exam_status": "N/A",
+                        "general_exam_status": general_exam if is_master_program(program) else "N/A",
                         "general_exam_passed_date": "",
-                        "final_exam_status": "Not Taken",
+                        "final_exam_status": final_exam,
                         "final_exam_passed_date": "",
                         "residency_years_used": 0,
                         "extension_count": 0,
@@ -653,55 +680,60 @@ if role == "SESAM Staff":
                         "graduation_approved": "No",
                         "graduation_date": "",
                         "re_admission_status": "Not Applicable",
-                        "re_admission_date": "",
-                        "profile_pic": ""
+                        "re_admission_date": ""
                     })
                     new_df = pd.DataFrame([new_row])
                     df = pd.concat([df, new_df], ignore_index=True)
                     save_data(df)
-                    st.success(f"✅ Student '{full_name}' (Number: {new_student_number}) added!")
+                    st.success(f"✅ Student {full_name} (Number: {student_number}) registered successfully!")
                     st.rerun()
 
 # ==================== ADVISER VIEW ====================
 elif role == "Faculty Adviser":
-    st.subheader(f"👨‍🏫 Your Advisees ({st.session_state.display_name})")
-    advisees = df[df["advisor_username"] == st.session_state.username].copy()
-    if len(advisees) == 0:
-        st.warning("No students assigned to you.")
+    st.subheader(f"👨‍🏫 Your Advisees")
+    # Get all unique advisor names from the data
+    all_advisors = sorted(df["advisor"].unique())
+    if len(all_advisors) == 0:
+        st.warning("No advisors found in the data.")
     else:
-        search_adv = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001")
-        filtered_advisees = filter_dataframe(search_adv, advisees)
-        filtered_advisees["warnings"] = filtered_advisees.apply(lambda row: "\n".join(get_all_warnings(row)), axis=1)
-        display_cols = ["student_number", "name", "program", "year_admitted", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status", "warnings"]
-        st.dataframe(filtered_advisees[display_cols], width='stretch')
-        if len(filtered_advisees) > 0:
-            st.markdown("---")
-            st.subheader("📌 Detailed View")
-            for _, row in filtered_advisees.iterrows():
-                with st.expander(f"{row['name']} ({row['student_number']})"):
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.markdown(f"**Program:** {row['program']}")
-                        st.markdown(f"**Admitted:** {format_ay(row['year_admitted'])}")
-                        st.markdown(f"**GWA:** {row['gwa']}")
-                        st.markdown(f"**POS Status:** {row['pos_status']}")
-                        st.markdown(f"**Thesis Units:** {row['thesis_units_taken']}/{row['thesis_units_limit']}")
-                    with col2:
-                        st.markdown(f"**General Exam:** {row['general_exam_status']}")
-                        st.markdown(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
-                        st.markdown(f"**Final Exam:** {row['final_exam_status']}")
-                        st.markdown(f"**Residency:** {row['residency_years_used']}/{get_residency_max(row['program'])} years")
-                    pic_path = get_profile_picture_path(row["student_number"])
-                    if pic_path and os.path.exists(pic_path):
-                        st.image(pic_path, width=100, caption="Profile Picture")
-                    warnings_text = row["warnings"]
-                    if any("⚠️" in w for w in warnings_text.split("\n")):
-                        for w in warnings_text.split("\n"):
-                            st.error(w)
-                    else:
-                        st.success(warnings_text)
+        selected_advisor = st.selectbox("Select your name", all_advisors)
+        advisees = df[df["advisor"] == selected_advisor].copy()
+        if len(advisees) == 0:
+            st.warning("No students assigned to this advisor.")
         else:
-            st.info("No matching students.")
+            search_adv = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001")
+            filtered_advisees = filter_dataframe(search_adv, advisees)
+            filtered_advisees["warnings"] = filtered_advisees.apply(lambda row: "\n".join(get_all_warnings(row)), axis=1)
+            display_cols = ["student_number", "name", "program", "year_admitted", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status", "warnings"]
+            st.dataframe(filtered_advisees[display_cols], width='stretch')
+            if len(filtered_advisees) > 0:
+                st.markdown("---")
+                st.subheader("📌 Detailed View")
+                for _, row in filtered_advisees.iterrows():
+                    with st.expander(f"{row['name']} ({row['student_number']})"):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown(f"**Program:** {row['program']}")
+                            st.markdown(f"**Admitted:** {format_ay(row['year_admitted'])}")
+                            st.markdown(f"**GWA:** {row['gwa']}")
+                            st.markdown(f"**POS Status:** {row['pos_status']}")
+                            st.markdown(f"**Thesis Units:** {row['thesis_units_taken']}/{row['thesis_units_limit']}")
+                        with col2:
+                            st.markdown(f"**General Exam:** {row['general_exam_status']}")
+                            st.markdown(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
+                            st.markdown(f"**Final Exam:** {row['final_exam_status']}")
+                            st.markdown(f"**Residency:** {row['residency_years_used']}/{get_residency_max(row['program'])} years")
+                        pic_path = get_profile_picture_path(row["student_number"])
+                        if pic_path and os.path.exists(pic_path):
+                            st.image(pic_path, width=100, caption="Profile Picture")
+                        warnings_text = row["warnings"]
+                        if any("⚠️" in w for w in warnings_text.split("\n")):
+                            for w in warnings_text.split("\n"):
+                                st.error(w)
+                        else:
+                            st.success(warnings_text)
+            else:
+                st.info("No matching students.")
     st.info("📌 Read-only view. For updates, contact SESAM Staff.")
 
 # ==================== STUDENT VIEW ====================
@@ -731,8 +763,7 @@ elif role == "Student":
                     st.metric("Program", student["program"])
                     st.metric("Year Admitted", format_ay(student["year_admitted"]))
                 with col2:
-                    advisor_display = USERS.get(student["advisor_username"], {}).get("display_name", student["advisor_username"])
-                    st.metric("Advisor", advisor_display)
+                    st.metric("Advisor", student["advisor"])
                     st.metric("GWA", f"{student['gwa']:.2f}")
                     st.metric("POS Status", student["pos_status"])
                 with col3:
@@ -747,8 +778,7 @@ elif role == "Student":
                 st.metric("Program", student["program"])
                 st.metric("Year Admitted", format_ay(student["year_admitted"]))
             with col2:
-                advisor_display = USERS.get(student["advisor_username"], {}).get("display_name", student["advisor_username"])
-                st.metric("Advisor", advisor_display)
+                st.metric("Advisor", student["advisor"])
                 st.metric("GWA", f"{student['gwa']:.2f}")
                 st.metric("POS Status", student["pos_status"])
             with col3:
