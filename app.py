@@ -1,9 +1,10 @@
 """
 SESAM KMIS - Student Module V2 (Graduate School Rules Integration)
-Author: SESAM Dev Team
+Author: Alyssa Fatmah S. Mastura
 Date: 2026-04-23
 Description: Tracks graduate student milestones, thesis units, exams, residency, LOA/AWOL, etc.
-Plus student uploads: profile picture and AMIS screenshot (with manual GWA entry).
+Students upload profile picture and AMIS screenshot (with manual GWA entry).
+Staff & faculty can only view uploaded images.
 Based on UPLB Graduate School Policies, Rules and Regulations (2009).
 """
 
@@ -544,7 +545,7 @@ def filter_dataframe(search_term, data):
     )
     return data[mask]
 
-# ==================== STAFF VIEW ====================
+# ==================== STAFF VIEW (view‑only images) ====================
 if role == "SESAM Staff":
     st.subheader("📋 All Students")
     search = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001")
@@ -581,7 +582,7 @@ if role == "SESAM Staff":
             st.image(pic_path, width=100, caption="Current Profile Picture")
         else:
             st.info("No profile picture uploaded by student.")
-        
+
         # ----- AMIS SCREENSHOT (Staff: view only) -----
         st.markdown("---")
         st.subheader("📊 AMIS Screenshot (View Only)")
@@ -590,18 +591,31 @@ if role == "SESAM Staff":
             st.image(amis_path, width=250, caption="AMIS Screenshot")
         else:
             st.info("No AMIS screenshot uploaded by student.")
-                # ----- DEADLINE ALERTS & WARNINGS -----
-                deadline_alerts = check_deadline_alerts(student)
-                if deadline_alerts:
-                    for alert in deadline_alerts:
-                        st.error(alert)
-        
-                warnings = get_all_warnings(student)
-                if any("⚠️" in w for w in warnings):
-                    for w in warnings:
-                        st.error(w)
-                else:
-                    st.success("\n".join(warnings))
+
+        # ----- MANUAL GWA ENTRY (Staff can edit based on AMIS) -----
+        st.markdown("---")
+        st.subheader("📈 Manual GWA Entry (based on AMIS)")
+        current_gwa = float(student["gwa"])
+        new_gwa = st.number_input("Enter the GWA exactly as shown on the AMIS screenshot", 
+                                  min_value=1.0, max_value=5.0, step=0.01, value=current_gwa)
+        if st.button("Update GWA from AMIS"):
+            df.loc[df["student_number"] == student_number, "gwa"] = new_gwa
+            save_data(df)
+            st.success(f"GWA updated to {new_gwa}")
+            st.rerun()
+
+        # ----- DEADLINE ALERTS & WARNINGS -----
+        deadline_alerts = check_deadline_alerts(student)
+        if deadline_alerts:
+            for alert in deadline_alerts:
+                st.error(alert)
+
+        warnings = get_all_warnings(student)
+        if any("⚠️" in w for w in warnings):
+            for w in warnings:
+                st.error(w)
+        else:
+            st.success("\n".join(warnings))
 
         # ----- STUDENT INFO -----
         st.markdown("---")
@@ -620,7 +634,7 @@ if role == "SESAM Staff":
             if student["thesis_units_taken"] > limit:
                 st.error("⚠️ Units exceeded!")
 
-        # ----- EDIT TABS -----
+        # ----- EDIT TABS (unchanged – staff can edit all milestone data) -----
         tabs = st.tabs(["Coursework & Thesis", "Exams", "Residency & Leave", "Graduation", "Committee", "Other"])
         
         with tabs[0]:
@@ -734,7 +748,7 @@ if role == "SESAM Staff":
     else:
         st.info("No students match the current search. Try a different name/number or add a new student below.")
 
-    # ----- ADD NEW STUDENT -----
+    # ----- ADD NEW STUDENT (unchanged) -----
     st.markdown("---")
     st.subheader("➕ Add New Student")
     with st.expander("Register New Student", expanded=True):
@@ -775,6 +789,23 @@ if role == "SESAM Staff":
                 st.empty()
             
             st.markdown("---")
+            st.markdown("### Initial Milestone Status (optional)")
+            col10, col11, col12 = st.columns(3)
+            with col10:
+                gwa = st.number_input("Initial GWA", min_value=1.0, max_value=5.0, step=0.01, value=2.0, help="1.0 best, 5.0 failing")
+            with col11:
+                thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=0)
+                st.caption(get_thesis_pattern_description(program))
+            with col12:
+                pos_status = st.selectbox("POS Status", ["Not Filed", "Pending", "Approved"])
+            
+            col13, col14, col15 = st.columns(3)
+            with col13:
+                comp_exam = st.selectbox("Comprehensive Exam (PhD)", ["N/A", "Not Taken", "Passed", "Failed"])
+            with col14:
+                general_exam = st.selectbox("General Exam (MS)", ["N/A", "Not Taken", "Passed", "Failed"])
+            with col15:
+                final_exam = st.selectbox("Final Exam Status", ["Not Taken", "Passed", "Failed"])
             
             submitted = st.form_submit_button("Register Student")
             if submitted:
@@ -858,7 +889,7 @@ if role == "SESAM Staff":
                     st.success(f"✅ Student {full_name} (Number: {student_number}) registered successfully!")
                     st.rerun()
 
-# ==================== ADVISER VIEW ====================
+# ==================== ADVISER VIEW (view‑only images) ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees")
     all_advisors = sorted(df["advisor"].unique())
@@ -893,11 +924,11 @@ elif role == "Faculty Adviser":
                             st.markdown(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
                             st.markdown(f"**Final Exam:** {row['final_exam_status']}")
                             st.markdown(f"**Residency:** {row['residency_years_used']}/{get_residency_max(row['program'])} years")
-                        # Profile picture
+                        # Profile picture (view only)
                         pic_path = get_profile_picture_path(row["student_number"])
                         if pic_path and os.path.exists(pic_path):
                             st.image(pic_path, width=100, caption="Profile Picture")
-                        # AMIS screenshot
+                        # AMIS screenshot (view only)
                         amis_path = get_amis_screenshot_path(row["student_number"])
                         if amis_path and os.path.exists(amis_path):
                             with st.expander("📄 View AMIS Screenshot"):
@@ -914,9 +945,9 @@ elif role == "Faculty Adviser":
                             st.success(warnings_text)
             else:
                 st.info("No matching students.")
-    st.info("📌 Read-only view. For updates, contact SESAM Staff.")
+    st.info("📌 Read‑only view. For updates, contact SESAM Staff.")
 
-# ==================== STUDENT VIEW ====================
+# ==================== STUDENT VIEW (full upload/delete rights) ====================
 elif role == "Student":
     st.subheader(f"📘 Your Academic Progress ({st.session_state.display_name})")
     # Use student_number for reliable lookup
@@ -932,12 +963,11 @@ elif role == "Student":
     
     student = student_record.iloc[0]
 
-    # Deadline alerts
+    # Deadline alerts & warnings
     alerts = check_deadline_alerts(student)
     if alerts:
         for alert in alerts:
             st.error(alert)
-    # Standard warnings
     warnings = get_all_warnings(student)
     if any("⚠️" in w for w in warnings):
         for w in warnings:
@@ -945,7 +975,7 @@ elif role == "Student":
     else:
         st.success("\n".join(warnings))
 
-    # ------ PROFILE PICTURE ------
+    # ------ PROFILE PICTURE (student can upload/delete) ------
     st.markdown("---")
     st.subheader("📸 Your Profile Picture")
     col_pic1, col_pic2 = st.columns([1, 2])
@@ -971,7 +1001,7 @@ elif role == "Student":
                 st.success("Profile picture deleted.")
                 st.rerun()
 
-    # ------ AMIS SCREENSHOT ------
+    # ------ AMIS SCREENSHOT (student can upload/delete) ------
     st.markdown("---")
     st.subheader("📊 Your AMIS Screenshot (Subjects, Grades, Units)")
     col_amis1, col_amis2 = st.columns([1, 2])
@@ -993,7 +1023,7 @@ elif role == "Student":
                 st.success("AMIS screenshot deleted.")
                 st.rerun()
 
-    # ------ MANUAL GWA ENTRY ------
+    # ------ MANUAL GWA ENTRY (student can also update GWA) ------
     st.markdown("---")
     st.subheader("📈 Update GWA from AMIS Screenshot")
     current_gwa = float(student["gwa"])
@@ -1057,7 +1087,7 @@ elif role == "Student":
         ]
     })
     st.dataframe(milestone_df, width='stretch', hide_index=True)
-    st.info("📌 Read-only view. For updates, contact your adviser or SESAM Staff.")
+    st.info("📌 Read‑only view. For updates, contact your adviser or SESAM Staff.")
 
 # ==================== FOOTER ====================
 st.markdown("---")
