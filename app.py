@@ -173,7 +173,6 @@ def load_data():
     for idx, row in df.iterrows():
         program = str(row["program"]).strip()
         if program not in PROGRAMS:
-            # Try to map old "MS" / "PhD" values
             if program == "MS":
                 program = PROGRAMS[0]
             elif program == "PhD":
@@ -235,7 +234,6 @@ def check_gwa_warning(gwa):
         gwa = float(gwa)
     except:
         return "⚠️ GWA data error"
-    # Wording as requested: "below 2.00" even though UP system uses >2.00 as problematic.
     if gwa > 2.00:
         return f"⚠️ GWA {gwa:.2f} is below 2.00 – may affect exam eligibility and graduation"
     return f"✅ GWA {gwa:.2f} – good standing"
@@ -367,36 +365,46 @@ def format_ay(year):
     """Convert year to Academic Year display (e.g., 2026 -> A.Y. 2026-2027 (1st Sem))."""
     return f"A.Y. {year}-{year+1} (1st Sem)"
 
-# ==================== STAFF VIEW (WITH SEARCH BAR) ====================
+def filter_dataframe(search_term, data):
+    """Filter dataframe by name or student_id, case‑insensitive, partial match."""
+    if not search_term:
+        return data
+    mask = (
+        data["name"].str.contains(search_term, case=False, na=False) |
+        data["student_id"].str.contains(search_term, case=False, na=False)
+    )
+    return data[mask]
+
+# ==================== STAFF VIEW ====================
 if role == "SESAM Staff":
     st.subheader("📋 All Students")
-
-    # ---- SEARCH BAR ----
-    search_term = st.text_input("🔍 Search by name or student ID", placeholder="e.g., Juan or S001")
-    if search_term:
-        # Case-insensitive partial match on name or student_id
-        mask = (
-            df["name"].str.contains(search_term, case=False, na=False) |
-            df["student_id"].str.contains(search_term, case=False, na=False)
-        )
-        filtered_df = df[mask].copy()
-    else:
-        filtered_df = df.copy()
-
-    # Display filtered table
+    
+    # ----- SEARCH BAR FOR THE TABLE -----
+    search = st.text_input("🔍 Search by name or student ID", placeholder="e.g., Juan or S001")
+    filtered_df = filter_dataframe(search, df)
     st.dataframe(filtered_df, width='stretch', height=400)
 
     st.markdown("---")
     st.subheader("✏️ Update Student Record")
 
     if len(filtered_df) > 0:
-        # Use filtered names for the selector
-        student_name = st.selectbox("Select Student", filtered_df["name"])
-        # Retrieve the full student record from the original df (to have latest data)
+        # ----- SEARCHABLE STUDENT SELECTION (using the filtered list) -----
+        st.subheader("🔍 Search Student to Edit")
+        edit_search = st.text_input("Type part of the student's name:", value="", placeholder="e.g., Juan or Maria", key="edit_search")
+        if edit_search:
+            edit_filtered_names = filtered_df[filtered_df["name"].str.contains(edit_search, case=False, na=False)]["name"].tolist()
+        else:
+            edit_filtered_names = filtered_df["name"].tolist()
+        
+        if not edit_filtered_names:
+            st.warning("No matching students found.")
+            st.stop()
+        
+        student_name = st.selectbox("Select Student", edit_filtered_names)
         student = df[df["name"] == student_name].iloc[0].copy()
         student_id = student["student_id"]
 
-        # Display warnings in RED using st.error
+        # Display warnings in RED
         warnings = get_all_warnings(student)
         if any("⚠️" in w for w in warnings):
             for w in warnings:
@@ -404,7 +412,7 @@ if role == "SESAM Staff":
         else:
             st.success("\n".join(warnings))
 
-        # Basic info display - fixed to avoid truncation (using markdown instead of metric)
+        # Basic info display - using markdown to avoid truncation
         st.markdown("---")
         st.markdown("### Student Information")
         col1, col2, col3 = st.columns(3)
@@ -535,7 +543,6 @@ if role == "SESAM Staff":
         st.markdown("---")
         st.subheader("🗑️ Delete Student")
         with st.expander("Click to expand and delete a student record"):
-            # Use filtered_df for delete selection as well
             delete_name = st.selectbox("Select Student to Delete", filtered_df["name"])
             delete_id = df[df["name"] == delete_name]["student_id"].values[0]
             confirm = st.checkbox("⚠️ I confirm that I want to permanently delete this student. This action cannot be undone.")
@@ -561,7 +568,7 @@ if role == "SESAM Staff":
                 st.warning("Please check the confirmation box before resetting.")
 
     else:
-        st.info("No students match your search. Try a different keyword or add a new student below.")
+        st.info("No students found. Use the Add Student feature below.")
 
     # ----- ADD NEW STUDENT -----
     st.markdown("---")
@@ -642,15 +649,21 @@ if role == "SESAM Staff":
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees ({st.session_state.display_name})")
     advisees = df[df["advisor_username"] == st.session_state.username].copy()
+    
     if len(advisees) == 0:
         st.warning("No students assigned to you.")
     else:
-        advisees["warnings"] = advisees.apply(lambda row: "\n".join(get_all_warnings(row)), axis=1)
+        # ----- SEARCH BAR FOR ADVISER TABLE -----
+        search_adv = st.text_input("🔍 Search by name or student ID", placeholder="e.g., Juan or S001")
+        filtered_advisees = filter_dataframe(search_adv, advisees)
+        
+        filtered_advisees["warnings"] = filtered_advisees.apply(lambda row: "\n".join(get_all_warnings(row)), axis=1)
         display_cols = ["student_id", "name", "program", "year_admitted", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status", "warnings"]
-        st.dataframe(advisees[display_cols], width='stretch')
+        st.dataframe(filtered_advisees[display_cols], width='stretch')
+        
         st.markdown("---")
         st.subheader("📌 Detailed View")
-        for _, row in advisees.iterrows():
+        for _, row in filtered_advisees.iterrows():
             with st.expander(f"{row['name']} ({row['student_id']})"):
                 col1, col2 = st.columns(2)
                 with col1:
