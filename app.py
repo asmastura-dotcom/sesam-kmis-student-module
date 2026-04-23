@@ -4,12 +4,15 @@ Author: SESAM Dev Team
 Date: 2026-04-23
 Description: Tracks graduate student milestones, thesis units, exams, residency, LOA/AWOL, etc.
 Plus student uploads: profile picture and AMIS screenshot (with manual GWA entry).
+Based on UPLB Graduate School Policies, Rules and Regulations (2009).
 """
 
 import streamlit as st
 import pandas as pd
 import os
 from datetime import date, datetime
+from PIL import Image
+import io
 
 # ==================== PAGE CONFIGURATION ====================
 st.set_page_config(
@@ -37,7 +40,7 @@ USERS = {
     "student2": {"password": "stu456", "role": "Student", "display_name": "Santos, Maria L."}
 }
 
-# ==================== PROGRAM & TRACK DEFINITIONS ====================
+# ==================== PROGRAM DEFINITIONS ====================
 PROGRAMS = [
     "MS Environmental Science",
     "PhD Environmental Science",
@@ -46,7 +49,6 @@ PROGRAMS = [
     "Professional Masters in Tropical Marine Ecosystems Management (PM-TMEM)"
 ]
 
-PhD_TRACKS = ["MS EnvSci graduate", "non-MS EnvSci graduate"]
 SEMESTERS = ["1st Sem", "2nd Sem", "Summer"]
 
 current_year = date.today().year
@@ -120,59 +122,85 @@ def check_deadline_alerts(row):
     
     return alerts
 
-# ==================== IMAGE HELPER FUNCTIONS ====================
+# ==================== IMAGE COMPRESSION AND STORAGE ====================
 PROFILE_FOLDER = "profile_pics"
 AMIS_FOLDER = "amis_screenshots"
 for folder in [PROFILE_FOLDER, AMIS_FOLDER]:
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-def save_image(student_number, uploaded_file, folder, prefix):
+def compress_image(file, max_size_kb=200, output_width=500):
+    """Compress uploaded image to max_size_kb and resize width."""
+    img = Image.open(file)
+    if img.mode in ('RGBA', 'P'):
+        img = img.convert('RGB')
+    ratio = output_width / float(img.size[0])
+    output_height = int(float(img.size[1]) * ratio)
+    img = img.resize((output_width, output_height), Image.Resampling.LANCZOS)
+    buffer = io.BytesIO()
+    quality = 85
+    while True:
+        buffer.seek(0)
+        buffer.truncate()
+        img.save(buffer, format='JPEG', quality=quality, optimize=True)
+        if buffer.tell() <= max_size_kb * 1024 or quality <= 10:
+            break
+        quality -= 5
+    return buffer.getvalue()
+
+def save_profile_picture(student_number, uploaded_file):
     if uploaded_file is None:
         return None
-    ext = uploaded_file.name.split('.')[-1].lower()
-    if ext not in ['jpg', 'jpeg', 'png', 'gif']:
-        st.error(f"Unsupported file format. Use JPG, PNG, or GIF for {prefix}.")
+    try:
+        compressed = compress_image(uploaded_file, max_size_kb=150, output_width=300)
+        filename = f"{student_number}.jpg"
+        filepath = os.path.join(PROFILE_FOLDER, filename)
+        with open(filepath, "wb") as f:
+            f.write(compressed)
+        return filename
+    except Exception as e:
+        st.error(f"Profile picture compression failed: {e}")
         return None
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{student_number}_{prefix}_{timestamp}.{ext}"
-    filepath = os.path.join(folder, filename)
-    with open(filepath, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    return filename
 
-def delete_image(student_number, folder, column_name, df, student_number_col):
-    # Find the row index
-    mask = df[student_number_col] == student_number
-    if not mask.any():
-        return df
-    idx = df.index[mask][0]
-    old_filename = df.at[idx, column_name]
-    if old_filename and pd.notna(old_filename) and old_filename != "":
-        filepath = os.path.join(folder, old_filename)
-        if os.path.exists(filepath):
-            os.remove(filepath)
-    df.at[idx, column_name] = ""
-    return df
-
-def show_image(student_number, folder, column_name, df, student_number_col, caption):
-    mask = df[student_number_col] == student_number
-    if not mask.any():
-        st.info(f"No {caption.lower()} uploaded yet.")
-        return False
-    idx = df.index[mask][0]
-    pic = df.at[idx, column_name]
-    if pic and pd.notna(pic) and pic != "":
-        path = os.path.join(folder, pic)
-        if os.path.exists(path):
-            st.image(path, caption=caption, width=400)
+def delete_profile_picture(student_number):
+    for f in os.listdir(PROFILE_FOLDER):
+        if f.startswith(str(student_number) + "."):
+            os.remove(os.path.join(PROFILE_FOLDER, f))
             return True
-        else:
-            st.warning(f"{caption} file missing.")
-            return False
-    else:
-        st.info(f"No {caption.lower()} uploaded yet.")
-        return False
+    return False
+
+def get_profile_picture_path(student_number):
+    for f in os.listdir(PROFILE_FOLDER):
+        if f.startswith(str(student_number) + "."):
+            return os.path.join(PROFILE_FOLDER, f)
+    return None
+
+def save_amis_screenshot(student_number, uploaded_file):
+    if uploaded_file is None:
+        return None
+    try:
+        compressed = compress_image(uploaded_file, max_size_kb=200, output_width=600)
+        filename = f"{student_number}.jpg"
+        filepath = os.path.join(AMIS_FOLDER, filename)
+        with open(filepath, "wb") as f:
+            f.write(compressed)
+        return filename
+    except Exception as e:
+        st.error(f"AMIS image compression failed: {e}")
+        return None
+
+def delete_amis_screenshot(student_number):
+    for f in os.listdir(AMIS_FOLDER):
+        if f.startswith(str(student_number) + "."):
+            os.remove(os.path.join(AMIS_FOLDER, f))
+            return True
+    return False
+
+def get_amis_screenshot_path(student_number):
+    for f in os.listdir(AMIS_FOLDER):
+        if f.startswith(str(student_number) + "."):
+            return os.path.join(AMIS_FOLDER, f)
+    return None
 
 # ==================== LOGIN PAGE ====================
 if not st.session_state.logged_in:
@@ -262,7 +290,7 @@ def load_data():
     else:
         df = create_default_data()
     
-    # Migrate old column names
+    # Migrate old column names and add missing ones
     if "advisor_username" in df.columns and "advisor" not in df.columns:
         df.rename(columns={"advisor_username": "advisor"}, inplace=True)
     if "year_admitted" in df.columns and "ay_start" not in df.columns:
@@ -270,13 +298,12 @@ def load_data():
         df["semester"] = "1st Sem"
         df.drop(columns=["year_admitted"], inplace=True)
     
-    # Ensure all required columns exist
     default_df = create_default_data()
     for col in default_df.columns:
         if col not in df.columns:
             df[col] = default_df[col]
     
-    # Convert numeric columns safely
+    # Convert numeric columns
     numeric_int_cols = [
         "thesis_units_taken", "thesis_units_limit",
         "total_units_taken", "total_units_required",
@@ -317,7 +344,7 @@ def load_data():
         
         if program in ["PhD Environmental Science", "PhD Environmental Diplomacy and Negotiations"]:
             track = row.get("phd_track", "")
-            if track not in PhD_TRACKS:
+            if track not in ["MS EnvSci graduate", "non-MS EnvSci graduate"]:
                 track = "MS EnvSci graduate"
             req = get_required_units(program, track)
         else:
@@ -474,6 +501,7 @@ def get_all_warnings(row):
         return ["✅ All rules satisfied"]
     return warnings
 
+# Load data
 df = load_data()
 
 # ==================== SIDEBAR ====================
@@ -540,11 +568,77 @@ if role == "SESAM Staff":
         student = df[df["name"] == student_name].iloc[0].copy()
         student_number = student["student_number"]
 
+        # ----- PROFILE PICTURE -----
+        st.markdown("---")
+        st.subheader("📸 Student Profile Picture")
+        col_pic1, col_pic2 = st.columns([1, 2])
+        with col_pic1:
+            pic_path = get_profile_picture_path(student_number)
+            if pic_path and os.path.exists(pic_path):
+                st.image(pic_path, width=100, caption="Current Picture")
+            else:
+                st.info("No profile picture uploaded.")
+        with col_pic2:
+            uploaded_file = st.file_uploader("Upload new profile picture (JPG, PNG, GIF)", type=["jpg", "jpeg", "png", "gif"], key=f"pic_{student_number}")
+            if uploaded_file:
+                new_filename = save_profile_picture(student_number, uploaded_file)
+                if new_filename:
+                    df.loc[df["student_number"] == student_number, "profile_pic"] = new_filename
+                    save_data(df)
+                    st.success("Profile picture updated!")
+                    st.rerun()
+            if st.button("🗑️ Delete current picture", key=f"del_pic_{student_number}"):
+                if delete_profile_picture(student_number):
+                    df.loc[df["student_number"] == student_number, "profile_pic"] = ""
+                    save_data(df)
+                    st.success("Profile picture deleted.")
+                    st.rerun()
+                else:
+                    st.warning("No picture to delete.")
+
+        # ----- AMIS SCREENSHOT SECTION -----
+        st.markdown("---")
+        st.subheader("📊 AMIS Screenshot (Subjects, Grades, Units)")
+        col_amis1, col_amis2 = st.columns([1, 2])
+        with col_amis1:
+            amis_path = get_amis_screenshot_path(student_number)
+            if amis_path and os.path.exists(amis_path):
+                st.image(amis_path, width=250, caption="AMIS Screenshot")
+            else:
+                st.info("No AMIS screenshot uploaded.")
+        with col_amis2:
+            uploaded_amis = st.file_uploader("Upload AMIS screenshot (JPG/PNG)", type=["jpg", "jpeg", "png"], key=f"amis_{student_number}")
+            if uploaded_amis:
+                new_file = save_amis_screenshot(student_number, uploaded_amis)
+                if new_file:
+                    st.success("AMIS screenshot uploaded and compressed!")
+                    st.rerun()
+            if st.button("🗑️ Delete AMIS screenshot", key=f"del_amis_{student_number}"):
+                if delete_amis_screenshot(student_number):
+                    st.success("AMIS screenshot deleted.")
+                    st.rerun()
+                else:
+                    st.warning("No screenshot to delete.")
+
+        # ----- MANUAL GWA ENTRY (from AMIS) -----
+        st.markdown("---")
+        st.subheader("📈 Manual GWA Entry (based on AMIS)")
+        current_gwa = float(student["gwa"])
+        new_gwa = st.number_input("Enter the GWA exactly as shown on the AMIS screenshot", 
+                                  min_value=1.0, max_value=5.0, step=0.01, value=current_gwa)
+        if st.button("Update GWA from AMIS"):
+            df.loc[df["student_number"] == student_number, "gwa"] = new_gwa
+            save_data(df)
+            st.success(f"GWA updated to {new_gwa}")
+            st.rerun()
+
+        # ----- DEADLINE ALERTS -----
         deadline_alerts = check_deadline_alerts(student)
         if deadline_alerts:
             for alert in deadline_alerts:
                 st.error(alert)
 
+        # ----- STANDARD WARNINGS -----
         warnings = get_all_warnings(student)
         if any("⚠️" in w for w in warnings):
             for w in warnings:
@@ -552,6 +646,7 @@ if role == "SESAM Staff":
         else:
             st.success("\n".join(warnings))
 
+        # ----- STUDENT INFO -----
         st.markdown("---")
         st.markdown("### Student Information")
         col1, col2, col3 = st.columns(3)
@@ -568,198 +663,117 @@ if role == "SESAM Staff":
             if student["thesis_units_taken"] > limit:
                 st.error("⚠️ Units exceeded!")
 
-        # ----- PROFILE PICTURE & AMIS SCREENSHOT -----
-        with st.expander("📸 Profile Picture & AMIS Screenshot"):
-            col1_img, col2_img = st.columns(2)
-            with col1_img:
-                st.markdown("**Profile Picture**")
-                show_image(student_number, PROFILE_FOLDER, "profile_pic", df, "student_number", "Profile Picture")
-                uploaded_profile = st.file_uploader("Upload new profile picture", type=["jpg", "jpeg", "png", "gif"], key=f"prof_{student_number}")
-                if uploaded_profile:
-                    new_file = save_image(student_number, uploaded_profile, PROFILE_FOLDER, "profile")
-                    if new_file:
-                        df.loc[df["student_number"] == student_number, "profile_pic"] = new_file
-                        save_data(df)
-                        st.success("Profile picture updated!")
-                        st.rerun()
-                if st.button("Remove profile picture", key=f"rm_prof_{student_number}"):
-                    df = delete_image(student_number, PROFILE_FOLDER, "profile_pic", df, "student_number")
-                    save_data(df)
-                    st.success("Profile picture removed.")
-                    st.rerun()
-            with col2_img:
-                st.markdown("**AMIS Screenshot (subjects, grades, units, GWA)**")
-                show_image(student_number, AMIS_FOLDER, "amis_screenshot", df, "student_number", "AMIS Screenshot")
-                uploaded_amis = st.file_uploader("Upload AMIS screenshot", type=["jpg", "jpeg", "png"], key=f"amis_{student_number}")
-                if uploaded_amis:
-                    new_file = save_image(student_number, uploaded_amis, AMIS_FOLDER, "amis")
-                    if new_file:
-                        df.loc[df["student_number"] == student_number, "amis_screenshot"] = new_file
-                        save_data(df)
-                        st.success("AMIS screenshot uploaded!")
-                        st.rerun()
-                if st.button("Remove AMIS screenshot", key=f"rm_amis_{student_number}"):
-                    df = delete_image(student_number, AMIS_FOLDER, "amis_screenshot", df, "student_number")
-                    save_data(df)
-                    st.success("AMIS screenshot removed.")
-                    st.rerun()
-
-        # ----- MANUAL GWA ENTRY (from AMIS screenshot) -----
-        with st.expander("📊 GWA from AMIS Screenshot"):
-            st.info("Enter the GWA exactly as shown on the uploaded AMIS screenshot.")
-            current_gwa = float(student["gwa"])
-            new_gwa = st.number_input("GWA (from AMIS screenshot)", min_value=1.0, max_value=5.0, step=0.01, value=current_gwa)
-            if st.button("Update GWA from AMIS"):
-                df.loc[df["student_number"] == student_number, "gwa"] = new_gwa
-                save_data(df)
-                st.success(f"GWA updated to {new_gwa}")
-                st.rerun()
-
-        # ----- EDIT TABS -----
+        # ----- EDIT TABS (6 tabs) -----
         tabs = st.tabs(["Coursework & Thesis", "Exams", "Residency & Leave", "Graduation", "Committee", "Other"])
         
-        with tabs[0]:  # Coursework & Thesis
-            st.subheader("Coursework & Thesis Progress")
-            col1, col2 = st.columns(2)
-            with col1:
-                new_units_taken = st.number_input("Total Coursework Units Taken", value=int(student["total_units_taken"]), step=1)
-                if st.button("Update Coursework Units"):
-                    df.loc[df["student_number"] == student_number, "total_units_taken"] = new_units_taken
+        with tabs[0]:
+            with st.form("coursework_form"):
+                st.subheader("Plan of Study (POS)")
+                pos_options = ["Not Filed", "Pending", "Approved"]
+                pos_status = st.selectbox("POS Status", pos_options, index=safe_index(pos_options, student["pos_status"]))
+                pos_submitted = st.text_input("POS Submitted Date (YYYY-MM-DD)", student["pos_submitted_date"])
+                pos_approved = st.text_input("POS Approved Date (YYYY-MM-DD)", student["pos_approved_date"])
+                st.subheader("Coursework")
+                gwa = st.number_input("GWA", min_value=1.0, max_value=5.0, step=0.01, value=float(student["gwa"]))
+                total_units_taken = st.number_input("Total Units Taken", min_value=0, max_value=60, step=1, value=int(student["total_units_taken"]))
+                total_units_required = st.number_input("Total Units Required", min_value=0, max_value=60, step=1, value=int(student["total_units_required"]))
+                progress = compute_coursework_progress(student)
+                st.progress(progress / 100, text=f"Coursework completion: {progress}% ({student['total_units_taken']} of {student['total_units_required']} units)")
+                st.caption(f"Remaining units: {max(0, student['total_units_required'] - student['total_units_taken'])}")
+                st.subheader("Thesis/Dissertation")
+                thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=int(student["thesis_units_taken"]))
+                st.caption(get_thesis_pattern_description(student["program"]))
+                outline_options = ["Yes", "No"]
+                thesis_outline_approved = st.selectbox("Thesis Outline Approved", outline_options, index=safe_index(outline_options, student["thesis_outline_approved"]))
+                thesis_outline_date = st.text_input("Outline Approval Date", student["thesis_outline_approved_date"])
+                status_options = ["Not Started", "In Progress", "Draft with Adviser", "For Committee Review", "Approved", "Submitted"]
+                thesis_status = st.selectbox("Thesis Status", status_options, index=safe_index(status_options, student["thesis_status"]))
+                if st.form_submit_button("Update Coursework & Thesis"):
+                    df.loc[df["student_number"] == student_number, ["pos_status","pos_submitted_date","pos_approved_date","gwa","total_units_taken","total_units_required","thesis_units_taken","thesis_outline_approved","thesis_outline_approved_date","thesis_status"]] = [pos_status, pos_submitted, pos_approved, gwa, total_units_taken, total_units_required, thesis_units_taken, thesis_outline_approved, thesis_outline_date, thesis_status]
                     save_data(df)
-                    st.success("Coursework units updated.")
-            with col2:
-                new_thesis_units = st.number_input("Thesis/Dissertation Units Taken", value=int(student["thesis_units_taken"]), step=1)
-                if st.button("Update Thesis Units"):
-                    limit = get_thesis_limit(student["program"])
-                    if new_thesis_units <= limit:
-                        df.loc[df["student_number"] == student_number, "thesis_units_taken"] = new_thesis_units
-                        save_data(df)
-                        st.success("Thesis units updated.")
-                    else:
-                        st.error(f"Cannot exceed {limit} units.")
-            st.markdown(get_thesis_pattern_description(student["program"]))
-            st.markdown("---")
-            st.subheader("Thesis/Dissertation Outline")
-            outline_status = st.selectbox("Outline Approved?", ["Yes", "No"], index=safe_index(["Yes", "No"], student["thesis_outline_approved"]))
-            if st.button("Update Outline Approval"):
-                df.loc[df["student_number"] == student_number, "thesis_outline_approved"] = outline_status
-                if outline_status == "Yes" and not student["thesis_outline_approved_date"]:
-                    df.loc[df["student_number"] == student_number, "thesis_outline_approved_date"] = date.today().isoformat()
-                save_data(df)
-                st.success("Outline status updated.")
-        
-        with tabs[1]:  # Exams
-            st.subheader("Exam Status")
-            if is_master_program(student["program"]):
-                gen_exam = st.selectbox("General Exam", ["Not Taken", "Passed", "Failed"], index=safe_index(["Not Taken", "Passed", "Failed"], student["general_exam_status"]))
-                if st.button("Update General Exam"):
-                    df.loc[df["student_number"] == student_number, "general_exam_status"] = gen_exam
-                    if gen_exam == "Passed" and not student["general_exam_passed_date"]:
-                        df.loc[df["student_number"] == student_number, "general_exam_passed_date"] = date.today().isoformat()
+                    st.success("✅ Updated!")
+                    st.rerun()
+        with tabs[1]:
+            with st.form("exams_form"):
+                st.subheader("Examinations")
+                qual_options = ["N/A", "Not Taken", "Passed", "Failed", "Re-exam Scheduled"]
+                qualifying = st.selectbox("Qualifying Exam Status (PhD)", qual_options, index=safe_index(qual_options, student["qualifying_exam_status"]))
+                qualifying_date = st.text_input("Qualifying Exam Passed Date", student["qualifying_exam_passed_date"])
+                wcomp_options = ["N/A", "Not Taken", "Passed", "Failed"]
+                written_comp = st.selectbox("Written Comprehensive Status", wcomp_options, index=safe_index(wcomp_options, student["written_comprehensive_status"]))
+                written_comp_date = st.text_input("Written Comprehensive Passed Date", student["written_comprehensive_passed_date"])
+                ocomp_options = ["N/A", "Not Taken", "Passed", "Failed"]
+                oral_comp = st.selectbox("Oral Comprehensive Status", ocomp_options, index=safe_index(ocomp_options, student["oral_comprehensive_status"]))
+                oral_comp_date = st.text_input("Oral Comprehensive Passed Date", student["oral_comprehensive_passed_date"])
+                gen_options = ["N/A", "Not Taken", "Passed", "Failed"]
+                general = st.selectbox("General Exam Status (MS)", gen_options, index=safe_index(gen_options, student["general_exam_status"]))
+                general_date = st.text_input("General Exam Passed Date", student["general_exam_passed_date"])
+                final_options = ["Not Taken", "Passed", "Failed", "Re-exam Scheduled"]
+                final = st.selectbox("Final Exam Status", final_options, index=safe_index(final_options, student["final_exam_status"]))
+                final_date = st.text_input("Final Exam Passed Date", student["final_exam_passed_date"])
+                if st.form_submit_button("Update Exams"):
+                    df.loc[df["student_number"] == student_number, ["qualifying_exam_status","qualifying_exam_passed_date","written_comprehensive_status","written_comprehensive_passed_date","oral_comprehensive_status","oral_comprehensive_passed_date","general_exam_status","general_exam_passed_date","final_exam_status","final_exam_passed_date"]] = [qualifying, qualifying_date, written_comp, written_comp_date, oral_comp, oral_comp_date, general, general_date, final, final_date]
                     save_data(df)
-                    st.success("General Exam updated.")
-            else:
-                qual_exam = st.selectbox("Qualifying Exam", ["N/A", "Not Taken", "Passed", "Failed"], index=safe_index(["N/A", "Not Taken", "Passed", "Failed"], student["qualifying_exam_status"]))
-                if st.button("Update Qualifying Exam"):
-                    df.loc[df["student_number"] == student_number, "qualifying_exam_status"] = qual_exam
-                    if qual_exam == "Passed" and not student["qualifying_exam_passed_date"]:
-                        df.loc[df["student_number"] == student_number, "qualifying_exam_passed_date"] = date.today().isoformat()
-                    save_data(df)
-                    st.success("Qualifying Exam updated.")
-            st.markdown("---")
-            if is_phd_program(student["program"]):
-                written_comp = st.selectbox("Written Comprehensive Exam", ["N/A", "Not Taken", "Passed", "Failed"], index=safe_index(["N/A", "Not Taken", "Passed", "Failed"], student["written_comprehensive_status"]))
-                oral_comp = st.selectbox("Oral Comprehensive Exam", ["N/A", "Not Taken", "Passed", "Failed"], index=safe_index(["N/A", "Not Taken", "Passed", "Failed"], student["oral_comprehensive_status"]))
-                if st.button("Update Comprehensive Exams"):
-                    df.loc[df["student_number"] == student_number, "written_comprehensive_status"] = written_comp
-                    df.loc[df["student_number"] == student_number, "oral_comprehensive_status"] = oral_comp
-                    if written_comp == "Passed" and not student["written_comprehensive_passed_date"]:
-                        df.loc[df["student_number"] == student_number, "written_comprehensive_passed_date"] = date.today().isoformat()
-                    if oral_comp == "Passed" and not student["oral_comprehensive_passed_date"]:
-                        df.loc[df["student_number"] == student_number, "oral_comprehensive_passed_date"] = date.today().isoformat()
-                    save_data(df)
-                    st.success("Comprehensive exams updated.")
-            final_exam = st.selectbox("Final Exam", ["Not Taken", "Passed", "Failed"], index=safe_index(["Not Taken", "Passed", "Failed"], student["final_exam_status"]))
-            if st.button("Update Final Exam"):
-                df.loc[df["student_number"] == student_number, "final_exam_status"] = final_exam
-                if final_exam == "Passed" and not student["final_exam_passed_date"]:
-                    df.loc[df["student_number"] == student_number, "final_exam_passed_date"] = date.today().isoformat()
-                save_data(df)
-                st.success("Final Exam updated.")
-        
-        with tabs[2]:  # Residency & Leave
-            st.subheader("Residency and Leave Management")
-            new_residency = st.number_input("Residency Years Used", value=int(student["residency_years_used"]), step=1)
-            if st.button("Update Residency"):
+                    st.success("✅ Updated!")
+                    st.rerun()
+        with tabs[2]:
+            with st.form("residency_form"):
+                st.subheader("Residency")
+                residency_used = st.number_input("Years of Residence Used", min_value=0, max_value=10, step=1, value=int(student["residency_years_used"]))
                 max_years = get_residency_max(student["program"])
-                if new_residency <= max_years:
-                    df.loc[df["student_number"] == student_number, "residency_years_used"] = new_residency
+                st.info(f"Maximum allowed: {max_years} years")
+                extension_count = st.number_input("Number of Extensions Granted", min_value=0, max_value=3, step=1, value=int(student["extension_count"]))
+                extension_end = st.text_input("Extension End Date (if applicable)", student["extension_end_date"])
+                st.subheader("Leave of Absence (LOA)")
+                loa_start = st.text_input("LOA Start Date", student["loa_start_date"])
+                loa_end = st.text_input("LOA End Date", student["loa_end_date"])
+                loa_terms = st.number_input("Total LOA Terms (each term = 0.5 year)", min_value=0, max_value=4, step=1, value=int(student["loa_total_terms"]))
+                st.subheader("AWOL")
+                awol_options = ["No", "Yes"]
+                awol = st.selectbox("AWOL Status", awol_options, index=safe_index(awol_options, student["awol_status"]))
+                awol_lifted = st.text_input("AWOL Lifted Date", student["awol_lifted_date"])
+                if st.form_submit_button("Update Residency & Leave"):
+                    df.loc[df["student_number"] == student_number, ["residency_years_used","extension_count","extension_end_date","loa_start_date","loa_end_date","loa_total_terms","awol_status","awol_lifted_date"]] = [residency_used, extension_count, extension_end, loa_start, loa_end, loa_terms, awol, awol_lifted]
                     save_data(df)
-                    st.success("Residency updated.")
-                else:
-                    st.error(f"Residency cannot exceed {max_years} years without extension.")
-            st.markdown("---")
-            awol = st.selectbox("AWOL Status", ["No", "Yes"], index=safe_index(["No", "Yes"], student["awol_status"]))
-            if st.button("Update AWOL"):
-                df.loc[df["student_number"] == student_number, "awol_status"] = awol
-                if awol == "Yes" and not student["awol_lifted_date"]:
-                    st.warning("AWOL record noted. Student must be re-admitted.")
-                save_data(df)
-                st.success("AWOL status updated.")
-            st.markdown("---")
-            loa_terms = st.number_input("Total LOA Terms (cumulative)", value=int(student["loa_total_terms"]), step=1)
-            loa_start = st.text_input("LOA Start Date (YYYY-MM-DD)", value=student["loa_start_date"])
-            loa_end = st.text_input("LOA End Date (YYYY-MM-DD)", value=student["loa_end_date"])
-            if st.button("Update LOA"):
-                if loa_terms > 2:
-                    st.error("Total LOA terms cannot exceed 2 (2 years).")
-                else:
-                    df.loc[df["student_number"] == student_number, "loa_total_terms"] = loa_terms
-                    df.loc[df["student_number"] == student_number, "loa_start_date"] = loa_start
-                    df.loc[df["student_number"] == student_number, "loa_end_date"] = loa_end
+                    st.success("✅ Updated!")
+                    st.rerun()
+        with tabs[3]:
+            with st.form("graduation_form"):
+                st.subheader("Graduation")
+                yn_options = ["No", "Yes"]
+                grad_applied = st.selectbox("Graduation Applied", yn_options, index=safe_index(yn_options, student["graduation_applied"]))
+                grad_approved = st.selectbox("Graduation Approved", yn_options, index=safe_index(yn_options, student["graduation_approved"]))
+                grad_date = st.text_input("Graduation Date (YYYY-MM-DD)", student["graduation_date"])
+                st.subheader("Transfer Credit")
+                transfer_units = st.number_input("Transfer Credits Approved (max 9 units)", min_value=0, max_value=9, step=1, value=int(student["transfer_units_approved"]))
+                if st.form_submit_button("Update Graduation & Transfer"):
+                    df.loc[df["student_number"] == student_number, ["graduation_applied","graduation_approved","graduation_date","transfer_units_approved"]] = [grad_applied, grad_approved, grad_date, transfer_units]
                     save_data(df)
-                    st.success("LOA record updated.")
-        
-        with tabs[3]:  # Graduation
-            st.subheader("Graduation Application")
-            grad_applied = st.selectbox("Graduation Applied?", ["No", "Yes"], index=safe_index(["No", "Yes"], student["graduation_applied"]))
-            grad_approved = st.selectbox("Graduation Approved?", ["No", "Yes"], index=safe_index(["No", "Yes"], student["graduation_approved"]))
-            grad_date = st.text_input("Graduation Date (YYYY-MM-DD)", value=student["graduation_date"])
-            if st.button("Update Graduation Status"):
-                df.loc[df["student_number"] == student_number, "graduation_applied"] = grad_applied
-                df.loc[df["student_number"] == student_number, "graduation_approved"] = grad_approved
-                df.loc[df["student_number"] == student_number, "graduation_date"] = grad_date
-                save_data(df)
-                st.success("Graduation status updated.")
-        
-        with tabs[4]:  # Committee
-            st.subheader("Guidance/Advisory Committee")
-            committee = st.text_area("Committee Members (one per line)", value=student["committee_members"].replace(", ", "\n"))
-            approval_date = st.text_input("Committee Approval Date (YYYY-MM-DD)", value=student["committee_approval_date"])
-            if st.button("Update Committee"):
-                df.loc[df["student_number"] == student_number, "committee_members"] = committee.replace("\n", ", ")
-                df.loc[df["student_number"] == student_number, "committee_approval_date"] = approval_date
-                save_data(df)
-                st.success("Committee updated.")
-        
-        with tabs[5]:  # Other
-            st.subheader("Plan of Study (POS)")
-            pos_stat = st.selectbox("POS Status", ["Not Filed", "Pending", "Approved"], index=safe_index(["Not Filed", "Pending", "Approved"], student["pos_status"]))
-            pos_sub = st.text_input("POS Submitted Date", value=student["pos_submitted_date"])
-            pos_app = st.text_input("POS Approved Date", value=student["pos_approved_date"])
-            if st.button("Update POS"):
-                df.loc[df["student_number"] == student_number, "pos_status"] = pos_stat
-                df.loc[df["student_number"] == student_number, "pos_submitted_date"] = pos_sub
-                df.loc[df["student_number"] == student_number, "pos_approved_date"] = pos_app
-                save_data(df)
-                st.success("POS updated.")
-            st.markdown("---")
-            st.subheader("Transfer Credits")
-            transfer = st.number_input("Approved Transfer Units", value=int(student["transfer_units_approved"]), step=1)
-            if st.button("Update Transfer Credits"):
-                df.loc[df["student_number"] == student_number, "transfer_units_approved"] = transfer
-                save_data(df)
-                st.success("Transfer credits updated.")
+                    st.success("✅ Updated!")
+                    st.rerun()
+        with tabs[4]:
+            with st.form("committee_form"):
+                st.subheader("Guidance / Advisory Committee")
+                committee_members = st.text_area("Committee Members (one per line)", value=student.get("committee_members", ""), height=150,
+                                                 help="List names of major professor/adviser and other committee members.")
+                committee_approval_date = st.text_input("Committee Approval Date (YYYY-MM-DD)", student.get("committee_approval_date", ""))
+                if st.form_submit_button("Update Committee"):
+                    df.loc[df["student_number"] == student_number, "committee_members"] = committee_members
+                    df.loc[df["student_number"] == student_number, "committee_approval_date"] = committee_approval_date
+                    save_data(df)
+                    st.success("Committee information updated!")
+                    st.rerun()
+        with tabs[5]:
+            with st.form("other_form"):
+                st.subheader("Re-admission (for students who exceeded time limit)")
+                readmit_options = ["Not Applicable", "Applied", "Approved", "Denied"]
+                re_status = st.selectbox("Re-admission Status", readmit_options, index=safe_index(readmit_options, student["re_admission_status"]))
+                re_date = st.text_input("Re-admission Date", student["re_admission_date"])
+                if st.form_submit_button("Update Re-admission"):
+                    df.loc[df["student_number"] == student_number, ["re_admission_status","re_admission_date"]] = [re_status, re_date]
+                    save_data(df)
+                    st.success("✅ Updated!")
+                    st.rerun()
     else:
         st.info("No students match the current search. Try a different name/number or add a new student below.")
 
@@ -786,7 +800,7 @@ if role == "SESAM Staff":
             if program in ["PhD Environmental Science", "PhD Environmental Diplomacy and Negotiations"]:
                 track_col, dummy = st.columns([1, 1])
                 with track_col:
-                    phd_track = st.selectbox("PhD Track *", options=PhD_TRACKS, help="Select based on your previous degree")
+                    phd_track = st.selectbox("PhD Track *", options=["MS EnvSci graduate", "non-MS EnvSci graduate"], help="Select based on your previous degree")
             
             col6, col7 = st.columns(2)
             with col6:
@@ -807,7 +821,7 @@ if role == "SESAM Staff":
             st.markdown("### Initial Milestone Status (optional)")
             col10, col11, col12 = st.columns(3)
             with col10:
-                gwa = st.number_input("Initial GWA", min_value=1.0, max_value=5.0, step=0.01, value=2.0)
+                gwa = st.number_input("Initial GWA", min_value=1.0, max_value=5.0, step=0.01, value=2.0, help="1.0 best, 5.0 failing")
             with col11:
                 thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=0)
                 st.caption(get_thesis_pattern_description(program))
@@ -832,7 +846,7 @@ if role == "SESAM Staff":
                 if not student_number:
                     errors.append("Student Number is required.")
                 if student_number in df["student_number"].values:
-                    errors.append("Student number already exists.")
+                    errors.append("Student number already exists. Please use a unique number.")
                 if program in ["PhD Environmental Science", "PhD Environmental Diplomacy and Negotiations"] and not phd_track:
                     errors.append("PhD Track is required.")
                 if errors:
@@ -939,9 +953,15 @@ elif role == "Faculty Adviser":
                             st.markdown(f"**Comprehensive Exam (PhD):** Written: {row['written_comprehensive_status']}, Oral: {row['oral_comprehensive_status']}")
                             st.markdown(f"**Final Exam:** {row['final_exam_status']}")
                             st.markdown(f"**Residency:** {row['residency_years_used']}/{get_residency_max(row['program'])} years")
-                        with st.expander("View Documents"):
-                            show_image(row["student_number"], PROFILE_FOLDER, "profile_pic", df, "student_number", "Profile Picture")
-                            show_image(row["student_number"], AMIS_FOLDER, "amis_screenshot", df, "student_number", "AMIS Screenshot")
+                        # Profile picture
+                        pic_path = get_profile_picture_path(row["student_number"])
+                        if pic_path and os.path.exists(pic_path):
+                            st.image(pic_path, width=100, caption="Profile Picture")
+                        # AMIS screenshot
+                        amis_path = get_amis_screenshot_path(row["student_number"])
+                        if amis_path and os.path.exists(amis_path):
+                            with st.expander("📄 View AMIS Screenshot"):
+                                st.image(amis_path, width=300)
                         alerts = check_deadline_alerts(row)
                         if alerts:
                             for alert in alerts:
@@ -959,145 +979,138 @@ elif role == "Faculty Adviser":
 # ==================== STUDENT VIEW ====================
 elif role == "Student":
     st.subheader(f"📘 Your Academic Progress ({st.session_state.display_name})")
-    
     student_record = df[df["name"] == st.session_state.display_name]
     if len(student_record) == 0:
-        st.warning("Your record could not be automatically identified. Please select your record from the list below.")
-        student_names = df["name"].tolist()
-        if not student_names:
-            st.error("No student records exist. Please contact SESAM Staff.")
-            st.stop()
-        selected_name = st.selectbox("Select your name", student_names)
-        student_record = df[df["name"] == selected_name]
-        if len(student_record) == 0:
-            st.error("Still no matching record. Please contact SESAM Staff.")
-            st.stop()
-    
-    student = student_record.iloc[0]
-    
-    alerts = check_deadline_alerts(student)
-    if alerts:
-        for alert in alerts:
-            st.error(alert)
-    warnings = get_all_warnings(student)
-    if any("⚠️" in w for w in warnings):
-        for w in warnings:
-            st.error(w)
+        st.error("Your record not found. Please contact SESAM Staff.")
     else:
-        st.success("\n".join(warnings))
-    
-    # ------ PROFILE PICTURE ------
-    st.markdown("---")
-    st.subheader("📸 Your Profile Picture")
-    col_pic1, col_pic2 = st.columns([1, 2])
-    with col_pic1:
-        show_image(student["student_number"], PROFILE_FOLDER, "profile_pic", df, "student_number", "Your Picture")
-    with col_pic2:
-        uploaded_profile = st.file_uploader("Change profile picture (JPG, PNG, GIF)", type=["jpg", "jpeg", "png", "gif"], key="profile_upload")
-        if uploaded_profile:
-            new_file = save_image(student["student_number"], uploaded_profile, PROFILE_FOLDER, "profile")
-            if new_file:
-                df.loc[df["student_number"] == student["student_number"], "profile_pic"] = new_file
-                save_data(df)
-                st.success("Profile picture updated!")
-                st.rerun()
-        if st.button("Remove profile picture"):
-            df = delete_image(student["student_number"], PROFILE_FOLDER, "profile_pic", df, "student_number")
-            save_data(df)
-            st.success("Profile picture removed.")
-            st.rerun()
-    
-    # ------ AMIS SCREENSHOT ------
-    st.markdown("---")
-    st.subheader("📊 AMIS Screenshot (Subjects, Grades, Units, GWA)")
-    col_amis1, col_amis2 = st.columns([1, 2])
-    with col_amis1:
-        show_image(student["student_number"], AMIS_FOLDER, "amis_screenshot", df, "student_number", "AMIS Screenshot")
-    with col_amis2:
-        uploaded_amis = st.file_uploader("Upload AMIS screenshot (JPG/PNG)", type=["jpg", "jpeg", "png"], key="amis_upload")
-        if uploaded_amis:
-            new_file = save_image(student["student_number"], uploaded_amis, AMIS_FOLDER, "amis")
-            if new_file:
-                df.loc[df["student_number"] == student["student_number"], "amis_screenshot"] = new_file
-                save_data(df)
-                st.success("AMIS screenshot uploaded!")
-                st.rerun()
-        if st.button("Remove AMIS screenshot"):
-            df = delete_image(student["student_number"], AMIS_FOLDER, "amis_screenshot", df, "student_number")
-            save_data(df)
-            st.success("AMIS screenshot removed.")
-            st.rerun()
-    
-    # ------ MANUAL GWA ENTRY ------
-    st.markdown("---")
-    st.subheader("📈 GWA from AMIS Screenshot")
-    current_gwa = float(student["gwa"])
-    new_gwa = st.number_input("Enter the GWA exactly as shown on the AMIS screenshot", min_value=1.0, max_value=5.0, step=0.01, value=current_gwa)
-    if st.button("Update My GWA"):
-        df.loc[df["student_number"] == student["student_number"], "gwa"] = new_gwa
-        save_data(df)
-        st.success(f"Your GWA has been updated to {new_gwa}")
-        st.rerun()
-    
-    # ------ OTHER STUDENT INFO ------
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Student Number", student["student_number"])
-        st.metric("Program", student["program"])
-        st.metric("Academic Year", format_ay(student["ay_start"], student["semester"]))
-    with col2:
-        st.metric("Advisor", student["advisor"])
-        st.metric("GWA", f"{student['gwa']:.2f}")
-        st.metric("POS Status", student["pos_status"])
-    with col3:
-        limit = get_thesis_limit(student["program"])
-        st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
-        st.metric("Residency", f"{student['residency_years_used']} / {get_residency_max(student['program'])} years")
-        st.metric("Final Exam", student["final_exam_status"])
-    
-    # Coursework progress
-    st.markdown("---")
-    st.subheader("📚 Coursework Progress")
-    prog = compute_coursework_progress(student)
-    st.progress(prog / 100, text=f"{prog}% completed ({student['total_units_taken']} of {student['total_units_required']} units)")
-    st.caption(f"Remaining units: {max(0, student['total_units_required'] - student['total_units_taken'])}")
-    
-    # Committee
-    if student.get("committee_members"):
-        with st.expander("📋 Your Guidance/Advisory Committee"):
-            members = student["committee_members"].strip().split('\n')
-            if members and members[0]:
-                for m in members:
-                    if m.strip():
-                        st.markdown(f"- {m.strip()}")
-            else:
-                st.info("Committee members not yet listed.")
-            if student.get("committee_approval_date"):
-                st.caption(f"Approved on: {student['committee_approval_date']}")
-    
-    # Milestone status
-    st.markdown("---")
-    st.subheader("📌 Milestone Status")
-    milestone_df = pd.DataFrame({
-        "Milestone": [
-            "Plan of Study (POS)",
-            "General Exam (MS) / Qualifying Exam (PhD)",
-            "Written Comprehensive (PhD)",
-            "Oral Comprehensive (PhD)",
-            "Thesis/Dissertation Outline",
-            "Final Examination"
-        ],
-        "Status": [
-            student["pos_status"],
-            student["general_exam_status"] if is_master_program(student["program"]) else student["qualifying_exam_status"],
-            student["written_comprehensive_status"] if is_phd_program(student["program"]) else "N/A",
-            student["oral_comprehensive_status"] if is_phd_program(student["program"]) else "N/A",
-            student["thesis_outline_approved"],
-            student["final_exam_status"]
-        ]
-    })
-    st.dataframe(milestone_df, width='stretch', hide_index=True)
-    st.info("📌 Read-only view. For updates, contact your adviser or SESAM Staff.")
+        student = student_record.iloc[0]
+        # Deadline alerts
+        alerts = check_deadline_alerts(student)
+        if alerts:
+            for alert in alerts:
+                st.error(alert)
+        # Standard warnings
+        warnings = get_all_warnings(student)
+        if any("⚠️" in w for w in warnings):
+            for w in warnings:
+                st.error(w)
+        else:
+            st.success("\n".join(warnings))
 
+        # ------ PROFILE PICTURE ------
+        st.markdown("---")
+        st.subheader("📸 Your Profile Picture")
+        col_pic1, col_pic2 = st.columns([1, 2])
+        with col_pic1:
+            pic_path = get_profile_picture_path(student["student_number"])
+            if pic_path and os.path.exists(pic_path):
+                st.image(pic_path, width=100, caption="Your Picture")
+            else:
+                st.info("No profile picture uploaded.")
+        with col_pic2:
+            uploaded_file = st.file_uploader("Upload new profile picture (JPG, PNG, GIF)", type=["jpg", "jpeg", "png", "gif"], key="profile_upload")
+            if uploaded_file:
+                new_filename = save_profile_picture(student["student_number"], uploaded_file)
+                if new_filename:
+                    df.loc[df["student_number"] == student["student_number"], "profile_pic"] = new_filename
+                    save_data(df)
+                    st.success("Profile picture updated!")
+                    st.rerun()
+            if st.button("🗑️ Delete my profile picture"):
+                if delete_profile_picture(student["student_number"]):
+                    df.loc[df["student_number"] == student["student_number"], "profile_pic"] = ""
+                    save_data(df)
+                    st.success("Profile picture deleted.")
+                    st.rerun()
+
+        # ------ AMIS SCREENSHOT ------
+        st.markdown("---")
+        st.subheader("📊 Your AMIS Screenshot (Subjects, Grades, Units)")
+        col_amis1, col_amis2 = st.columns([1, 2])
+        with col_amis1:
+            amis_path = get_amis_screenshot_path(student["student_number"])
+            if amis_path and os.path.exists(amis_path):
+                st.image(amis_path, width=250, caption="Your AMIS Screenshot")
+            else:
+                st.info("No AMIS screenshot uploaded.")
+        with col_amis2:
+            uploaded_amis = st.file_uploader("Upload AMIS screenshot (JPG/PNG)", type=["jpg", "jpeg", "png"], key="amis_upload_student")
+            if uploaded_amis:
+                new_file = save_amis_screenshot(student["student_number"], uploaded_amis)
+                if new_file:
+                    st.success("AMIS screenshot uploaded!")
+                    st.rerun()
+            if st.button("🗑️ Delete my AMIS screenshot"):
+                if delete_amis_screenshot(student["student_number"]):
+                    st.success("AMIS screenshot deleted.")
+                    st.rerun()
+
+        # ------ MANUAL GWA ENTRY ------
+        st.markdown("---")
+        st.subheader("📈 Update GWA from AMIS Screenshot")
+        current_gwa = float(student["gwa"])
+        new_gwa = st.number_input("Enter GWA exactly as on the screenshot", 
+                                  min_value=1.0, max_value=5.0, step=0.01, value=current_gwa)
+        if st.button("Update My GWA"):
+            df.loc[df["student_number"] == student["student_number"], "gwa"] = new_gwa
+            save_data(df)
+            st.success(f"GWA updated to {new_gwa}")
+            st.rerun()
+
+        # ------ OTHER STUDENT INFO ------
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Student Number", student["student_number"])
+            st.metric("Program", student["program"])
+            st.metric("Academic Year", format_ay(student["ay_start"], student["semester"]))
+        with col2:
+            st.metric("Advisor", student["advisor"])
+            st.metric("GWA", f"{student['gwa']:.2f}")
+            st.metric("POS Status", student["pos_status"])
+        with col3:
+            limit = get_thesis_limit(student["program"])
+            st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
+            st.metric("Residency", f"{student['residency_years_used']} / {get_residency_max(student['program'])} years")
+            st.metric("Final Exam", student["final_exam_status"])
+
+        # Coursework progress
+        st.markdown("---")
+        st.subheader("📚 Coursework Progress")
+        prog = compute_coursework_progress(student)
+        st.progress(prog / 100, text=f"{prog}% completed ({student['total_units_taken']} of {student['total_units_required']} units)")
+        st.caption(f"Remaining units: {max(0, student['total_units_required'] - student['total_units_taken'])}")
+
+        # Committee information
+        if student.get("committee_members"):
+            with st.expander("📋 Your Guidance/Advisory Committee"):
+                st.text_area("Committee Members", value=student["committee_members"], height=120, disabled=True)
+                if student.get("committee_approval_date"):
+                    st.caption(f"Approved on: {student['committee_approval_date']}")
+
+        # Milestone status
+        st.markdown("---")
+        st.subheader("📌 Milestone Status")
+        milestone_df = pd.DataFrame({
+            "Milestone": [
+                "Plan of Study (POS)",
+                "General Exam (MS) / Qualifying Exam (PhD)",
+                "Written Comprehensive (PhD)",
+                "Oral Comprehensive (PhD)",
+                "Thesis/Dissertation Outline",
+                "Final Examination"
+            ],
+            "Status": [
+                student["pos_status"],
+                student["general_exam_status"] if is_master_program(student["program"]) else student["qualifying_exam_status"],
+                student["written_comprehensive_status"] if is_phd_program(student["program"]) else "N/A",
+                student["oral_comprehensive_status"] if is_phd_program(student["program"]) else "N/A",
+                student["thesis_outline_approved"],
+                student["final_exam_status"]
+            ]
+        })
+        st.dataframe(milestone_df, width='stretch', hide_index=True)
+        st.info("📌 Read-only view. For updates, contact your adviser or SESAM Staff.")
+
+# ==================== FOOTER ====================
 st.markdown("---")
 st.caption("SESAM KMIS – Student Module V2 | Based on UPLB Graduate School Rules (2009)")
