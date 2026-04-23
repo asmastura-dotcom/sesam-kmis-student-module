@@ -173,7 +173,6 @@ def load_data():
     for idx, row in df.iterrows():
         program = str(row["program"]).strip()
         if program not in PROGRAMS:
-            # Try to map old "MS" / "PhD" values
             if program == "MS":
                 program = PROGRAMS[0]
             elif program == "PhD":
@@ -235,7 +234,6 @@ def check_gwa_warning(gwa):
         gwa = float(gwa)
     except:
         return "⚠️ GWA data error"
-    # Wording as requested: "below 2.00" even though UP system uses >2.00 as problematic.
     if gwa > 2.00:
         return f"⚠️ GWA {gwa:.2f} is below 2.00 – may affect exam eligibility and graduation"
     return f"✅ GWA {gwa:.2f} – good standing"
@@ -376,7 +374,19 @@ if role == "SESAM Staff":
     st.subheader("✏️ Update Student Record")
 
     if len(df) > 0:
-        student_name = st.selectbox("Select Student", df["name"])
+        # ----- SEARCHABLE STUDENT SELECTION -----
+        st.subheader("🔍 Search Student by Name")
+        search_term = st.text_input("Type part of the student's name:", value="", placeholder="e.g., Juan or Maria")
+        if search_term:
+            filtered_names = df[df["name"].str.contains(search_term, case=False, na=False)]["name"].tolist()
+        else:
+            filtered_names = df["name"].tolist()
+        
+        if not filtered_names:
+            st.warning("No matching students found.")
+            st.stop()
+        
+        student_name = st.selectbox("Select Student", filtered_names)
         student = df[df["name"] == student_name].iloc[0].copy()
         student_id = student["student_id"]
 
@@ -388,7 +398,7 @@ if role == "SESAM Staff":
         else:
             st.success("\n".join(warnings))
 
-        # Basic info display - fixed to avoid truncation (using markdown instead of metric)
+        # Basic info display - using markdown to avoid truncation
         st.markdown("---")
         st.markdown("### Student Information")
         col1, col2, col3 = st.columns(3)
