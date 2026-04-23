@@ -569,7 +569,7 @@ if role == "SESAM Staff":
     else:
         st.info("No students match the current search. Try a different name/number or add a new student below.")
 
-    # ----- ADD NEW STUDENT (simple format from image) -----
+    # ----- ADD NEW STUDENT (with formatted Year Admitted) -----
     st.markdown("---")
     st.subheader("➕ Add New Student")
     with st.expander("Register New Student", expanded=True):
@@ -590,7 +590,8 @@ if role == "SESAM Staff":
             
             col6, col7 = st.columns(2)
             with col6:
-                year_admitted = st.number_input("Year Admitted", min_value=2000, max_value=2030, value=2026, step=1)
+                year_admitted = st.number_input("Year Admitted", min_value=2000, max_value=2030, value=2026, step=1, help="Enter the starting year of the academic year")
+                st.caption(f"📅 {format_ay(year_admitted)}")
             with col7:
                 advisor = st.text_input("Advisor (optional)", placeholder="Dr. Faustino-Eslava")
             
