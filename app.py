@@ -379,23 +379,71 @@ def filter_dataframe(search_term, data):
 if role == "SESAM Staff":
     st.subheader("📋 All Students")
     
-    # ----- SEARCH BAR FOR THE TABLE -----
+    # ----- CUSTOM FILTERS SECTION -----
+    with st.expander("🔍 Advanced Filters (click to expand)"):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            # Program filter (multiselect)
+            program_options = sorted(df["program"].unique())
+            selected_programs = st.multiselect("Program", program_options, default=program_options)
+            # Advisor filter (multiselect)
+            advisor_names = [USERS.get(u, {}).get("display_name", u) for u in df["advisor_username"].unique()]
+            advisor_username_map = {USERS.get(u, {}).get("display_name", u): u for u in df["advisor_username"].unique()}
+            selected_advisor_display = st.multiselect("Advisor", advisor_names, default=advisor_names)
+            selected_advisors = [advisor_username_map[name] for name in selected_advisor_display]
+            # Year admitted - slider for range
+            min_year = int(df["year_admitted"].min())
+            max_year = int(df["year_admitted"].max())
+            year_range = st.slider("Year Admitted", min_year, max_year, (min_year, max_year))
+        with col2:
+            # POS Status
+            pos_options = df["pos_status"].unique().tolist()
+            selected_pos = st.multiselect("POS Status", pos_options, default=pos_options)
+            # Final Exam Status
+            final_options = df["final_exam_status"].unique().tolist()
+            selected_final = st.multiselect("Final Exam Status", final_options, default=final_options)
+            # GWA range
+            gwa_min = float(df["gwa"].min())
+            gwa_max = float(df["gwa"].max())
+            gwa_range = st.slider("GWA", gwa_min, gwa_max, (gwa_min, gwa_max), step=0.05)
+        with col3:
+            # Thesis units range
+            thesis_min = int(df["thesis_units_taken"].min())
+            thesis_max = int(df["thesis_units_taken"].max())
+            thesis_range = st.slider("Thesis Units Taken", thesis_min, thesis_max, (thesis_min, thesis_max))
+            # Reset button
+            if st.button("Reset All Filters"):
+                st.session_state.clear()
+                st.rerun()
+    
+    # Apply filters
+    filtered = df.copy()
+    filtered = filtered[filtered["program"].isin(selected_programs)]
+    filtered = filtered[filtered["advisor_username"].isin(selected_advisors)]
+    filtered = filtered[(filtered["year_admitted"] >= year_range[0]) & (filtered["year_admitted"] <= year_range[1])]
+    filtered = filtered[filtered["pos_status"].isin(selected_pos)]
+    filtered = filtered[filtered["final_exam_status"].isin(selected_final)]
+    filtered = filtered[(filtered["gwa"] >= gwa_range[0]) & (filtered["gwa"] <= gwa_range[1])]
+    filtered = filtered[(filtered["thesis_units_taken"] >= thesis_range[0]) & (filtered["thesis_units_taken"] <= thesis_range[1])]
+    
+    # ----- SEARCH BAR FOR THE TABLE (name/ID) -----
     search = st.text_input("🔍 Search by name or student ID", placeholder="e.g., Juan or S001")
-    filtered_df = filter_dataframe(search, df)
-    st.dataframe(filtered_df, width='stretch', height=400)
+    filtered = filter_dataframe(search, filtered)
+    
+    st.dataframe(filtered, width='stretch', height=400)
 
     st.markdown("---")
     st.subheader("✏️ Update Student Record")
 
-    if len(filtered_df) > 0:
+    if len(filtered) > 0:
         # ----- SEARCH BAR FOR STUDENT SELECTION (update dropdown) -----
         st.subheader("🔍 Search Student to Edit")
         edit_search = st.text_input("Type name or student ID", value="", placeholder="e.g., Juan or S001", key="edit_search")
         if edit_search:
-            edit_filtered = filter_dataframe(edit_search, filtered_df)
+            edit_filtered = filter_dataframe(edit_search, filtered)
             edit_filtered_names = edit_filtered["name"].tolist()
         else:
-            edit_filtered_names = filtered_df["name"].tolist()
+            edit_filtered_names = filtered["name"].tolist()
         
         if not edit_filtered_names:
             st.warning("No matching students found.")
@@ -544,9 +592,8 @@ if role == "SESAM Staff":
         st.markdown("---")
         st.subheader("🗑️ Delete Student")
         with st.expander("Click to expand and delete a student record"):
-            # Use the filtered list (current table view) for deletion selection
             delete_search = st.text_input("Search student to delete", placeholder="name or ID", key="delete_search")
-            delete_filtered = filter_dataframe(delete_search, filtered_df) if delete_search else filtered_df
+            delete_filtered = filter_dataframe(delete_search, filtered) if delete_search else filtered
             if len(delete_filtered) == 0:
                 st.warning("No matching students to delete.")
             else:
@@ -575,7 +622,7 @@ if role == "SESAM Staff":
                 st.warning("Please check the confirmation box before resetting.")
 
     else:
-        st.info("No students found. Use the Add Student feature below.")
+        st.info("No students match the current filters. Adjust filters or add a new student below.")
 
     # ----- ADD NEW STUDENT -----
     st.markdown("---")
@@ -660,7 +707,7 @@ elif role == "Faculty Adviser":
     if len(advisees) == 0:
         st.warning("No students assigned to you.")
     else:
-        # ----- SEARCH BAR FOR ADVISER TABLE -----
+        # ----- SIMPLE SEARCH FOR ADVISER TABLE (no advanced filters) -----
         search_adv = st.text_input("🔍 Search by name or student ID", placeholder="e.g., Juan or S001")
         filtered_advisees = filter_dataframe(search_adv, advisees)
         
