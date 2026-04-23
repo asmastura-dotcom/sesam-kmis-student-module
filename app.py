@@ -68,37 +68,6 @@ def format_ay(ay_start, semester):
     """Format academic year and semester, e.g., A.Y. 2024-2025 (1st Sem)"""
     return f"A.Y. {ay_start}-{ay_start+1} ({semester})"
 
-# ==================== PROFILE PICTURE HELPER ====================
-PIC_FOLDER = "profile_pics"
-if not os.path.exists(PIC_FOLDER):
-    os.makedirs(PIC_FOLDER)
-
-def save_profile_picture(student_number, uploaded_file):
-    if uploaded_file is None:
-        return None
-    ext = uploaded_file.name.split('.')[-1].lower()
-    if ext not in ['jpg', 'jpeg', 'png', 'gif']:
-        st.error("Unsupported file format. Use JPG, PNG, or GIF.")
-        return None
-    filename = f"{student_number}.{ext}"
-    filepath = os.path.join(PIC_FOLDER, filename)
-    with open(filepath, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    return filename
-
-def delete_profile_picture(student_number):
-    for f in os.listdir(PIC_FOLDER):
-        if f.startswith(str(student_number) + "."):
-            os.remove(os.path.join(PIC_FOLDER, f))
-            return True
-    return False
-
-def get_profile_picture_path(student_number):
-    for f in os.listdir(PIC_FOLDER):
-        if f.startswith(str(student_number) + "."):
-            return os.path.join(PIC_FOLDER, f)
-    return None
-
 # ==================== LOGIN PAGE ====================
 if not st.session_state.logged_in:
     st.title("🔐 SESAM KMIS Login")
@@ -136,13 +105,12 @@ def create_default_data():
         "middle_name": ["M.", "L.", "P.", "C.", "R."],
         "program": [PROGRAMS[0], PROGRAMS[1], PROGRAMS[0], PROGRAMS[1], PROGRAMS[0]],
         "advisor": ["Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava"],
-        "ay_start": [2024, 2023, 2024, 2022, 2024],
+        "AY": [2024-2025, 2023-2024, 2024-2025, 2022-2023, 2024-2025],
         "semester": ["1st Sem", "1st Sem", "2nd Sem", "1st Sem", "1st Sem"],
-        "profile_pic": ["", "", "", "", ""],
-        "pos_status": ["Approved", "Approved", "Pending", "Approved", "Pending"],
-        "pos_submitted_date": ["2024-01-15", "2023-06-10", "", "2022-09-01", ""],
-        "pos_approved_date": ["2024-02-01", "2023-07-01", "", "2022-09-15", ""],
-        "gwa": [1.75, 1.85, 2.10, 1.95, 2.05],
+        "POS_status": ["Approved", "Approved", "Pending", "Approved", "Pending"],
+        "POS_submitted_date": ["2024-01-15", "2023-06-10", "", "2022-09-01", ""],
+        "POS_approved_date": ["2024-02-01", "2023-07-01", "", "2022-09-15", ""],
+        "GWA": [1.75, 1.85, 2.10, 1.95, 2.05],
         "total_units_taken": [12, 18, 9, 24, 6],
         "total_units_required": [24, 24, 24, 24, 24],
         "thesis_units_taken": [3, 8, 2, 12, 1],
@@ -444,34 +412,6 @@ if role == "SESAM Staff":
         student = df[df["name"] == student_name].iloc[0].copy()
         student_number = student["student_number"]
 
-        # Profile picture
-        st.markdown("---")
-        st.subheader("📸 Student Profile Picture")
-        col_pic1, col_pic2 = st.columns([1, 2])
-        with col_pic1:
-            pic_path = get_profile_picture_path(student_number)
-            if pic_path and os.path.exists(pic_path):
-                st.image(pic_path, width=150, caption="Current Picture")
-            else:
-                st.info("No profile picture uploaded.")
-        with col_pic2:
-            uploaded_file = st.file_uploader("Upload new profile picture (JPG, PNG, GIF)", type=["jpg", "jpeg", "png", "gif"], key=f"pic_{student_number}")
-            if uploaded_file:
-                new_filename = save_profile_picture(student_number, uploaded_file)
-                if new_filename:
-                    df.loc[df["student_number"] == student_number, "profile_pic"] = new_filename
-                    save_data(df)
-                    st.success("Profile picture updated!")
-                    st.rerun()
-            if st.button("🗑️ Delete current picture", key=f"del_pic_{student_number}"):
-                if delete_profile_picture(student_number):
-                    df.loc[df["student_number"] == student_number, "profile_pic"] = ""
-                    save_data(df)
-                    st.success("Profile picture deleted.")
-                    st.rerun()
-                else:
-                    st.warning("No picture to delete.")
-
         # Warnings
         warnings = get_all_warnings(student)
         if any("⚠️" in w for w in warnings):
@@ -622,7 +562,6 @@ if role == "SESAM Staff":
                 ay_start = int(selected_ay_range.split("-")[0])
             with col7:
                 semester = st.selectbox("Semester *", options=SEMESTERS)
-            st.caption(f"📅 {format_ay(ay_start, semester)}")
             
             col8, col9 = st.columns(2)
             with col8:
