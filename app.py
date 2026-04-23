@@ -48,6 +48,10 @@ PROGRAMS = [
 
 SEMESTERS = ["1st Sem", "2nd Sem", "Summer"]
 
+# Generate academic year ranges for dropdown (current year - 5 to current year + 5)
+current_year = date.today().year
+ACADEMIC_YEARS = [f"{year}-{year+1}" for year in range(current_year-5, current_year+6)]
+
 def is_master_program(program):
     return program.startswith("MS") or program.startswith("Master") or program.startswith("Professional Masters")
 
@@ -493,7 +497,7 @@ if role == "SESAM Staff":
             if student["thesis_units_taken"] > limit:
                 st.error("⚠️ Units exceeded!")
 
-        # Edit tabs (same as before, but we need to add ay_start and semester to the edit form)
+        # Edit tabs (same as before)
         tabs = st.tabs(["Coursework & Thesis", "Exams", "Residency & Leave", "Graduation", "Other"])
         with tabs[0]:
             with st.form("coursework_form"):
@@ -591,7 +595,7 @@ if role == "SESAM Staff":
     else:
         st.info("No students match the current search. Try a different name/number or add a new student below.")
 
-    # ----- ADD NEW STUDENT (with separate AY and semester) -----
+    # ----- ADD NEW STUDENT (with Academic Year dropdown and Semester) -----
     st.markdown("---")
     st.subheader("➕ Add New Student")
     with st.expander("Register New Student", expanded=True):
@@ -612,16 +616,19 @@ if role == "SESAM Staff":
             
             col6, col7 = st.columns(2)
             with col6:
-                ay_start = st.number_input("Academic Year Start Year", min_value=2000, max_value=2030, value=2026, step=1, help="e.g., 2024 for A.Y. 2024-2025")
+                # Academic Year dropdown with ranges like "2026-2027"
+                selected_ay_range = st.selectbox("Academic Year *", options=ACADEMIC_YEARS, index=ACADEMIC_YEARS.index(f"{current_year}-{current_year+1}") if f"{current_year}-{current_year+1}" in ACADEMIC_YEARS else 0)
+                # Extract start year from selected range (e.g., "2026-2027" -> 2026)
+                ay_start = int(selected_ay_range.split("-")[0])
             with col7:
-                semester = st.selectbox("Semester", options=SEMESTERS)
+                semester = st.selectbox("Semester *", options=SEMESTERS)
             st.caption(f"📅 {format_ay(ay_start, semester)}")
             
             col8, col9 = st.columns(2)
             with col8:
                 advisor = st.text_input("Advisor (optional)", placeholder="Dr. Faustino-Eslava")
             with col9:
-                st.empty()  # placeholder for alignment
+                st.empty()
             
             st.markdown("---")
             st.markdown("### Initial Milestone Status (optional)")
