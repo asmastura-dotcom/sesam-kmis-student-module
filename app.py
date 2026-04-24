@@ -3,15 +3,14 @@ SESAM KMIS - Graduate Student Lifecycle Management System (Enhanced UI)
 Author: [Your Name]
 Date: [Current Date]
 Description: Full workflow-based lifecycle management with beautiful, modern dashboard.
+Staff dashboard: table always visible, forms appear only when "Update Student" or "Add New Student" is clicked.
 """
 
 import streamlit as st
 import pandas as pd
 import os
 import json
-import shutil
-from datetime import date, datetime, timedelta
-from pathlib import Path
+from datetime import date, datetime
 
 # ==================== PAGE CONFIGURATION ====================
 st.set_page_config(
@@ -24,12 +23,7 @@ st.set_page_config(
 # ==================== CUSTOM CSS FOR MODERN UI ====================
 st.markdown("""
 <style>
-    /* Main container padding */
-    .main > div {
-        padding: 0 1rem;
-    }
-    
-    /* Card styling */
+    .main > div { padding: 0 1rem; }
     .css-1r6slb0, .element-container, .stExpander {
         background: white;
         border-radius: 12px;
@@ -38,11 +32,7 @@ st.markdown("""
         box-shadow: 0 2px 8px rgba(0,0,0,0.05);
         transition: all 0.2s ease;
     }
-    .stExpander:hover {
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    }
-    
-    /* Metric cards */
+    .stExpander:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
     [data-testid="stMetric"] {
         background: #f8f9fa;
         border-radius: 12px;
@@ -50,14 +40,7 @@ st.markdown("""
         text-align: center;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
-    
-    /* Headers */
-    h1, h2, h3 {
-        font-weight: 600 !important;
-        letter-spacing: -0.01em;
-    }
-    
-    /* Badges */
+    h1, h2, h3 { font-weight: 600 !important; letter-spacing: -0.01em; }
     .badge {
         display: inline-block;
         padding: 0.25rem 0.75rem;
@@ -70,35 +53,15 @@ st.markdown("""
     .badge-warning { background: #fff3cd; color: #856404; }
     .badge-danger { background: #f8d7da; color: #721c24; }
     .badge-info { background: #d1ecf1; color: #0c5460; }
-    .badge-secondary { background: #e2e3e5; color: #383d41; }
-    
-    /* Progress bar */
-    .stProgress > div > div {
-        background-color: #2c7da0;
-        border-radius: 10px;
-    }
-    
-    /* Tables */
+    .stProgress > div > div { background-color: #2c7da0; border-radius: 10px; }
     .dataframe {
         border-radius: 12px;
         overflow: hidden;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
-    .dataframe th {
-        background-color: #2c3e50 !important;
-        color: white !important;
-        font-weight: 500;
-    }
-    .dataframe tr:hover {
-        background-color: #f1f9ff !important;
-    }
-    
-    /* Sidebar */
-    .css-1d391kg {
-        background-color: #f4f6f9;
-    }
-    
-    /* Notification panel */
+    .dataframe th { background-color: #2c3e50 !important; color: white !important; }
+    .dataframe tr:hover { background-color: #f1f9ff !important; }
+    .css-1d391kg { background-color: #f4f6f9; }
     .notification-error {
         border-left: 4px solid #dc3545;
         background: #fff5f5;
@@ -113,8 +76,6 @@ st.markdown("""
         border-radius: 8px;
         margin-bottom: 0.5rem;
     }
-    
-    /* Button styling */
     .stButton button {
         border-radius: 20px;
         font-weight: 500;
@@ -124,8 +85,6 @@ st.markdown("""
         transform: translateY(-2px);
         box-shadow: 0 4px 8px rgba(0,0,0,0.1);
     }
-    
-    /* Tabs styling */
     .stTabs [data-baseweb="tab-list"] {
         gap: 1rem;
         background: #f8f9fa;
@@ -156,7 +115,7 @@ if "display_name" not in st.session_state:
 if "selected_student" not in st.session_state:
     st.session_state.selected_student = None
 
-# ==================== USER AUTH (unchanged) ====================
+# ==================== USER AUTH ====================
 USERS = {
     "staff1": {"password": "admin123", "role": "SESAM Staff", "display_name": "SESAM Administrator"},
     "adviser1": {"password": "adv123", "role": "Faculty Adviser", "display_name": "Dr. Eslava"},
@@ -165,7 +124,7 @@ USERS = {
     "student2": {"password": "stu456", "role": "Student", "display_name": "Santos, Maria L."}
 }
 
-# ==================== PROGRAM DEFINITIONS (unchanged) ====================
+# ==================== PROGRAM DEFINITIONS ====================
 PROGRAMS = [
     "MS Environmental Science",
     "PhD Environmental Science",
@@ -381,7 +340,7 @@ def get_adviser_notifications(adviser_name):
             notifications.append({"student": student["name"], "student_number": student["student_number"], "type": "Milestone Overdue", "message": "Exams due by 2nd year", "severity": "error"})
     return notifications
 
-# ==================== PROFILE PICTURE HELPER ====================
+# ==================== PROFILE PICTURE ====================
 PIC_FOLDER = "profile_pics"
 if not os.path.exists(PIC_FOLDER):
     os.makedirs(PIC_FOLDER)
@@ -653,10 +612,6 @@ def display_workflow_grid(completed_steps, next_step):
             else:
                 st.markdown(f'<div style="background:#f5f5f5; border-radius:12px; padding:0.75rem; text-align:center; margin:0.25rem; opacity:0.6;"><div style="font-size:1.2rem;">🔒</div><div style="font-weight:500;">{step}</div><div style="font-size:0.7rem; color:#757575;">Locked</div></div>', unsafe_allow_html=True)
 
-def status_badge(status):
-    color_map = {"Pending": "#ffc107", "Approved": "#28a745", "Rejected": "#dc3545", "Completed": "#17a2b8"}
-    return f'<span style="background:{color_map.get(status, "#6c757d")}; color:white; padding:0.2rem 0.5rem; border-radius:20px; font-size:0.7rem;">{status}</span>'
-
 # ==================== LOGIN PAGE ====================
 if not st.session_state.logged_in:
     st.markdown('<div style="text-align:center; margin-bottom:2rem;"><h1>🎓 SESAM KMIS</h1><p style="color:#6c757d;">Graduate Student Lifecycle Management System</p></div>', unsafe_allow_html=True)
@@ -683,7 +638,6 @@ df = load_data()
 
 # ==================== SIDEBAR ====================
 with st.sidebar:
-    st.image("https://via.placeholder.com/150x80?text=SESAM+Logo", use_column_width=True)  # Replace with actual logo if available
     st.markdown(f"### 👤 {st.session_state.display_name}")
     st.markdown(f"**Role:** {st.session_state.role}")
     st.markdown("---")
@@ -704,8 +658,8 @@ st.caption("Complete workflow tracking from admission to graduation")
 role = st.session_state.role
 
 # ==================== STAFF VIEW (with toggle buttons) ====================
-elif role == "SESAM Staff":
-    # Header with title and buttons
+if role == "SESAM Staff":
+    # Header with buttons
     col_title, col_buttons = st.columns([2, 1])
     with col_title:
         st.subheader("📋 Student Directory")
@@ -729,7 +683,7 @@ elif role == "SESAM Staff":
         st.session_state.staff_show_update = False
         st.rerun()
     
-    # Always show the student table
+    # Always show student table
     search = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001", key="staff_search")
     filtered_df = filter_dataframe(search, df)
     filtered_df["academic_year"] = filtered_df.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
@@ -751,7 +705,7 @@ elif role == "SESAM Staff":
         if len(filtered_df) == 0:
             st.warning("No students available to edit.")
         else:
-            # Student selection (radio)
+            # Student selection
             selected_index = st.radio(
                 "Select a student to edit",
                 options=filtered_df.index,
@@ -760,14 +714,13 @@ elif role == "SESAM Staff":
             )
             student = filtered_df.loc[selected_index].copy()
             
-            # Cancel button inside form area
             if st.button("❌ Cancel", key="cancel_update"):
                 st.session_state.staff_show_update = False
                 st.rerun()
             
             st.markdown(f"### Editing: {student['name']} ({student['student_number']})")
             
-            # Workflow progress grid
+            # Workflow progress
             completed_steps = get_step_completion_status(student)
             next_step = get_next_required_step(student)
             st.markdown("#### 🚀 Milestone Workflow")
@@ -780,16 +733,15 @@ elif role == "SESAM Staff":
             else:
                 st.success("🎉 All milestones completed! Ready for graduation.")
             
-            # Tabs (same as before)
+            # Tabs
             tabs = st.tabs(["📝 Student Info", "📚 Coursework & Thesis", "📝 Exams", "🏠 Residency", "🎓 Graduation", "👥 Committee", "📁 Documents", "📖 Semester History"])
             
             with tabs[0]:
-                # Profile picture and basic info (unchanged)
                 col1, col2 = st.columns([1,2])
                 with col1:
                     pic_path = get_profile_picture_path(student["student_number"])
                     if pic_path and os.path.exists(pic_path):
-                        st.image(pic_path, width=180, caption="Profile Picture")
+                        st.image(pic_path, width=180)
                     else:
                         st.info("No profile picture")
                     uploaded_file = st.file_uploader("Upload new picture", type=["jpg","jpeg","png"], key="staff_pic")
@@ -813,7 +765,6 @@ elif role == "SESAM Staff":
                     st.markdown(f"**GWA (Official):** {student['gwa']:.2f}")
             
             with tabs[1]:
-                # Coursework & Thesis (same as before, abbreviated for brevity)
                 locked = is_step_locked(student, "Coursework")
                 if locked:
                     st.warning("🔒 Coursework step locked until Committee approved.")
@@ -844,7 +795,6 @@ elif role == "SESAM Staff":
                             st.error("Locked step cannot be edited")
             
             with tabs[2]:
-                # Exams (abbreviated, same as original)
                 locked = is_step_locked(student, "Exams")
                 if locked:
                     st.warning("🔒 Exams step locked until Coursework completed.")
@@ -870,7 +820,6 @@ elif role == "SESAM Staff":
                             st.error("Locked step cannot be edited")
             
             with tabs[3]:
-                # Residency & Leave (unchanged)
                 with st.form("staff_residency"):
                     residency_used = st.number_input("Years of Residence Used", min_value=0, value=int(student["residency_years_used"]))
                     max_years = get_residency_max(student["program"])
@@ -889,7 +838,6 @@ elif role == "SESAM Staff":
                         st.rerun()
             
             with tabs[4]:
-                # Graduation
                 defense_done = "Defense" in get_step_completion_status(student)
                 if not defense_done:
                     st.warning("🔒 Graduation locked until Final Exam passed.")
@@ -908,7 +856,6 @@ elif role == "SESAM Staff":
                             st.error("Cannot approve graduation before Final Exam")
             
             with tabs[5]:
-                # Committee
                 with st.form("staff_committee"):
                     committee_members = st.text_area("Committee Members (one per line)", value=student.get("committee_members",""), height=150)
                     committee_approval_date = st.text_input("Committee Approval Date", student.get("committee_approval_date",""))
@@ -920,7 +867,6 @@ elif role == "SESAM Staff":
                         st.rerun()
             
             with tabs[6]:
-                # Document submissions
                 st.subheader("📎 Document Submissions")
                 uploads = get_all_uploads_for_student(student["student_number"])
                 if len(uploads)==0:
@@ -953,7 +899,6 @@ elif role == "SESAM Staff":
                                 st.write(f"Comment: {doc['reviewer_comment']}")
             
             with tabs[7]:
-                # Semester history
                 st.subheader("📚 Academic Semester Records")
                 semesters = get_student_semesters(student["student_number"])
                 if len(semesters)==0:
@@ -999,7 +944,6 @@ elif role == "SESAM Staff":
     # ==================== ADD NEW STUDENT FORM ====================
     if st.session_state.staff_show_add:
         st.subheader("➕ Register New Student")
-        # Cancel button
         if st.button("❌ Cancel", key="cancel_add"):
             st.session_state.staff_show_add = False
             st.rerun()
@@ -1125,21 +1069,63 @@ elif role == "SESAM Staff":
                     df = pd.concat([df, new_df], ignore_index=True)
                     save_data(df)
                     st.success(f"✅ Student {full_name} (Number: {student_number}) registered successfully!")
-                    st.session_state.staff_show_add = False  # Close form after success
+                    st.session_state.staff_show_add = False
                     st.rerun()
+
+# ==================== ADVISER VIEW ====================
+elif role == "Faculty Adviser":
+    st.subheader(f"👨‍🏫 Your Advisees – {st.session_state.display_name}")
+    advisees = df[df["advisor"] == st.session_state.display_name].copy()
+    if len(advisees)==0:
+        st.warning("No students assigned.")
+    else:
+        notifications = get_adviser_notifications(st.session_state.display_name)
+        if notifications:
+            st.markdown("#### 🔔 Notifications")
+            for n in notifications:
+                if n["severity"]=="error":
+                    st.error(f"**{n['student']}** ({n['student_number']}): {n['message']}")
+                else:
+                    st.warning(f"**{n['student']}** ({n['student_number']}): {n['message']}")
+            st.markdown("---")
+        search_adv = st.text_input("🔍 Filter advisees")
+        filtered = filter_dataframe(search_adv, advisees)
+        filtered["academic_year"] = filtered.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
+        st.dataframe(filtered[["student_number","name","program","academic_year","gwa","thesis_units_taken","pos_status","final_exam_status"]], use_container_width=True)
+        for _, row in filtered.iterrows():
+            with st.expander(f"📌 {row['name']} ({row['student_number']})"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Program", row["program"])
+                    st.metric("GWA", f"{row['gwa']:.2f}")
+                    st.metric("Thesis Units", f"{row['thesis_units_taken']}/{get_thesis_limit(row['program'])}")
+                with col2:
+                    st.metric("Residency", f"{row['residency_years_used']}/{get_residency_max(row['program'])}")
+                    st.metric("POS Status", row["pos_status"])
+                    st.metric("Final Exam", row["final_exam_status"])
+                display_workflow_grid(get_step_completion_status(row), get_next_required_step(row))
+                pic = get_profile_picture_path(row["student_number"])
+                if pic:
+                    st.image(pic, width=100)
+                for alert in check_deadline_alerts(row):
+                    st.error(alert)
+                for w in get_all_warnings(row):
+                    if "⚠️" in w:
+                        st.warning(w)
+                    else:
+                        st.success(w)
+        st.info("For updates, contact SESAM Staff.")
 
 # ==================== STUDENT VIEW ====================
 elif role == "Student":
     st.subheader(f"📘 Your Dashboard – {st.session_state.display_name}")
     student = df[df["name"] == st.session_state.display_name].iloc[0]
     
-    # Workflow progress
     completed = get_step_completion_status(student)
     next_step = get_next_required_step(student)
     st.markdown("#### 🚀 Your Milestone Journey")
     display_workflow_grid(completed, next_step)
     
-    # Alerts
     for alert in check_deadline_alerts(student):
         st.error(alert)
     for w in get_all_warnings(student):
@@ -1148,7 +1134,6 @@ elif role == "Student":
         else:
             st.success(w)
     
-    # Profile and metrics row
     colp1, colp2 = st.columns([1,3])
     with colp1:
         pic = get_profile_picture_path(student["student_number"])
@@ -1168,11 +1153,9 @@ elif role == "Student":
         metrics2[2].metric("POS Status", student["pos_status"])
         metrics2[3].metric("Final Exam", student["final_exam_status"])
     
-    # Coursework progress
     prog = compute_coursework_progress(student)
     st.progress(prog/100, text=f"Coursework completion: {prog}% ({student['total_units_taken']}/{student['total_units_required']} units)")
     
-    # Document upload
     st.markdown("#### 📎 Submit Requirements")
     with st.expander("Upload a document for review"):
         category = st.selectbox("Document Type", UPLOAD_CATEGORIES, format_func=lambda x: UPLOAD_DISPLAY_NAMES[x])
@@ -1187,7 +1170,6 @@ elif role == "Student":
                 st.success("Uploaded successfully. Staff will review.")
                 st.rerun()
     
-    # Submission status
     st.markdown("#### 📋 Document Status")
     uploads_student = get_all_uploads_for_student(student["student_number"])
     if len(uploads_student)>0:
@@ -1197,7 +1179,6 @@ elif role == "Student":
     else:
         st.info("No documents submitted.")
     
-    # Semester history
     st.markdown("#### 📚 Academic History")
     semesters = get_student_semesters(student["student_number"])
     if len(semesters)==0:
@@ -1210,7 +1191,6 @@ elif role == "Student":
                     st.table(pd.DataFrame(subjects))
                 st.caption(f"Total units: {sem['total_units']}")
     
-    # Committee info
     if student.get("committee_members"):
         with st.expander("👥 Your Committee"):
             st.text(student["committee_members"])
