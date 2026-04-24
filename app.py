@@ -953,7 +953,7 @@ if role == "SESAM Staff":
                     st.success(f"✅ Student {full_name} (Number: {student_number}) registered successfully!")
                     st.rerun()
 
-# ==================== ADVISER VIEW (enhanced, correct progression) ====================
+# ==================== ADVISER VIEW (correct progression for MS and PhD) ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees")
     adviser_name = st.session_state.display_name
@@ -1002,25 +1002,31 @@ elif role == "Faculty Adviser":
                     st.caption(f"Remaining units: {max(0, units_required - units_taken)}")
                     
                     st.markdown("---")
-                    # === Milestone Table (correct academic progression) ===
+                    # === Milestone Table (MS vs PhD progression) ===
                     st.subheader("📋 Milestone Status & Dates")
                     milestone_data = []
-                    # 1. Plan of Study
+                    # 1. Plan of Study (all)
                     pos_date = row['pos_approved_date'] if row['pos_approved_date'] and row['pos_approved_date'] != 'nan' else row['pos_submitted_date'] if row['pos_submitted_date'] and row['pos_submitted_date'] != 'nan' else ''
                     milestone_data.append(["Plan of Study (POS)", row['pos_status'], pos_date])
-                    # 2. Comprehensive Exams (PhD: written then oral; MS: general)
+                    
+                    # 2. Exams (different for MS and PhD)
                     if is_phd_program(row['program']):
                         milestone_data.append(["Written Comprehensive Exam", row['written_comprehensive_status'], row['written_comprehensive_passed_date']])
                         milestone_data.append(["Oral Comprehensive Exam", row['oral_comprehensive_status'], row['oral_comprehensive_passed_date']])
                     else:
+                        # MS General Exam (mostly oral, but may include written supplement)
                         milestone_data.append(["General Exam (MS)", row['general_exam_status'], row['general_exam_passed_date']])
-                    # 3. Thesis/Dissertation Outline (after comps)
+                    
+                    # 3. Thesis/Dissertation Outline
                     thesis_date = row['thesis_outline_approved_date'] if row['thesis_outline_approved'] == 'Yes' else ''
                     milestone_data.append(["Thesis/Dissertation Outline", row['thesis_outline_approved'], thesis_date])
+                    
                     # 4. Thesis Status
                     milestone_data.append(["Thesis/Dissertation Status", row['thesis_status'], ""])
+                    
                     # 5. Final Exam
                     milestone_data.append(["Final Exam", row['final_exam_status'], row['final_exam_passed_date']])
+                    
                     # 6. Graduation
                     milestone_data.append(["Graduation Application", row['graduation_applied'], ""])
                     milestone_data.append(["Graduation Approved", row['graduation_approved'], row['graduation_date']])
@@ -1034,6 +1040,7 @@ elif role == "Faculty Adviser":
                     pending = []
                     if row['pos_status'] not in ["Approved", "Completed"]:
                         pending.append("❌ Plan of Study (POS) not approved – required in first semester of residency")
+                    
                     if is_phd_program(row['program']):
                         if row['written_comprehensive_status'] != "Passed":
                             pending.append("❌ Written comprehensive exam not passed")
@@ -1041,16 +1048,18 @@ elif role == "Faculty Adviser":
                             pending.append("❌ Oral comprehensive exam not passed")
                     else:
                         if row['general_exam_status'] != "Passed":
-                            pending.append("❌ General exam not passed")
-                    # Thesis outline eligibility check
-                    outline_overdue = False
+                            pending.append("❌ General exam (MS) not passed")
+                    
+                    # Thesis outline eligibility
                     if is_phd_program(row['program']):
                         comp_passed = (row['written_comprehensive_status'] == "Passed" and row['oral_comprehensive_status'] == "Passed")
                         if comp_passed and row['thesis_outline_approved'] != "Yes":
                             pending.append("❌ Thesis/Dissertation outline not approved after passing comprehensive exams")
-                    elif is_master_program(row['program']):
+                    else:
+                        # For MS: outline should be approved before final exam, typically after general exam
                         if row['thesis_units_taken'] >= 4 and row['thesis_outline_approved'] != "Yes":
                             pending.append("❌ Thesis outline approval overdue (should be approved by 2nd thesis semester)")
+                    
                     if row['final_exam_status'] != "Passed":
                         pending.append("❌ Final exam not passed")
                     if row['graduation_applied'] == "Yes" and row['graduation_approved'] != "Yes":
@@ -1068,7 +1077,7 @@ elif role == "Faculty Adviser":
                     else:
                         st.success("✅ No pending requirements – student is on track.")
                     
-                    # === Committee ===
+                    # === Committee Info ===
                     if row.get('committee_members') and row['committee_members'] not in ['', 'nan']:
                         with st.expander("📋 Guidance/Advisory Committee"):
                             members = row['committee_members'].replace(", ", "\n")
@@ -1083,7 +1092,7 @@ elif role == "Faculty Adviser":
                         st.caption(f"AWOL lifted on: {row['awol_lifted_date']}")
                     
                     st.markdown("---")
-                    # === Images ===
+                    # === Images (view only) ===
                     col_pic, col_amis = st.columns(2)
                     with col_pic:
                         pic_path = get_profile_picture_path(row["student_number"])
