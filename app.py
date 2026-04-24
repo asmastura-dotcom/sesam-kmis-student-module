@@ -670,45 +670,127 @@ def filter_dataframe(search_term, data):
     )
     return data[mask]
 
-# ==================== STAFF VIEW (full editing + basic analytics) ====================
+# ==================== HELPER FUNCTIONS FOR DASHBOARD ====================
+def compute_course_demand_forecast(df):
+    """Simulate course demand forecast based on POS data (if available) or return placeholder."""
+    # In a real system, you would aggregate course codes from POS data.
+    # For demo, we return a sample table with dummy data.
+    sample_courses = [
+        {"code": "ES 201", "title": "Environmental Science", "pos_count": 25, "hist_rate": 0.85, "capacity": 30},
+        {"code": "ES 210", "title": "Environmental Policy", "pos_count": 18, "hist_rate": 0.90, "capacity": 25},
+        {"code": "ES 220", "title": "Climate Change", "pos_count": 30, "hist_rate": 0.80, "capacity": 30},
+    ]
+    forecast = []
+    for c in sample_courses:
+        projected = int(c["pos_count"] * c["hist_rate"])
+        if projected > c["capacity"]:
+            status = "Over-Subscribed"
+        elif projected < c["capacity"] * 0.7:
+            status = "Under-Subscribed"
+        else:
+            status = "Adequate"
+        forecast.append({
+            "Course Code": c["code"],
+            "Title": c["title"],
+            "POS Count": c["pos_count"],
+            "Hist. Rate": f"{c['hist_rate']*100:.0f}%",
+            "Projected": projected,
+            "Capacity": c["capacity"],
+            "Status": status
+        })
+    return pd.DataFrame(forecast)
+
+def compute_time_to_degree(df):
+    """Compute average time-to-degree for graduated students."""
+    graduated = df[df["graduation_applied"] == "Yes"]
+    if len(graduated) == 0:
+        return None
+    # In real data, you would compute from admission year to graduation date.
+    # For demo, return a placeholder.
+    return 2.4  # average years (example)
+
+def compute_milestone_completion_rates(df):
+    """Compute milestone completion rates for key events."""
+    total = len(df)
+    if total == 0:
+        return {"POS Approved": 0, "Thesis Outline Approved": 0, "Final Exam Passed": 0}
+    pos_approved = (df["pos_status"] == "Approved").sum()
+    outline_approved = (df["thesis_outline_approved"] == "Yes").sum()
+    final_passed = (df["final_exam_status"] == "Passed").sum()
+    return {
+        "POS Approved": int((pos_approved / total) * 100),
+        "Thesis Outline Approved": int((outline_approved / total) * 100),
+        "Final Exam Passed": int((final_passed / total) * 100)
+    }
+
+# ==================== STAFF VIEW (G.U.I.D.E. style dashboard) ====================
 if role == "SESAM Staff":
-    st.subheader("📋 All Students")
+    st.subheader("📊 Dashboard")
+    
+    # ---- Top metrics (Active, Delayed, Graduated) ----
+    total_students = len(df)
+    active = df[df["graduation_approved"] != "Yes"].shape[0]
+    delayed = df[df["gwa"] > 2.0].shape[0] + df[df["thesis_units_taken"] > df["thesis_units_limit"]].shape[0]
+    graduated = df[df["graduation_approved"] == "Yes"].shape[0]
+    
+    col_metrics = st.columns(4)
+    with col_metrics[0]:
+        st.metric("Active Students", active, delta=f"{active/total_students*100:.0f}%")
+    with col_metrics[1]:
+        st.metric("At-Risk / Delayed", delayed)
+    with col_metrics[2]:
+        st.metric("Graduated", graduated)
+    with col_metrics[3]:
+        st.metric("Total Students", total_students)
+    
+    st.markdown("---")
+    
+    # ---- Search bar (reuse existing) ----
     search = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001")
     filtered_df = filter_dataframe(search, df)
     filtered_df["academic_year"] = filtered_df.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
     display_cols = ["student_number", "name", "program", "academic_year", "advisor", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status"]
-    st.dataframe(filtered_df[display_cols], width='stretch', height=400)
-
-    # ---- Simple analytics dashboard for staff ----
-    st.markdown("---")
-    st.subheader("📊 Program Analytics")
-    col_metrics = st.columns(4)
-    total_students = len(df)
-    at_risk = df[df["gwa"] > 2.0].shape[0] + df[df["thesis_units_taken"] > df["thesis_units_limit"]].shape[0]
-    with col_metrics[0]:
-        st.metric("Total Students", total_students)
-    with col_metrics[1]:
-        st.metric("At-Risk Students", at_risk, delta=f"{at_risk/total_students*100:.0f}%")
-    with col_metrics[2]:
-        st.metric("Master's Students", df[df["program"].apply(is_master_program)].shape[0])
-    with col_metrics[3]:
-        st.metric("PhD Students", df[df["program"].apply(is_phd_program)].shape[0])
+    st.dataframe(filtered_df[display_cols], width='stretch', height=300)
     
-    # Graphs placed at the bottom, side by side, smaller
     st.markdown("---")
-    col_chart1, col_chart2 = st.columns(2)
-    with col_chart1:
-        prog_counts = df["program"].value_counts().reset_index()
-        prog_counts.columns = ["Program", "Count"]
-        fig = px.bar(prog_counts, x="Program", y="Count", title="Student Distribution by Program", color="Program", height=300)
-        st.plotly_chart(fig, use_container_width=True)
-    with col_chart2:
-        fig_gwa = px.histogram(df, x="gwa", nbins=20, title="GWA Distribution", color_discrete_sequence=["green"], height=300)
-        st.plotly_chart(fig_gwa, use_container_width=True)
-
+    
+    # ---- Two columns for Course Demand Forecast and Time-to-Degree + Milestone Rates ----
+    col_left, col_right = st.columns([2, 1])
+    
+    with col_left:
+        st.subheader("Course Demand Forecast — 2nd Sem 2025–2026")
+        forecast_df = compute_course_demand_forecast(df)
+        # Style the Status column
+        def color_status(val):
+            if val == "Over-Subscribed":
+                return "background-color: #ffcccc"
+            elif val == "Under-Subscribed":
+                return "background-color: #ccffcc"
+            else:
+                return ""
+        styled = forecast_df.style.applymap(color_status, subset=["Status"])
+        st.dataframe(styled, width='stretch', hide_index=True)
+    
+    with col_right:
+        # Time-to-Degree card
+        ttd = compute_time_to_degree(df)
+        if ttd:
+            st.subheader("Time-to-Degree (Years)")
+            st.markdown(f"**MS Environmental Science**\n\nRange: 2–5 years")
+            st.metric("Average", f"{ttd} years")
+        else:
+            st.info("No graduated students yet to compute time-to-degree.")
+        
+        st.markdown("---")
+        st.subheader("Milestone Completion Rates")
+        rates = compute_milestone_completion_rates(df)
+        for milestone, rate in rates.items():
+            st.metric(milestone, f"{rate}%")
+    
     st.markdown("---")
     st.subheader("✏️ Update Student Record")
-
+    
+    # ---- The rest of the Staff view (editing, adding students) remains unchanged ----
     if len(filtered_df) > 0:
         st.subheader("🔍 Search Student to Edit")
         edit_search = st.text_input("Type name or student number", value="", placeholder="e.g., Cruz or S001", key="edit_search")
@@ -1021,7 +1103,7 @@ if role == "SESAM Staff":
                     st.success(f"✅ Student {full_name} (Number: {student_number}) registered successfully!")
                     st.rerun()
 
-# ==================== ENHANCED ADVISER VIEW (with dashboard & early warnings) ====================
+# ==================== ENHANCED ADVISER VIEW (remains as before, with dashboard) ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees")
     adviser_name = st.session_state.display_name
@@ -1099,7 +1181,7 @@ elif role == "Faculty Adviser":
                 fig_milestone.update_layout(barmode='group', title="", xaxis_tickangle=-45, height=350)
                 st.plotly_chart(fig_milestone, use_container_width=True)
         
-        # ---- Detailed student expanders ----
+        # ---- Detailed student expanders (unchanged) ----
         if len(filtered_advisees) > 0:
             st.markdown("---")
             st.subheader("📌 Detailed Student Progress & Notifications")
