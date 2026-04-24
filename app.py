@@ -953,7 +953,7 @@ if role == "SESAM Staff":
                     st.success(f"✅ Student {full_name} (Number: {student_number}) registered successfully!")
                     st.rerun()
 
-# ==================== ADVISER VIEW (enhanced detailed view) ====================
+# ==================== ADVISER VIEW (enhanced, correct progression) ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees")
     adviser_name = st.session_state.display_name
@@ -974,6 +974,7 @@ elif role == "Faculty Adviser":
             st.subheader("📌 Detailed Student Progress & Notifications")
             for _, row in filtered_advisees.iterrows():
                 with st.expander(f"📘 {row['name']} ({row['student_number']})", expanded=False):
+                    # === Top metrics ===
                     col1, col2, col3 = st.columns(3)
                     with col1:
                         st.metric("Program", row['program'])
@@ -992,6 +993,7 @@ elif role == "Faculty Adviser":
                         st.metric("Graduation Applied", row['graduation_applied'])
                     
                     st.markdown("---")
+                    # === Coursework Progress ===
                     st.subheader("📚 Coursework Progress")
                     units_taken = int(row['total_units_taken'])
                     units_required = int(row['total_units_required'])
@@ -1000,20 +1002,26 @@ elif role == "Faculty Adviser":
                     st.caption(f"Remaining units: {max(0, units_required - units_taken)}")
                     
                     st.markdown("---")
+                    # === Milestone Table (correct academic progression) ===
                     st.subheader("📋 Milestone Status & Dates")
                     milestone_data = []
+                    # 1. Plan of Study
                     pos_date = row['pos_approved_date'] if row['pos_approved_date'] and row['pos_approved_date'] != 'nan' else row['pos_submitted_date'] if row['pos_submitted_date'] and row['pos_submitted_date'] != 'nan' else ''
                     milestone_data.append(["Plan of Study (POS)", row['pos_status'], pos_date])
+                    # 2. Comprehensive Exams (PhD: written then oral; MS: general)
+                    if is_phd_program(row['program']):
+                        milestone_data.append(["Written Comprehensive Exam", row['written_comprehensive_status'], row['written_comprehensive_passed_date']])
+                        milestone_data.append(["Oral Comprehensive Exam", row['oral_comprehensive_status'], row['oral_comprehensive_passed_date']])
+                    else:
+                        milestone_data.append(["General Exam (MS)", row['general_exam_status'], row['general_exam_passed_date']])
+                    # 3. Thesis/Dissertation Outline (after comps)
                     thesis_date = row['thesis_outline_approved_date'] if row['thesis_outline_approved'] == 'Yes' else ''
                     milestone_data.append(["Thesis/Dissertation Outline", row['thesis_outline_approved'], thesis_date])
-                    milestone_data.append(["Thesis Status", row['thesis_status'], ""])
-                    if is_master_program(row['program']):
-                        milestone_data.append(["General Exam", row['general_exam_status'], row['general_exam_passed_date']])
-                    else:
-                        milestone_data.append(["Qualifying Exam", row['qualifying_exam_status'], row['qualifying_exam_passed_date']])
-                        milestone_data.append(["Written Comprehensive", row['written_comprehensive_status'], row['written_comprehensive_passed_date']])
-                        milestone_data.append(["Oral Comprehensive", row['oral_comprehensive_status'], row['oral_comprehensive_passed_date']])
+                    # 4. Thesis Status
+                    milestone_data.append(["Thesis/Dissertation Status", row['thesis_status'], ""])
+                    # 5. Final Exam
                     milestone_data.append(["Final Exam", row['final_exam_status'], row['final_exam_passed_date']])
+                    # 6. Graduation
                     milestone_data.append(["Graduation Application", row['graduation_applied'], ""])
                     milestone_data.append(["Graduation Approved", row['graduation_approved'], row['graduation_date']])
                     
@@ -1021,21 +1029,28 @@ elif role == "Faculty Adviser":
                     st.dataframe(milestone_df, width='stretch', hide_index=True)
                     
                     st.markdown("---")
+                    # === Pending Requirements (aligned with progression) ===
                     st.subheader("⚠️ Pending / Outstanding Requirements")
                     pending = []
                     if row['pos_status'] not in ["Approved", "Completed"]:
-                        pending.append("❌ POS not approved")
-                    if is_master_program(row['program']) and row['general_exam_status'] != "Passed":
-                        pending.append("❌ General exam not passed")
+                        pending.append("❌ Plan of Study (POS) not approved – required in first semester of residency")
                     if is_phd_program(row['program']):
-                        if row['qualifying_exam_status'] != "Passed":
-                            pending.append("❌ Qualifying exam not passed")
                         if row['written_comprehensive_status'] != "Passed":
                             pending.append("❌ Written comprehensive exam not passed")
-                        if row['oral_comprehensive_status'] != "Passed":
+                        if row['written_comprehensive_status'] == "Passed" and row['oral_comprehensive_status'] != "Passed":
                             pending.append("❌ Oral comprehensive exam not passed")
-                    if row['thesis_outline_approved'] != "Yes" and ((is_master_program(row['program']) and row['thesis_units_taken'] >= 4) or (is_phd_program(row['program']) and row['thesis_units_taken'] >= 8)):
-                        pending.append("❌ Thesis/dissertation outline not approved (overdue)")
+                    else:
+                        if row['general_exam_status'] != "Passed":
+                            pending.append("❌ General exam not passed")
+                    # Thesis outline eligibility check
+                    outline_overdue = False
+                    if is_phd_program(row['program']):
+                        comp_passed = (row['written_comprehensive_status'] == "Passed" and row['oral_comprehensive_status'] == "Passed")
+                        if comp_passed and row['thesis_outline_approved'] != "Yes":
+                            pending.append("❌ Thesis/Dissertation outline not approved after passing comprehensive exams")
+                    elif is_master_program(row['program']):
+                        if row['thesis_units_taken'] >= 4 and row['thesis_outline_approved'] != "Yes":
+                            pending.append("❌ Thesis outline approval overdue (should be approved by 2nd thesis semester)")
                     if row['final_exam_status'] != "Passed":
                         pending.append("❌ Final exam not passed")
                     if row['graduation_applied'] == "Yes" and row['graduation_approved'] != "Yes":
@@ -1053,6 +1068,7 @@ elif role == "Faculty Adviser":
                     else:
                         st.success("✅ No pending requirements – student is on track.")
                     
+                    # === Committee ===
                     if row.get('committee_members') and row['committee_members'] not in ['', 'nan']:
                         with st.expander("📋 Guidance/Advisory Committee"):
                             members = row['committee_members'].replace(", ", "\n")
@@ -1060,12 +1076,14 @@ elif role == "Faculty Adviser":
                             if row.get('committee_approval_date') and row['committee_approval_date'] not in ['', 'nan']:
                                 st.caption(f"Approved on: {row['committee_approval_date']}")
                     
+                    # === LOA/AWOL details ===
                     if row['loa_start_date'] and row['loa_start_date'] not in ['', 'nan']:
                         st.caption(f"LOA period: {row['loa_start_date']} to {row['loa_end_date']}")
                     if row['awol_lifted_date'] and row['awol_lifted_date'] not in ['', 'nan']:
                         st.caption(f"AWOL lifted on: {row['awol_lifted_date']}")
                     
                     st.markdown("---")
+                    # === Images ===
                     col_pic, col_amis = st.columns(2)
                     with col_pic:
                         pic_path = get_profile_picture_path(row["student_number"])
@@ -1080,6 +1098,7 @@ elif role == "Faculty Adviser":
                                 st.image(amis_path, width=300)
                     
                     st.markdown("---")
+                    # === Send Notification ===
                     st.subheader("📬 Send Notification to Student")
                     with st.form(key=f"notif_form_{row['student_number']}"):
                         notif_type = st.selectbox("Notification Type", ["General Reminder", "Academic Warning", "Meeting Request", "Requirement Follow-up"])
@@ -1093,6 +1112,7 @@ elif role == "Faculty Adviser":
                         elif send and not message.strip():
                             st.error("Message cannot be empty.")
                     
+                    # === System alerts and warnings ===
                     alerts = check_deadline_alerts(row)
                     if alerts:
                         for alert in alerts:
