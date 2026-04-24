@@ -1,5 +1,5 @@
 """
-SESAM KMIS - Graduate Student Milestone Workflow System
+SESAM KMIS - Graduate Student Milestone Workflow System (FIXED)
 Full milestone tracking, document uploads, validation workflows, alerts, and dashboards.
 Author: SESAM Dev Team
 Date: 2026-04-24
@@ -55,14 +55,19 @@ ACADEMIC_YEARS = [f"{year}-{year+1}" for year in range(current_year-5, current_y
 
 def is_master_program(program):
     return program.startswith("MS") or program.startswith("Master") or program.startswith("Professional Masters")
+
 def is_phd_program(program):
     return program.startswith("PhD")
+
 def get_thesis_limit_from_program(program):
     return 6 if is_master_program(program) else 12
+
 def get_residency_max_from_program(program):
     return 5 if is_master_program(program) else 7
+
 def get_required_units(program, phd_track=None):
-    if program == "MS Environmental Science": return 32
+    if program == "MS Environmental Science":
+        return 32
     elif program == "PhD Environmental Science":
         return 37 if phd_track == "MS EnvSci graduate" else 50
     else:
@@ -72,14 +77,13 @@ def format_ay(ay_start, semester):
     return f"A.Y. {ay_start}-{ay_start+1} ({semester})"
 
 def get_start_date(ay_start, semester):
-    """Approximate start date for deadline calculations."""
-    year = ay_start
+    """Approximate start date for deadline calculations (fixed for 2nd Sem/Summer)."""
     if semester == "1st Sem":
-        return date(year, 8, 1)
+        return date(ay_start, 8, 1)
     elif semester == "2nd Sem":
-        return date(year, 1, 1)
+        return date(ay_start + 1, 1, 1)   # Jan of next year
     else:  # Summer
-        return date(year, 4, 1)
+        return date(ay_start + 1, 4, 1)   # April of next year
 
 # ==================== FOLDER SETUP ====================
 FOLDERS = ["profile_pics", "amis_screenshots", "admission_letters", "committee_docs",
@@ -94,7 +98,8 @@ def compress_image(file, max_size_kb=200, output_width=500):
         img = img.convert('RGB')
     ratio = output_width / float(img.size[0])
     output_height = int(float(img.size[1]) * ratio)
-    img = img.resize((output_width, output_height), Image.Resampling.LANCZOS)
+    # Use legacy LANCZOS for compatibility with older Pillow
+    img = img.resize((output_width, output_height), Image.LANCZOS)
     buffer = io.BytesIO()
     quality = 85
     while True:
@@ -117,7 +122,7 @@ def save_uploaded_file(folder, student_number, file, prefix):
         else:
             compressed = file.getvalue()
             filename = f"{student_number}_{prefix}.{ext}"
-        filepath = os.path.join(folder, filename)
+        filepath = os.path.abspath(os.path.join(folder, filename))
         with open(filepath, "wb") as f:
             f.write(compressed)
         return filepath
@@ -140,20 +145,32 @@ def get_file_path(folder, student_number, prefix):
 # ==================== NOTIFICATION FUNCTIONS ====================
 def get_notifications(student_row):
     try:
-        return json.loads(student_row.get("notifications", "[]"))
+        val = student_row.get("notifications", "[]")
+        if pd.isna(val) or val == "":
+            return []
+        return json.loads(val)
     except:
         return []
+
 def add_notification(df, student_number, from_name, message, notif_type="General"):
     idx = df[df["student_number"] == student_number].index
-    if len(idx)==0: return df
+    if len(idx) == 0:
+        return df
     notif_list = get_notifications(df.loc[idx[0]])
-    notif_list.append({"timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                       "from": from_name, "message": message, "type": notif_type, "read": False})
+    notif_list.append({
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "from": from_name,
+        "message": message,
+        "type": notif_type,
+        "read": False
+    })
     df.at[idx[0], "notifications"] = json.dumps(notif_list)
     return df
+
 def dismiss_notification(df, student_number, index):
     idx = df[df["student_number"] == student_number].index
-    if len(idx)==0: return df
+    if len(idx) == 0:
+        return df
     notif_list = get_notifications(df.loc[idx[0]])
     if 0 <= index < len(notif_list):
         notif_list.pop(index)
@@ -208,7 +225,7 @@ def create_default_data():
         "proposal_approved_date": ["", "2024-01-10"],
         "manuscript_progress": [0, 50],
         "external_review_status": ["Not Started", "Not Started"],
-        "thesis_docs": ["[]", "[]"],  # list of uploaded file paths
+        "thesis_docs": ["[]", "[]"],
         # Final defense
         "defense_status": ["Pending", "Pending"],
         "defense_result": ["", ""],
@@ -293,7 +310,7 @@ def load_data():
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
     df["gwa"] = pd.to_numeric(df["gwa"], errors='coerce').fillna(2.0).astype(float)
     
-    # Recompute program-specific values
+    # Recompute program-specific values and committee deadline
     for idx, row in df.iterrows():
         prog = row["program"]
         if prog not in PROGRAMS:
@@ -305,7 +322,7 @@ def load_data():
         df.at[idx, "residency_max_years"] = get_residency_max_from_program(prog)
         df.at[idx, "thesis_units_limit"] = get_thesis_limit_from_program(prog)
         
-        # Set committee deadline (2 months after start)
+        # Set committee deadline (2 months after start) - fixed date logic
         start = get_start_date(row["ay_start"], row["semester"])
         deadline = start + timedelta(days=60)
         df.at[idx, "committee_deadline"] = deadline.strftime("%Y-%m-%d")
@@ -359,11 +376,14 @@ def check_deadline_alerts(student):
     if student["committee_status"] not in ["Approved", "Rejected"]:
         deadline = student.get("committee_deadline", "")
         if deadline:
-            d = datetime.strptime(deadline, "%Y-%m-%d").date()
-            if today > d:
-                alerts.append(f"📌 Committee formation overdue (deadline: {deadline})")
-            elif (d - today).days <= 14:
-                alerts.append(f"⚠️ Committee formation deadline approaching: {deadline}")
+            try:
+                d = datetime.strptime(deadline, "%Y-%m-%d").date()
+                if today > d:
+                    alerts.append(f"📌 Committee formation overdue (deadline: {deadline})")
+                elif (d - today).days <= 14:
+                    alerts.append(f"⚠️ Committee formation deadline approaching: {deadline}")
+            except:
+                pass
     # Admission pending validation
     if student["admission_status"] == "Pending":
         alerts.append("📌 Admission validation pending")
@@ -383,8 +403,10 @@ def get_eligibility_for_major_exam(student):
         return True, "Eligible: coursework complete and GWA ≤ 2.0"
     else:
         reasons = []
-        if taken < required_units: reasons.append(f"Insufficient units ({taken}/{required_units})")
-        if not gwa_ok: reasons.append(f"GWA too high ({student['gwa']:.2f} > 2.0)")
+        if taken < required_units:
+            reasons.append(f"Insufficient units ({taken}/{required_units})")
+        if not gwa_ok:
+            reasons.append(f"GWA too high ({student['gwa']:.2f} > 2.0)")
         return False, "; ".join(reasons)
 
 def get_early_warning_indicators(row):
@@ -515,15 +537,17 @@ if role == "SESAM Staff":
         with tab3:
             st.subheader("Coursework & Grades (Per Semester)")
             sem_records = json.loads(student["semester_records"])
-            for i, rec in enumerate(sem_records):
-                with st.expander(f"{rec.get('semester', 'Semester')} - GWA: {rec.get('gwa','')}"):
-                    st.write(f"Units taken: {rec.get('units_taken',0)} | Passed: {rec.get('units_passed',0)}")
-                    if rec.get("amis_path") and os.path.exists(rec["amis_path"]):
-                        st.image(rec["amis_path"], width=200)
-                    if rec.get("grades_path") and os.path.exists(rec["grades_path"]):
-                        with open(rec["grades_path"], "rb") as f:
-                            st.download_button(f"Download Grades Screenshot {i}", f)
-            st.info("Students upload AMIS and grades per semester. Staff can validate here (simplified).")
+            if sem_records:
+                for i, rec in enumerate(sem_records):
+                    with st.expander(f"{rec.get('semester', 'Semester')} - GWA: {rec.get('gwa','')}"):
+                        st.write(f"Units taken: {rec.get('units_taken',0)} | Passed: {rec.get('units_passed',0)}")
+                        if rec.get("amis_path") and os.path.exists(rec["amis_path"]):
+                            st.image(rec["amis_path"], width=200)
+                        if rec.get("grades_path") and os.path.exists(rec["grades_path"]):
+                            with open(rec["grades_path"], "rb") as f:
+                                st.download_button(f"Download Grades Screenshot {i}", f)
+            else:
+                st.info("No semester records yet.")
         
         with tab4:
             st.subheader("Major Examination")
