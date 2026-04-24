@@ -3,8 +3,8 @@ SESAM KMIS - Graduate Student Lifecycle Management System (Enhanced UI)
 Author: [Your Name]
 Date: [Current Date]
 Description: Full workflow-based lifecycle management with beautiful, modern dashboard.
-Staff dashboard: table always visible, forms appear only when "Update Student" or "Add New Student" is clicked.
-Toggle buttons are now smaller and more compact.
+Staff dashboard: "All Students" table + search + two toggle buttons for Update/Add.
+Add student form simplified (no initial milestones, no academic year caption).
 """
 
 import streamlit as st
@@ -21,7 +21,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ==================== CUSTOM CSS FOR MODERN UI (with smaller buttons) ====================
+# ==================== CUSTOM CSS FOR MODERN UI ====================
 st.markdown("""
 <style>
     .main > div { padding: 0 1rem; }
@@ -77,7 +77,6 @@ st.markdown("""
         border-radius: 8px;
         margin-bottom: 0.5rem;
     }
-    /* Default button styling (kept for other buttons) */
     .stButton button {
         border-radius: 20px;
         font-weight: 500;
@@ -93,12 +92,10 @@ st.markdown("""
         font-size: 0.8rem !important;
         min-height: 32px !important;
     }
-    /* Target by aria-label or key? Use data-testid and class */
     .stButton button[kind="secondary"] {
         padding: 0.2rem 0.6rem !important;
         font-size: 0.75rem !important;
     }
-    /* More specific: buttons inside the staff header column */
     div[data-testid="column"]:has(> div > button) button {
         padding: 0.2rem 0.8rem !important;
         font-size: 0.75rem !important;
@@ -676,19 +673,33 @@ st.caption("Complete workflow tracking from admission to graduation")
 
 role = st.session_state.role
 
-# ==================== STAFF VIEW (with smaller toggle buttons) ====================
+# ==================== STAFF VIEW (with table + toggle buttons) ====================
 if role == "SESAM Staff":
-    # Header with smaller buttons
-    col_title, col_buttons = st.columns([2, 1])
-    with col_title:
-        st.subheader("📋 Student Directory")
-    with col_buttons:
-        # Use two columns inside to make buttons even smaller and better spaced
-        btn_col1, btn_col2 = st.columns(2)
-        with btn_col1:
-            btn_update = st.button("✏️ Update", use_container_width=True, key="staff_btn_update_small")
-        with btn_col2:
-            btn_add = st.button("➕ Add", use_container_width=True, key="staff_btn_add_small")
+    st.subheader("📋 All Students")   # Changed from "Student Directory" to "All Students"
+    
+    # Search box
+    search = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001", key="staff_search")
+    filtered_df = filter_dataframe(search, df)
+    filtered_df["academic_year"] = filtered_df.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
+    
+    # Display dataframe
+    if len(filtered_df) > 0:
+        st.dataframe(
+            filtered_df[["student_number", "name", "program", "academic_year", "advisor", "gwa", "pos_status", "final_exam_status"]],
+            use_container_width=True,
+            height=400
+        )
+    else:
+        st.info("No students match the current search.")
+    
+    st.markdown("---")
+    
+    # Two toggle buttons
+    col1, col2, col3 = st.columns([1,1,2])
+    with col1:
+        btn_update = st.button("✏️ Update Student", use_container_width=True, key="staff_btn_update")
+    with col2:
+        btn_add = st.button("➕ Add New Student", use_container_width=True, key="staff_btn_add")
     
     # Initialize session state for toggles
     if "staff_show_update" not in st.session_state:
@@ -706,36 +717,19 @@ if role == "SESAM Staff":
         st.session_state.staff_show_update = False
         st.rerun()
     
-    # Always show student table
-    search = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001", key="staff_search")
-    filtered_df = filter_dataframe(search, df)
-    filtered_df["academic_year"] = filtered_df.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
-    
-    if len(filtered_df) > 0:
-        st.dataframe(
-            filtered_df[["student_number", "name", "program", "academic_year", "advisor", "gwa", "pos_status", "final_exam_status"]],
-            use_container_width=True,
-            height=400
-        )
-    else:
-        st.info("No students match the current search.")
-    
-    st.markdown("---")
-    
     # ==================== UPDATE STUDENT FORM ====================
     if st.session_state.staff_show_update:
         st.subheader("✏️ Update Student Record")
         if len(filtered_df) == 0:
             st.warning("No students available to edit.")
         else:
-            # Student selection
-            selected_index = st.radio(
+            # Select a student from the filtered list
+            selected_student_name = st.selectbox(
                 "Select a student to edit",
-                options=filtered_df.index,
-                format_func=lambda idx: f"{filtered_df.loc[idx, 'student_number']} - {filtered_df.loc[idx, 'name']}",
+                options=filtered_df["name"].tolist(),
                 key="staff_update_select"
             )
-            student = filtered_df.loc[selected_index].copy()
+            student = filtered_df[filtered_df["name"] == selected_student_name].iloc[0].copy()
             
             if st.button("❌ Cancel", key="cancel_update"):
                 st.session_state.staff_show_update = False
@@ -964,7 +958,7 @@ if role == "SESAM Staff":
                         else:
                             st.error("Add at least one subject")
     
-    # ==================== ADD NEW STUDENT FORM ====================
+    # ==================== ADD NEW STUDENT FORM (simplified) ====================
     if st.session_state.staff_show_add:
         st.subheader("➕ Register New Student")
         if st.button("❌ Cancel", key="cancel_add"):
@@ -992,7 +986,7 @@ if role == "SESAM Staff":
                 ay_start = int(selected_ay_range.split("-")[0])
             with col7:
                 semester = st.selectbox("Semester *", options=SEMESTERS)
-            st.caption(f"📅 {format_ay(ay_start, semester)}")
+            # No caption – removed as requested
             
             col8, col9 = st.columns(2)
             with col8:
@@ -1000,24 +994,7 @@ if role == "SESAM Staff":
             with col9:
                 st.empty()
             
-            st.markdown("---")
-            st.markdown("### Initial Milestone Status (optional)")
-            col10, col11, col12 = st.columns(3)
-            with col10:
-                gwa = st.number_input("Initial GWA", min_value=1.0, max_value=5.0, step=0.01, value=2.0, help="1.0 best, 5.0 failing")
-            with col11:
-                thesis_units_taken = st.number_input("Thesis Units Taken", min_value=0, max_value=20, step=1, value=0)
-                st.caption(get_thesis_pattern_description(program))
-            with col12:
-                pos_status = st.selectbox("POS Status", ["Not Filed", "Pending", "Approved"])
-            
-            col13, col14, col15 = st.columns(3)
-            with col13:
-                comp_exam = st.selectbox("Comprehensive Exam (PhD)", ["N/A", "Not Taken", "Passed", "Failed"])
-            with col14:
-                general_exam = st.selectbox("General Exam (MS)", ["N/A", "Not Taken", "Passed", "Failed"])
-            with col15:
-                final_exam = st.selectbox("Final Exam Status", ["Not Taken", "Passed", "Failed"])
+            # No "Initial Milestone Status" section – removed as requested
             
             submitted = st.form_submit_button("Register Student")
             
@@ -1048,9 +1025,9 @@ if role == "SESAM Staff":
                         "advisor": advisor.strip() if advisor else "Not assigned",
                         "ay_start": ay_start,
                         "semester": semester,
-                        "pos_status": pos_status,
-                        "gwa": gwa,
-                        "thesis_units_taken": thesis_units_taken,
+                        "pos_status": "Not Filed",
+                        "gwa": 2.0,
+                        "thesis_units_taken": 0,
                         "thesis_units_limit": get_thesis_limit(program),
                         "residency_max_years": get_residency_max(program),
                         "committee_members": "",
@@ -1063,15 +1040,15 @@ if role == "SESAM Staff":
                         "thesis_outline_approved": "No",
                         "thesis_outline_approved_date": "",
                         "thesis_status": "Not Started",
-                        "qualifying_exam_status": comp_exam if program.startswith("PhD") else "N/A",
+                        "qualifying_exam_status": "N/A",
                         "qualifying_exam_passed_date": "",
                         "written_comprehensive_status": "N/A",
                         "written_comprehensive_passed_date": "",
                         "oral_comprehensive_status": "N/A",
                         "oral_comprehensive_passed_date": "",
-                        "general_exam_status": general_exam if is_master_program(program) else "N/A",
+                        "general_exam_status": "N/A",
                         "general_exam_passed_date": "",
-                        "final_exam_status": final_exam,
+                        "final_exam_status": "Not Taken",
                         "final_exam_passed_date": "",
                         "residency_years_used": 0,
                         "extension_count": 0,
@@ -1095,7 +1072,7 @@ if role == "SESAM Staff":
                     st.session_state.staff_show_add = False
                     st.rerun()
 
-# ==================== ADVISER VIEW ====================
+# ==================== ADVISER VIEW (unchanged) ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees – {st.session_state.display_name}")
     advisees = df[df["advisor"] == st.session_state.display_name].copy()
@@ -1139,7 +1116,7 @@ elif role == "Faculty Adviser":
                         st.success(w)
         st.info("For updates, contact SESAM Staff.")
 
-# ==================== STUDENT VIEW ====================
+# ==================== STUDENT VIEW (unchanged) ====================
 elif role == "Student":
     st.subheader(f"📘 Your Dashboard – {st.session_state.display_name}")
     student = df[df["name"] == st.session_state.display_name].iloc[0]
