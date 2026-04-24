@@ -952,7 +952,7 @@ if role == "SESAM Staff":
                     st.success(f"✅ Student {full_name} (Number: {student_number}) registered successfully!")
                     st.rerun()
 
-# ==================== ADVISER VIEW (fixed overlapping & duplicate exams) ====================
+# ==================== ADVISER VIEW (fixed truncation) ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees")
     adviser_name = st.session_state.display_name
@@ -973,21 +973,22 @@ elif role == "Faculty Adviser":
             st.subheader("📌 Detailed Student Progress & Notifications")
             for _, row in filtered_advisees.iterrows():
                 with st.expander(f"📘 {row['name']} ({row['student_number']})", expanded=False):
-                    # ----- PROFILE PICTURE at upper right (wider columns for metrics) -----
+                    # ----- PROFILE PICTURE at upper right (metrics without truncation) -----
                     pic_path = get_profile_picture_path(row["student_number"])
-                    col_pic_left, col_pic_right = st.columns([4, 1])  # more space for metrics
+                    col_pic_left, col_pic_right = st.columns([4, 1])
                     with col_pic_right:
                         if pic_path and os.path.exists(pic_path):
                             st.image(pic_path, width=100, caption="Profile Picture")
                         else:
                             st.info("No picture")
                     with col_pic_left:
-                        # Metrics in 3 columns with better spacing
-                        col1, col2, col3 = st.columns(3)
+                        # Use standard columns for the remaining metrics
+                        col1, col2, col3 = st.columns([2, 2, 2])
                         with col1:
-                            st.metric("Program", row['program'])
+                            # Program and Academic Year: use markdown to allow wrapping
+                            st.markdown(f"**Program:** {row['program']}")
                             st.metric("GWA", f"{row['gwa']:.2f}", delta="Good" if row['gwa'] <= 2.0 else "Alert", delta_color="normal")
-                            st.metric("Academic Year", format_ay(row['ay_start'], row['semester']))
+                            st.markdown(f"**Academic Year:** {format_ay(row['ay_start'], row['semester'])}")
                         with col2:
                             st.metric("Residency", f"{row['residency_years_used']} / {get_residency_max(row['program'])} years")
                             st.metric("Thesis Units", f"{row['thesis_units_taken']} / {row['thesis_units_limit']}")
@@ -995,7 +996,6 @@ elif role == "Faculty Adviser":
                         with col3:
                             st.metric("Final Exam", row['final_exam_status'])
                             st.metric("Graduation Applied", row['graduation_applied'])
-                            # No exam metrics here – they are in the milestone table only
                     
                     st.markdown("---")
                     # === Coursework Progress ===
