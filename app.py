@@ -675,7 +675,7 @@ role = st.session_state.role
 
 # ==================== STAFF VIEW (with table + toggle buttons) ====================
 if role == "SESAM Staff":
-    st.subheader("📋 All Students")   # Changed from "Student Directory" to "All Students"
+    st.subheader("📋 Student Directory")   
     
     # Search box
     search = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001", key="staff_search")
