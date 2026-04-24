@@ -4,8 +4,7 @@ Author: [Your Name]
 Date: [Current Date]
 Description: Full workflow-based lifecycle management with beautiful, modern dashboard.
 Staff dashboard: Student Directory table + search + two toggle buttons for Update/Add.
-Add student form simplified (no initial milestones, no academic year caption).
-Sidebar presentation enhanced with modern styling.
+Admission step removed from workflow. First step is now Committee.
 """
 
 import streamlit as st
@@ -72,7 +71,6 @@ st.markdown("""
         transform: translateY(-2px);
         box-shadow: 0 4px 8px rgba(0,0,0,0.1);
     }
-    /* Smaller toggle buttons for staff dashboard */
     button[data-testid="baseButton-secondary"] {
         padding: 0.25rem 0.75rem !important;
         font-size: 0.8rem !important;
@@ -103,7 +101,7 @@ st.markdown("""
         color: white;
     }
 
-    /* ========== ENHANCED SIDEBAR STYLING ========== */
+    /* Enhanced sidebar styling */
     section[data-testid="stSidebar"] {
         background: linear-gradient(135deg, #f8fafc 0%, #eef2f5 100%);
         border-right: 1px solid rgba(0,0,0,0.05);
@@ -111,7 +109,6 @@ st.markdown("""
     section[data-testid="stSidebar"] .css-1d391kg {
         background: transparent;
     }
-    /* Profile card */
     .sidebar-profile {
         background: white;
         border-radius: 20px;
@@ -135,7 +132,6 @@ st.markdown("""
         border-radius: 20px;
         margin-top: 0.25rem;
     }
-    /* Logout button */
     .sidebar-logout button {
         background: white !important;
         border: 1px solid #e2e8f0 !important;
@@ -151,14 +147,12 @@ st.markdown("""
         transform: none !important;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }
-    /* Sidebar divider */
     hr.sidebar-divider {
         margin: 1rem 0;
         border: 0;
         height: 1px;
         background: linear-gradient(to right, #cbd5e1, transparent);
     }
-    /* Version and copyright */
     .sidebar-footer {
         font-size: 0.7rem;
         color: #94a3b8;
@@ -223,13 +217,14 @@ def get_thesis_pattern_description(program):
     else:
         return "💡 PhD: 12 dissertation units (3-3-3-3 or 4-4-4)"
 
-# ==================== WORKFLOW ENGINE ====================
-WORKFLOW_STEPS = ["Admission", "Committee", "Coursework", "Exams", "POS", "Thesis", "Defense", "Graduation"]
+# ==================== WORKFLOW ENGINE (Admission removed) ====================
+WORKFLOW_STEPS = ["Committee", "Coursework", "Exams", "POS", "Thesis", "Defense", "Graduation"]
 
 def get_step_completion_status(student_row):
     program = student_row["program"]
     completed = set()
-    completed.add("Admission")
+    # Admission is always considered done, but we don't show it anymore
+    # So we start with Committee
     if pd.notna(student_row.get("committee_approval_date")) and student_row.get("committee_approval_date"):
         completed.add("Committee")
     if student_row.get("total_units_taken", 0) >= student_row.get("total_units_required", 24):
@@ -701,9 +696,8 @@ if not st.session_state.logged_in:
 # ==================== DATA LOAD ====================
 df = load_data()
 
-# ==================== ENHANCED SIDEBAR ====================
+# ==================== SIDEBAR ====================
 with st.sidebar:
-    # Profile card
     st.markdown(f"""
     <div class="sidebar-profile">
         <h3>👤 {st.session_state.display_name}</h3>
@@ -711,7 +705,6 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
     
-    # Logout button with custom styling
     st.markdown('<div class="sidebar-logout">', unsafe_allow_html=True)
     if st.button("🚪 Logout", use_container_width=True):
         st.session_state.logged_in = False
@@ -721,10 +714,8 @@ with st.sidebar:
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # Divider
     st.markdown('<hr class="sidebar-divider">', unsafe_allow_html=True)
     
-    # Version and copyright
     st.markdown("""
     <div class="sidebar-footer">
         Version 3.0 | Lifecycle Management<br>
@@ -738,16 +729,14 @@ st.caption("Complete workflow tracking from admission to graduation")
 
 role = st.session_state.role
 
-# ==================== STAFF VIEW (unchanged except sidebar) ====================
+# ==================== STAFF VIEW ====================
 if role == "SESAM Staff":
-    st.subheader("📋 Student Directory")   # Title as requested
+    st.subheader("📋 Student Directory")
     
-    # Search box
     search = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001", key="staff_search")
     filtered_df = filter_dataframe(search, df)
     filtered_df["academic_year"] = filtered_df.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
     
-    # Display dataframe
     if len(filtered_df) > 0:
         st.dataframe(
             filtered_df[["student_number", "name", "program", "academic_year", "advisor", "gwa", "pos_status", "final_exam_status"]],
@@ -759,20 +748,17 @@ if role == "SESAM Staff":
     
     st.markdown("---")
     
-    # Two toggle buttons
     col1, col2, col3 = st.columns([1,1,2])
     with col1:
         btn_update = st.button("✏️ Update Student", use_container_width=True, key="staff_btn_update")
     with col2:
         btn_add = st.button("➕ Add New Student", use_container_width=True, key="staff_btn_add")
     
-    # Initialize session state for toggles
     if "staff_show_update" not in st.session_state:
         st.session_state.staff_show_update = False
     if "staff_show_add" not in st.session_state:
         st.session_state.staff_show_add = False
     
-    # Handle button clicks
     if btn_update:
         st.session_state.staff_show_update = not st.session_state.staff_show_update
         st.session_state.staff_show_add = False
@@ -801,7 +787,6 @@ if role == "SESAM Staff":
             
             st.markdown(f"### Editing: {student['name']} ({student['student_number']})")
             
-            # Workflow progress
             completed_steps = get_step_completion_status(student)
             next_step = get_next_required_step(student)
             st.markdown("#### 🚀 Milestone Workflow")
@@ -814,7 +799,6 @@ if role == "SESAM Staff":
             else:
                 st.success("🎉 All milestones completed! Ready for graduation.")
             
-            # Tabs (same as before)
             tabs = st.tabs(["📝 Student Info", "📚 Coursework & Thesis", "📝 Exams", "🏠 Residency", "🎓 Graduation", "👥 Committee", "📁 Documents", "📖 Semester History"])
             
             with tabs[0]:
@@ -1022,7 +1006,7 @@ if role == "SESAM Staff":
                         else:
                             st.error("Add at least one subject")
     
-    # ==================== ADD NEW STUDENT FORM (simplified) ====================
+    # ==================== ADD NEW STUDENT FORM ====================
     if st.session_state.staff_show_add:
         st.subheader("➕ Register New Student")
         if st.button("❌ Cancel", key="cancel_add"):
@@ -1133,7 +1117,7 @@ if role == "SESAM Staff":
                     st.session_state.staff_show_add = False
                     st.rerun()
 
-# ==================== ADVISER VIEW (unchanged) ====================
+# ==================== ADVISER VIEW ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees – {st.session_state.display_name}")
     advisees = df[df["advisor"] == st.session_state.display_name].copy()
@@ -1177,7 +1161,7 @@ elif role == "Faculty Adviser":
                         st.success(w)
         st.info("For updates, contact SESAM Staff.")
 
-# ==================== STUDENT VIEW (unchanged) ====================
+# ==================== STUDENT VIEW ====================
 elif role == "Student":
     st.subheader(f"📘 Your Dashboard – {st.session_state.display_name}")
     student = df[df["name"] == st.session_state.display_name].iloc[0]
