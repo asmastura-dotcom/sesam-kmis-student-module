@@ -670,127 +670,43 @@ def filter_dataframe(search_term, data):
     )
     return data[mask]
 
-# ==================== HELPER FUNCTIONS FOR DASHBOARD ====================
-def compute_course_demand_forecast(df):
-    """Simulate course demand forecast based on POS data (if available) or return placeholder."""
-    # In a real system, you would aggregate course codes from POS data.
-    # For demo, we return a sample table with dummy data.
-    sample_courses = [
-        {"code": "ES 201", "title": "Environmental Science", "pos_count": 25, "hist_rate": 0.85, "capacity": 30},
-        {"code": "ES 210", "title": "Environmental Policy", "pos_count": 18, "hist_rate": 0.90, "capacity": 25},
-        {"code": "ES 220", "title": "Climate Change", "pos_count": 30, "hist_rate": 0.80, "capacity": 30},
-    ]
-    forecast = []
-    for c in sample_courses:
-        projected = int(c["pos_count"] * c["hist_rate"])
-        if projected > c["capacity"]:
-            status = "Over-Subscribed"
-        elif projected < c["capacity"] * 0.7:
-            status = "Under-Subscribed"
-        else:
-            status = "Adequate"
-        forecast.append({
-            "Course Code": c["code"],
-            "Title": c["title"],
-            "POS Count": c["pos_count"],
-            "Hist. Rate": f"{c['hist_rate']*100:.0f}%",
-            "Projected": projected,
-            "Capacity": c["capacity"],
-            "Status": status
-        })
-    return pd.DataFrame(forecast)
-
-def compute_time_to_degree(df):
-    """Compute average time-to-degree for graduated students."""
-    graduated = df[df["graduation_applied"] == "Yes"]
-    if len(graduated) == 0:
-        return None
-    # In real data, you would compute from admission year to graduation date.
-    # For demo, return a placeholder.
-    return 2.4  # average years (example)
-
-def compute_milestone_completion_rates(df):
-    """Compute milestone completion rates for key events."""
-    total = len(df)
-    if total == 0:
-        return {"POS Approved": 0, "Thesis Outline Approved": 0, "Final Exam Passed": 0}
-    pos_approved = (df["pos_status"] == "Approved").sum()
-    outline_approved = (df["thesis_outline_approved"] == "Yes").sum()
-    final_passed = (df["final_exam_status"] == "Passed").sum()
-    return {
-        "POS Approved": int((pos_approved / total) * 100),
-        "Thesis Outline Approved": int((outline_approved / total) * 100),
-        "Final Exam Passed": int((final_passed / total) * 100)
-    }
-
-# ==================== STAFF VIEW (G.U.I.D.E. style dashboard) ====================
+# ==================== STAFF VIEW (full editing + basic analytics) ====================
 if role == "SESAM Staff":
-    st.subheader("📊 Dashboard")
-    
-    # ---- Top metrics (Active, Delayed, Graduated) ----
-    total_students = len(df)
-    active = df[df["graduation_approved"] != "Yes"].shape[0]
-    delayed = df[df["gwa"] > 2.0].shape[0] + df[df["thesis_units_taken"] > df["thesis_units_limit"]].shape[0]
-    graduated = df[df["graduation_approved"] == "Yes"].shape[0]
-    
-    col_metrics = st.columns(4)
-    with col_metrics[0]:
-        st.metric("Active Students", active, delta=f"{active/total_students*100:.0f}%")
-    with col_metrics[1]:
-        st.metric("At-Risk / Delayed", delayed)
-    with col_metrics[2]:
-        st.metric("Graduated", graduated)
-    with col_metrics[3]:
-        st.metric("Total Students", total_students)
-    
-    st.markdown("---")
-    
-    # ---- Search bar (reuse existing) ----
+    st.subheader("📋 All Students")
     search = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001")
     filtered_df = filter_dataframe(search, df)
     filtered_df["academic_year"] = filtered_df.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
     display_cols = ["student_number", "name", "program", "academic_year", "advisor", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status"]
-    st.dataframe(filtered_df[display_cols], width='stretch', height=300)
-    
+    st.dataframe(filtered_df[display_cols], width='stretch', height=400)
+
+    # ---- Simple analytics dashboard for staff ----
     st.markdown("---")
+    st.subheader("📊 Program Analytics Dashboard")
+    col_metrics = st.columns(4)
+    total_students = len(df)
+    at_risk = df[df["gwa"] > 2.0].shape[0] + df[df["thesis_units_taken"] > df["thesis_units_limit"]].shape[0]
+    with col_metrics[0]:
+        st.metric("Total Students", total_students)
+    with col_metrics[1]:
+        st.metric("At-Risk Students", at_risk, delta=f"{at_risk/total_students*100:.0f}%")
+    with col_metrics[2]:
+        st.metric("Master's Students", df[df["program"].apply(is_master_program)].shape[0])
+    with col_metrics[3]:
+        st.metric("PhD Students", df[df["program"].apply(is_phd_program)].shape[0])
     
-    # ---- Two columns for Course Demand Forecast and Time-to-Degree + Milestone Rates ----
-    col_left, col_right = st.columns([2, 1])
+    # Bar chart: students per program
+    prog_counts = df["program"].value_counts().reset_index()
+    prog_counts.columns = ["Program", "Count"]
+    fig = px.bar(prog_counts, x="Program", y="Count", title="Student Distribution by Program", color="Program")
+    st.plotly_chart(fig, use_container_width=True)
     
-    with col_left:
-        st.subheader("Course Demand Forecast — 2nd Sem 2025–2026")
-        forecast_df = compute_course_demand_forecast(df)
-        # Style the Status column
-        def color_status(val):
-            if val == "Over-Subscribed":
-                return "background-color: #ffcccc"
-            elif val == "Under-Subscribed":
-                return "background-color: #ccffcc"
-            else:
-                return ""
-        styled = forecast_df.style.applymap(color_status, subset=["Status"])
-        st.dataframe(styled, width='stretch', hide_index=True)
-    
-    with col_right:
-        # Time-to-Degree card
-        ttd = compute_time_to_degree(df)
-        if ttd:
-            st.subheader("Time-to-Degree (Years)")
-            st.markdown(f"**MS Environmental Science**\n\nRange: 2–5 years")
-            st.metric("Average", f"{ttd} years")
-        else:
-            st.info("No graduated students yet to compute time-to-degree.")
-        
-        st.markdown("---")
-        st.subheader("Milestone Completion Rates")
-        rates = compute_milestone_completion_rates(df)
-        for milestone, rate in rates.items():
-            st.metric(milestone, f"{rate}%")
-    
+    # GWA distribution
+    fig_gwa = px.histogram(df, x="gwa", nbins=20, title="GWA Distribution", color_discrete_sequence=["green"])
+    st.plotly_chart(fig_gwa, use_container_width=True)
+
     st.markdown("---")
     st.subheader("✏️ Update Student Record")
-    
-    # ---- The rest of the Staff view (editing, adding students) remains unchanged ----
+
     if len(filtered_df) > 0:
         st.subheader("🔍 Search Student to Edit")
         edit_search = st.text_input("Type name or student number", value="", placeholder="e.g., Cruz or S001", key="edit_search")
@@ -1103,7 +1019,7 @@ if role == "SESAM Staff":
                     st.success(f"✅ Student {full_name} (Number: {student_number}) registered successfully!")
                     st.rerun()
 
-# ==================== ENHANCED ADVISER VIEW (remains as before, with dashboard) ====================
+# ==================== ENHANCED ADVISER VIEW (with dashboard & early warnings) ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees")
     adviser_name = st.session_state.display_name
@@ -1150,8 +1066,27 @@ elif role == "Faculty Adviser":
                 at_risk_df = at_risk_df[at_risk_df["Warnings"] > 0]
                 st.dataframe(at_risk_df[["Name", "Student #", "GWA", "Thesis Units", "POS Status"]], width='stretch')
         
-        # ---- Search and table ----
+        # ---- Milestone completion chart (bar plot) ----
+        milestone_status = []
+        for _, row in advisees.iterrows():
+            milestone_status.append({
+                "Student": row["name"],
+                "POS Approved": 1 if row["pos_status"] == "Approved" else 0,
+                "Thesis Units Completed": 1 if row["thesis_units_taken"] >= get_thesis_limit(row["program"]) else 0,
+                "Final Exam Passed": 1 if row["final_exam_status"] == "Passed" else 0
+            })
+        milestone_df = pd.DataFrame(milestone_status)
+        if not milestone_df.empty:
+            fig_milestone = go.Figure(data=[
+                go.Bar(name="POS Approved", x=milestone_df["Student"], y=milestone_df["POS Approved"], marker_color="blue"),
+                go.Bar(name="Thesis Units Completed", x=milestone_df["Student"], y=milestone_df["Thesis Units Completed"], marker_color="orange"),
+                go.Bar(name="Final Exam Passed", x=milestone_df["Student"], y=milestone_df["Final Exam Passed"], marker_color="green")
+            ])
+            fig_milestone.update_layout(barmode='group', title="Key Milestone Completion by Student", xaxis_tickangle=-45)
+            st.plotly_chart(fig_milestone, use_container_width=True)
+        
         st.markdown("---")
+        # ---- Search and table ----
         search_adv = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001")
         filtered_advisees = filter_dataframe(search_adv, advisees)
         filtered_advisees["academic_year"] = filtered_advisees.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
@@ -1159,29 +1094,6 @@ elif role == "Faculty Adviser":
         display_cols = ["student_number", "name", "program", "academic_year", "gwa", "thesis_units_taken", "thesis_units_limit", "pos_status", "final_exam_status", "warnings"]
         st.dataframe(filtered_advisees[display_cols], width='stretch')
         
-        # ---- Milestone completion chart (placed at bottom, smaller) ----
-        if len(filtered_advisees) > 0:
-            milestone_status = []
-            for _, row in filtered_advisees.iterrows():
-                milestone_status.append({
-                    "Student": row["name"],
-                    "POS Approved": 1 if row["pos_status"] == "Approved" else 0,
-                    "Thesis Units Completed": 1 if row["thesis_units_taken"] >= get_thesis_limit(row["program"]) else 0,
-                    "Final Exam Passed": 1 if row["final_exam_status"] == "Passed" else 0
-                })
-            milestone_df = pd.DataFrame(milestone_status)
-            if not milestone_df.empty:
-                st.markdown("---")
-                st.subheader("📈 Key Milestone Completion (Overview)")
-                fig_milestone = go.Figure(data=[
-                    go.Bar(name="POS Approved", x=milestone_df["Student"], y=milestone_df["POS Approved"], marker_color="blue"),
-                    go.Bar(name="Thesis Units Completed", x=milestone_df["Student"], y=milestone_df["Thesis Units Completed"], marker_color="orange"),
-                    go.Bar(name="Final Exam Passed", x=milestone_df["Student"], y=milestone_df["Final Exam Passed"], marker_color="green")
-                ])
-                fig_milestone.update_layout(barmode='group', title="", xaxis_tickangle=-45, height=350)
-                st.plotly_chart(fig_milestone, use_container_width=True)
-        
-        # ---- Detailed student expanders (unchanged) ----
         if len(filtered_advisees) > 0:
             st.markdown("---")
             st.subheader("📌 Detailed Student Progress & Notifications")
@@ -1274,4 +1186,217 @@ elif role == "Faculty Adviser":
                         st.success("✅ All requirements satisfied – student is on track.")
                     
                     # Committee info
-       
+                    if row.get('committee_members') and row['committee_members'] not in ['', 'nan']:
+                        with st.expander("📋 Guidance/Advisory Committee"):
+                            st.text(row['committee_members'].replace(", ", "\n"))
+                            if row.get('committee_approval_date') and row['committee_approval_date'] not in ['', 'nan']:
+                                st.caption(f"Approved on: {row['committee_approval_date']}")
+                    
+                    # LOA/AWOL details
+                    if row['loa_start_date'] and row['loa_start_date'] not in ['', 'nan']:
+                        st.caption(f"LOA period: {row['loa_start_date']} to {row['loa_end_date']}")
+                    if row['awol_lifted_date'] and row['awol_lifted_date'] not in ['', 'nan']:
+                        st.caption(f"AWOL lifted on: {row['awol_lifted_date']}")
+                    
+                    st.markdown("---")
+                    # AMIS screenshot
+                    amis_path = get_amis_screenshot_path(row["student_number"])
+                    if amis_path and os.path.exists(amis_path):
+                        with st.expander("📄 View AMIS Screenshot"):
+                            st.image(amis_path, width=300)
+                    else:
+                        st.info("No AMIS screenshot uploaded.")
+                    
+                    st.markdown("---")
+                    # Send notification
+                    st.subheader("📬 Send Notification to Student")
+                    with st.form(key=f"notif_form_{row['student_number']}"):
+                        notif_type = st.selectbox("Notification Type", ["General Reminder", "Academic Warning", "Meeting Request", "Requirement Follow-up"])
+                        message = st.text_area("Message", height=100, placeholder="Type your message here...")
+                        send = st.form_submit_button("Send Notification")
+                        if send and message.strip():
+                            df = add_notification(df, row["student_number"], adviser_name, message, notif_type)
+                            save_data(df)
+                            st.success(f"Notification sent to {row['name']}!")
+                            st.rerun()
+                        elif send and not message.strip():
+                            st.error("Message cannot be empty.")
+                    
+                    # Deadline alerts and warnings
+                    alerts = check_deadline_alerts(row)
+                    if alerts:
+                        for alert in alerts:
+                            st.error(alert)
+                    warnings_text = row["warnings"]
+                    if any("⚠️" in w for w in warnings_text.split("\n")):
+                        for w in warnings_text.split("\n"):
+                            st.error(w)
+                    else:
+                        st.success(warnings_text)
+        else:
+            st.info("No matching students.")
+    st.info("📌 You can send notifications to your advisees. They will see them immediately when they log in.")
+
+# ==================== STUDENT VIEW (unchanged) ====================
+elif role == "Student":
+    st.subheader(f"📘 Your Academic Progress ({st.session_state.display_name})")
+    if st.session_state.student_number:
+        student_record = df[df["student_number"] == st.session_state.student_number]
+    else:
+        student_record = df[df["name"] == st.session_state.display_name]
+    
+    if len(student_record) == 0:
+        st.error("Your record was not found. Please contact SESAM Staff to verify your student number.")
+        st.stop()
+    
+    student = student_record.iloc[0]
+
+    # Display notifications
+    notifications = get_notifications(student)
+    if notifications:
+        st.markdown("---")
+        st.subheader("📬 Messages from Your Adviser")
+        for i, notif in enumerate(notifications):
+            notif_type = notif.get("type", "General")
+            if notif_type == "Academic Warning":
+                st.error(f"🚨 **{notif_type}** – {notif['timestamp']}\n\n*From: {notif['from']}*\n\n{notif['message']}")
+            elif notif_type == "Meeting Request":
+                st.info(f"📅 **{notif_type}** – {notif['timestamp']}\n\n*From: {notif['from']}*\n\n{notif['message']}")
+            else:
+                st.info(f"📌 **{notif_type}** – {notif['timestamp']}\n\n*From: {notif['from']}*\n\n{notif['message']}")
+            if st.button(f"Dismiss", key=f"dismiss_{i}"):
+                df = dismiss_notification(df, student["student_number"], i)
+                save_data(df)
+                st.rerun()
+    
+    # Deadline alerts & warnings
+    alerts = check_deadline_alerts(student)
+    if alerts:
+        for alert in alerts:
+            st.error(alert)
+    warnings = get_all_warnings(student)
+    if any("⚠️" in w for w in warnings):
+        for w in warnings:
+            st.error(w)
+    else:
+        st.success("\n".join(warnings))
+
+    # Profile picture at upper right
+    st.markdown("---")
+    col_left, col_right = st.columns([3, 1])
+    with col_right:
+        pic_path = get_profile_picture_path(student["student_number"])
+        if pic_path and os.path.exists(pic_path):
+            st.image(pic_path, width=100, caption="Your Picture")
+        else:
+            st.info("No profile picture")
+    with col_left:
+        st.subheader("Student Information")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Student Number", student["student_number"])
+            st.metric("Program", student["program"])
+            st.metric("Academic Year", format_ay(student["ay_start"], student["semester"]))
+        with col2:
+            st.metric("Advisor", student["advisor"])
+            st.metric("GWA", f"{student['gwa']:.2f}")
+            st.metric("POS Status", student["pos_status"])
+        with col3:
+            limit = get_thesis_limit(student["program"])
+            st.metric("Thesis Units", f"{student['thesis_units_taken']} / {limit}")
+            st.metric("Residency", f"{student['residency_years_used']} / {get_residency_max(student['program'])} years")
+            st.metric("Final Exam", student["final_exam_status"])
+    
+    # Profile picture upload/delete
+    st.markdown("---")
+    st.subheader("📸 Update Your Profile Picture")
+    uploaded_file = st.file_uploader("Upload new profile picture (JPG, PNG, GIF)", type=["jpg", "jpeg", "png", "gif"], key="profile_upload")
+    if uploaded_file:
+        new_filename = save_profile_picture(student["student_number"], uploaded_file)
+        if new_filename:
+            df.loc[df["student_number"] == student["student_number"], "profile_pic"] = new_filename
+            save_data(df)
+            st.success("Profile picture updated!")
+            st.rerun()
+    if st.button("🗑️ Delete my profile picture"):
+        if delete_profile_picture(student["student_number"]):
+            df.loc[df["student_number"] == student["student_number"], "profile_pic"] = ""
+            save_data(df)
+            st.success("Profile picture deleted.")
+            st.rerun()
+
+    # AMIS screenshot
+    st.markdown("---")
+    st.subheader("📊 Your AMIS Screenshot (Subjects, Grades, Units)")
+    col_amis1, col_amis2 = st.columns([1, 2])
+    with col_amis1:
+        amis_path = get_amis_screenshot_path(student["student_number"])
+        if amis_path and os.path.exists(amis_path):
+            st.image(amis_path, width=250, caption="Your AMIS Screenshot")
+        else:
+            st.info("No AMIS screenshot uploaded.")
+    with col_amis2:
+        uploaded_amis = st.file_uploader("Upload AMIS screenshot (JPG/PNG)", type=["jpg", "jpeg", "png"], key="amis_upload_student")
+        if uploaded_amis:
+            new_file = save_amis_screenshot(student["student_number"], uploaded_amis)
+            if new_file:
+                st.success("AMIS screenshot uploaded!")
+                st.rerun()
+        if st.button("🗑️ Delete my AMIS screenshot"):
+            if delete_amis_screenshot(student["student_number"]):
+                st.success("AMIS screenshot deleted.")
+                st.rerun()
+
+    # Manual GWA entry
+    st.markdown("---")
+    st.subheader("📈 Update GWA from AMIS Screenshot")
+    current_gwa = float(student["gwa"])
+    new_gwa = st.number_input("Enter GWA exactly as on the screenshot", 
+                              min_value=1.0, max_value=5.0, step=0.01, value=current_gwa)
+    if st.button("Update My GWA"):
+        df.loc[df["student_number"] == student["student_number"], "gwa"] = new_gwa
+        save_data(df)
+        st.success(f"GWA updated to {new_gwa}")
+        st.rerun()
+
+    # Coursework progress
+    st.markdown("---")
+    st.subheader("📚 Coursework Progress")
+    prog = compute_coursework_progress(student)
+    st.progress(prog / 100, text=f"{prog}% completed ({student['total_units_taken']} of {student['total_units_required']} units)")
+    st.caption(f"Remaining units: {max(0, student['total_units_required'] - student['total_units_taken'])}")
+
+    # Committee information
+    if student.get("committee_members"):
+        with st.expander("📋 Your Guidance/Advisory Committee"):
+            st.text_area("Committee Members", value=student["committee_members"], height=120, disabled=True)
+            if student.get("committee_approval_date"):
+                st.caption(f"Approved on: {student['committee_approval_date']}")
+
+    # Milestone status
+    st.markdown("---")
+    st.subheader("📌 Milestone Status")
+    milestone_df = pd.DataFrame({
+        "Milestone": [
+            "Plan of Study (POS)",
+            "General Exam (MS) / Qualifying Exam (PhD)",
+            "Written Comprehensive (PhD)",
+            "Oral Comprehensive (PhD)",
+            "Thesis/Dissertation Outline",
+            "Final Examination"
+        ],
+        "Status": [
+            student["pos_status"],
+            student["general_exam_status"] if is_master_program(student["program"]) else student["qualifying_exam_status"],
+            student["written_comprehensive_status"] if is_phd_program(student["program"]) else "N/A",
+            student["oral_comprehensive_status"] if is_phd_program(student["program"]) else "N/A",
+            student["thesis_outline_approved"],
+            student["final_exam_status"]
+        ]
+    })
+    st.dataframe(milestone_df, width='stretch', hide_index=True)
+    st.info("📌 Read‑only view. For updates, contact your adviser or SESAM Staff.")
+
+# ==================== FOOTER ====================
+st.markdown("---")
+st.caption("SESAM KMIS – Student Module V2 | Faculty-to-Student Notifications | Based on UPLB Graduate School Rules (2009)")
