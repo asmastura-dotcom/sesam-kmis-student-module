@@ -4,6 +4,7 @@ Author: [Your Name]
 Date: [Current Date]
 Description: Full workflow-based lifecycle management with beautiful, modern dashboard.
 Staff dashboard: table always visible, forms appear only when "Update Student" or "Add New Student" is clicked.
+Toggle buttons are now smaller and more compact.
 """
 
 import streamlit as st
@@ -20,7 +21,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ==================== CUSTOM CSS FOR MODERN UI ====================
+# ==================== CUSTOM CSS FOR MODERN UI (with smaller buttons) ====================
 st.markdown("""
 <style>
     .main > div { padding: 0 1rem; }
@@ -76,6 +77,7 @@ st.markdown("""
         border-radius: 8px;
         margin-bottom: 0.5rem;
     }
+    /* Default button styling (kept for other buttons) */
     .stButton button {
         border-radius: 20px;
         font-weight: 500;
@@ -84,6 +86,23 @@ st.markdown("""
     .stButton button:hover {
         transform: translateY(-2px);
         box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    /* Smaller toggle buttons for staff dashboard */
+    button[data-testid="baseButton-secondary"] {
+        padding: 0.25rem 0.75rem !important;
+        font-size: 0.8rem !important;
+        min-height: 32px !important;
+    }
+    /* Target by aria-label or key? Use data-testid and class */
+    .stButton button[kind="secondary"] {
+        padding: 0.2rem 0.6rem !important;
+        font-size: 0.75rem !important;
+    }
+    /* More specific: buttons inside the staff header column */
+    div[data-testid="column"]:has(> div > button) button {
+        padding: 0.2rem 0.8rem !important;
+        font-size: 0.75rem !important;
+        min-height: 30px !important;
     }
     .stTabs [data-baseweb="tab-list"] {
         gap: 1rem;
@@ -657,15 +676,19 @@ st.caption("Complete workflow tracking from admission to graduation")
 
 role = st.session_state.role
 
-# ==================== STAFF VIEW (with toggle buttons) ====================
+# ==================== STAFF VIEW (with smaller toggle buttons) ====================
 if role == "SESAM Staff":
-    # Header with buttons
+    # Header with smaller buttons
     col_title, col_buttons = st.columns([2, 1])
     with col_title:
         st.subheader("📋 Student Directory")
     with col_buttons:
-        btn_update = st.button("✏️ Update Student", use_container_width=True, key="staff_btn_update")
-        btn_add = st.button("➕ Add New Student", use_container_width=True, key="staff_btn_add")
+        # Use two columns inside to make buttons even smaller and better spaced
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            btn_update = st.button("✏️ Update", use_container_width=True, key="staff_btn_update_small")
+        with btn_col2:
+            btn_add = st.button("➕ Add", use_container_width=True, key="staff_btn_add_small")
     
     # Initialize session state for toggles
     if "staff_show_update" not in st.session_state:
@@ -733,7 +756,7 @@ if role == "SESAM Staff":
             else:
                 st.success("🎉 All milestones completed! Ready for graduation.")
             
-            # Tabs
+            # Tabs (same as before)
             tabs = st.tabs(["📝 Student Info", "📚 Coursework & Thesis", "📝 Exams", "🏠 Residency", "🎓 Graduation", "👥 Committee", "📁 Documents", "📖 Semester History"])
             
             with tabs[0]:
