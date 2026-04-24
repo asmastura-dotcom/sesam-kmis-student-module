@@ -77,13 +77,13 @@ def format_ay(ay_start, semester):
     return f"A.Y. {ay_start}-{ay_start+1} ({semester})"
 
 def get_start_date(ay_start, semester):
-    """Approximate start date for deadline calculations (fixed for 2nd Sem/Summer)."""
+    """Approximate start date for deadline calculations."""
     if semester == "1st Sem":
         return date(ay_start, 8, 1)
     elif semester == "2nd Sem":
-        return date(ay_start + 1, 1, 1)   # Jan of next year
-    else:  # Summer
-        return date(ay_start + 1, 4, 1)   # April of next year
+        return date(ay_start + 1, 1, 1)
+    else:
+        return date(ay_start + 1, 4, 1)
 
 # ==================== FOLDER SETUP ====================
 FOLDERS = ["profile_pics", "amis_screenshots", "admission_letters", "committee_docs",
@@ -98,7 +98,6 @@ def compress_image(file, max_size_kb=200, output_width=500):
         img = img.convert('RGB')
     ratio = output_width / float(img.size[0])
     output_height = int(float(img.size[1]) * ratio)
-    # Use legacy LANCZOS for compatibility with older Pillow
     img = img.resize((output_width, output_height), Image.LANCZOS)
     buffer = io.BytesIO()
     quality = 85
@@ -131,7 +130,7 @@ def save_uploaded_file(folder, student_number, file, prefix):
         return None
 
 def delete_file(filepath):
-    if filepath and os.path.exists(filepath):
+    if filepath and isinstance(filepath, str) and os.path.exists(filepath):
         os.remove(filepath)
         return True
     return False
@@ -177,7 +176,7 @@ def dismiss_notification(df, student_number, index):
         df.at[idx[0], "notifications"] = json.dumps(notif_list)
     return df
 
-# ==================== DATA LOADING WITH NEW COLUMNS ====================
+# ==================== DATA LOADING ====================
 DATA_FILE = "students.csv"
 
 def create_default_data():
@@ -197,50 +196,39 @@ def create_default_data():
         "notifications": ["[]", "[]"],
         "committee_members": ["", ""],
         "committee_approval_date": ["", ""],
-        # Admission milestone
         "admission_status": ["Approved", "Approved"],
         "admission_letter_path": ["", ""],
         "admission_validator": ["staff1", "staff1"],
         "admission_validation_date": ["2024-01-15", "2023-06-10"],
-        # Committee formation
         "committee_status": ["Approved", "Approved"],
         "committee_doc_path": ["", ""],
         "committee_deadline": ["2024-10-01", "2023-08-01"],
         "committee_validation_by": ["adviser1", "adviser2"],
-        # Coursework per semester (JSON)
         "semester_records": ["[]", "[]"],
-        # Major exam (MS: General, PhD: Comprehensive)
         "major_exam_status": ["Pending", "Passed"],
         "major_exam_doc_path": ["", ""],
         "major_exam_date": ["", "2024-02-10"],
         "major_exam_validator": ["", "adviser2"],
-        # PhD specific: Qualifying exam
         "qualifying_exam_status": ["N/A", "Passed"],
         "qualifying_exam_doc_path": ["", ""],
         "qualifying_exam_date": ["", "2023-12-01"],
-        # POS after qualifying (PhD)
         "pos_phd_status": ["N/A", "Approved"],
         "pos_phd_doc_path": ["", ""],
-        # Thesis/dissertation detailed
         "proposal_approved_date": ["", "2024-01-10"],
         "manuscript_progress": [0, 50],
         "external_review_status": ["Not Started", "Not Started"],
         "thesis_docs": ["[]", "[]"],
-        # Final defense
         "defense_status": ["Pending", "Pending"],
         "defense_result": ["", ""],
         "negative_votes": [0, 0],
         "defense_date": ["", ""],
-        # Manuscript & publication
         "final_manuscript_pdf": ["", ""],
         "final_manuscript_word": ["", ""],
         "publication_upload": ["", ""],
         "manuscript_complete": ["No", "No"],
-        # Graduation clearance
         "clearance_status": ["Not Cleared", "Not Cleared"],
         "clearance_date": ["", ""],
         "cleared_by": ["", ""],
-        # Existing fields
         "pos_status": ["Approved", "Approved"],
         "pos_submitted_date": ["", ""],
         "pos_approved_date": ["", ""],
@@ -282,13 +270,12 @@ def load_data():
         df = pd.read_csv(DATA_FILE)
     else:
         df = create_default_data()
-    
-    # Add missing columns from default
+
     default_df = create_default_data()
     for col in default_df.columns:
         if col not in df.columns:
             df[col] = default_df[col]
-    
+
     # Ensure JSON columns are valid
     for col in ["notifications", "semester_records", "thesis_docs"]:
         for idx in df.index:
@@ -300,7 +287,7 @@ def load_data():
                     json.loads(val)
                 except:
                     df.at[idx, col] = "[]"
-    
+
     # Convert numeric columns
     numeric_int = ["ay_start", "total_units_taken", "total_units_required", "thesis_units_taken",
                    "thesis_units_limit", "residency_years_used", "residency_max_years", "extension_count",
@@ -309,7 +296,12 @@ def load_data():
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
     df["gwa"] = pd.to_numeric(df["gwa"], errors='coerce').fillna(2.0).astype(float)
-    
+
+    # Fill NaN in string columns with empty string
+    string_cols = df.select_dtypes(include=['object']).columns
+    for col in string_cols:
+        df[col] = df[col].fillna("").astype(str)
+
     # Recompute program-specific values and committee deadline
     for idx, row in df.iterrows():
         prog = row["program"]
@@ -321,12 +313,14 @@ def load_data():
         df.at[idx, "total_units_required"] = req
         df.at[idx, "residency_max_years"] = get_residency_max_from_program(prog)
         df.at[idx, "thesis_units_limit"] = get_thesis_limit_from_program(prog)
-        
-        # Set committee deadline (2 months after start) - fixed date logic
-        start = get_start_date(row["ay_start"], row["semester"])
-        deadline = start + timedelta(days=60)
-        df.at[idx, "committee_deadline"] = deadline.strftime("%Y-%m-%d")
-    
+
+        try:
+            start = get_start_date(row["ay_start"], row["semester"])
+            deadline = start + timedelta(days=60)
+            df.at[idx, "committee_deadline"] = deadline.strftime("%Y-%m-%d")
+        except:
+            df.at[idx, "committee_deadline"] = ""
+
     # Build name from components if needed
     if "last_name" in df.columns and "first_name" in df.columns:
         def build_name(r):
@@ -337,7 +331,13 @@ def load_data():
                 return f"{last}, {first}" + (f" {middle}" if middle else "")
             return r.get("name", "")
         df["name"] = df.apply(build_name, axis=1)
-    
+
+    # Ensure file path columns are strings, not NaN
+    for col in ["admission_letter_path", "committee_doc_path", "major_exam_doc_path",
+                "final_manuscript_pdf", "publication_upload", "profile_pic", "amis_screenshot"]:
+        if col in df.columns:
+            df[col] = df[col].fillna("").astype(str)
+
     df.to_csv(DATA_FILE, index=False)
     return df
 
@@ -348,7 +348,6 @@ df = load_data()
 
 # ==================== HELPER FUNCTIONS ====================
 def compute_milestone_progress(student):
-    """Return percentage of completed milestones based on role."""
     milestones = {
         "Admission": student["admission_status"] == "Approved",
         "Committee Formation": student["committee_status"] == "Approved",
@@ -364,7 +363,6 @@ def compute_milestone_progress(student):
         milestones["POS after Qualifying"] = student["pos_phd_status"] == "Approved"
     else:
         milestones["POS (Coursework)"] = student["pos_status"] == "Approved"
-    
     completed = sum(milestones.values())
     total = len(milestones)
     return int(completed / total * 100) if total else 0, milestones
@@ -372,10 +370,9 @@ def compute_milestone_progress(student):
 def check_deadline_alerts(student):
     alerts = []
     today = date.today()
-    # Committee deadline
     if student["committee_status"] not in ["Approved", "Rejected"]:
         deadline = student.get("committee_deadline", "")
-        if deadline:
+        if deadline and deadline != "":
             try:
                 d = datetime.strptime(deadline, "%Y-%m-%d").date()
                 if today > d:
@@ -384,10 +381,8 @@ def check_deadline_alerts(student):
                     alerts.append(f"⚠️ Committee formation deadline approaching: {deadline}")
             except:
                 pass
-    # Admission pending validation
     if student["admission_status"] == "Pending":
         alerts.append("📌 Admission validation pending")
-    # Major exam eligibility
     if student["major_exam_status"] == "Pending" and student["total_units_taken"] >= student["total_units_required"]:
         if student["gwa"] <= 2.0:
             alerts.append("✅ You are eligible for major exam. Please request scheduling.")
@@ -420,6 +415,12 @@ def get_early_warning_indicators(row):
     if row["clearance_status"] != "Cleared" and row["defense_status"] == "Passed":
         warnings.append("📌 Graduation clearance pending")
     return warnings
+
+def safe_index(options, value):
+    try:
+        return options.index(value)
+    except ValueError:
+        return 0
 
 # ==================== LOGIN ====================
 if not st.session_state.logged_in:
@@ -468,38 +469,34 @@ if role == "SESAM Staff":
         filtered = df[df["name"].str.contains(search, case=False) | df["student_number"].str.contains(search, case=False)]
     else:
         filtered = df.copy()
-    
-    # Top metrics
+
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total Students", len(df))
     col2.metric("Pending Admissions", len(df[df["admission_status"]=="Pending"]))
     col3.metric("Pending Clearance", len(df[(df["defense_status"]=="Passed") & (df["clearance_status"]!="Cleared")]))
     col4.metric("Graduated", len(df[df["graduation_approved"]=="Yes"]))
-    
+
     st.dataframe(filtered[["student_number","name","program","advisor","admission_status","committee_status","major_exam_status","defense_status","clearance_status"]], use_container_width=True)
-    
-    # Student selection for detailed management
+
     st.markdown("---")
     student_choice = st.selectbox("Select student to manage", filtered["name"].tolist() if len(filtered)>0 else ["No students"])
     if student_choice and student_choice != "No students":
         student = filtered[filtered["name"]==student_choice].iloc[0]
         st.subheader(f"Managing: {student['name']} ({student['student_number']})")
-        
-        # Progress bar
+
         progress, milestones = compute_milestone_progress(student)
         st.progress(progress/100, text=f"Overall Progress: {progress}%")
         cols = st.columns(len(milestones))
         for i, (name, done) in enumerate(milestones.items()):
             cols[i].metric(name, "✅" if done else "⏳")
-        
-        # Tabs for each milestone
+
         tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
             ["Admission", "Committee", "Coursework", "Exams", "Thesis/Defense", "Manuscript", "Clearance"])
-        
+
         with tab1:
             st.subheader("Admission & Registration")
             st.write(f"Status: **{student['admission_status']}**")
-            if student["admission_letter_path"] and os.path.exists(student["admission_letter_path"]):
+            if student["admission_letter_path"] and student["admission_letter_path"] != "" and os.path.exists(student["admission_letter_path"]):
                 with open(student["admission_letter_path"], "rb") as f:
                     st.download_button("Download Admission Letter", f, file_name="admission_letter.pdf")
             if student["admission_status"] == "Pending":
@@ -515,12 +512,12 @@ if role == "SESAM Staff":
                     st.rerun()
             else:
                 st.info(f"Validated by {student['admission_validator']} on {student['admission_validation_date']}")
-        
+
         with tab2:
             st.subheader("Advisory Committee Formation")
             st.write(f"Status: **{student['committee_status']}**")
             st.write(f"Deadline: {student['committee_deadline']}")
-            if student["committee_doc_path"] and os.path.exists(student["committee_doc_path"]):
+            if student["committee_doc_path"] and student["committee_doc_path"] != "" and os.path.exists(student["committee_doc_path"]):
                 with open(student["committee_doc_path"], "rb") as f:
                     st.download_button("Download Committee Document", f)
             if student["committee_status"] == "Pending":
@@ -533,7 +530,7 @@ if role == "SESAM Staff":
                                      f"Committee formation {new_status.lower()}.", "Milestone")
                     st.success("Updated")
                     st.rerun()
-        
+
         with tab3:
             st.subheader("Coursework & Grades (Per Semester)")
             sem_records = json.loads(student["semester_records"])
@@ -548,7 +545,7 @@ if role == "SESAM Staff":
                                 st.download_button(f"Download Grades Screenshot {i}", f)
             else:
                 st.info("No semester records yet.")
-        
+
         with tab4:
             st.subheader("Major Examination")
             if is_master_program(student["program"]):
@@ -561,7 +558,7 @@ if role == "SESAM Staff":
                 st.success(reason)
             else:
                 st.warning(reason)
-            if student["major_exam_doc_path"] and os.path.exists(student["major_exam_doc_path"]):
+            if student["major_exam_doc_path"] and student["major_exam_doc_path"] != "" and os.path.exists(student["major_exam_doc_path"]):
                 with open(student["major_exam_doc_path"], "rb") as f:
                     st.download_button("Download Exam Result", f)
             if student["major_exam_status"] == "Pending" and eligible:
@@ -575,7 +572,7 @@ if role == "SESAM Staff":
                                      f"Major examination result: {new_status}", "Exam")
                     st.success(f"Exam marked {new_status}")
                     st.rerun()
-        
+
         with tab5:
             st.subheader("Thesis/Dissertation & Final Defense")
             st.write(f"Proposal approved: {student.get('proposal_approved_date', 'Not yet')}")
@@ -602,13 +599,13 @@ if role == "SESAM Staff":
                                          f"Final defense result: {result}", "Defense")
                         st.success("Updated")
                         st.rerun()
-        
+
         with tab6:
             st.subheader("Final Manuscript & Publication")
-            if student["final_manuscript_pdf"] and os.path.exists(student["final_manuscript_pdf"]):
+            if student["final_manuscript_pdf"] and student["final_manuscript_pdf"] != "" and os.path.exists(student["final_manuscript_pdf"]):
                 with open(student["final_manuscript_pdf"], "rb") as f:
                     st.download_button("Download Final Manuscript (PDF)", f)
-            if student["publication_upload"] and os.path.exists(student["publication_upload"]):
+            if student["publication_upload"] and student["publication_upload"] != "" and os.path.exists(student["publication_upload"]):
                 with open(student["publication_upload"], "rb") as f:
                     st.download_button("Download Publication-ready Article", f)
             if st.button("Mark Manuscript Complete"):
@@ -616,7 +613,7 @@ if role == "SESAM Staff":
                 save_data(df)
                 st.success("Manuscript submission recorded")
                 st.rerun()
-        
+
         with tab7:
             st.subheader("Graduation Clearance")
             st.write(f"Clearance Status: {student['clearance_status']}")
@@ -643,8 +640,8 @@ elif role == "Faculty Adviser":
         search_adv = st.text_input("🔍 Search among your advisees")
         if search_adv:
             advisees = advisees[advisees["name"].str.contains(search_adv, case=False)]
-        st.dataframe(advisees[["student_number","name","program","admission_status","committee_status","major_exam_status","defense_status"]])
-        
+        st.dataframe(advisees[["student_number","name","program","admission_status","committee_status","major_exam_status","defense_status"]], use_container_width=True)
+
         for _, student in advisees.iterrows():
             with st.expander(f"📘 {student['name']} – {student['student_number']}"):
                 progress, _ = compute_milestone_progress(student)
@@ -652,7 +649,6 @@ elif role == "Faculty Adviser":
                 alerts = check_deadline_alerts(student)
                 for alert in alerts:
                     st.warning(alert)
-                # Adviser can validate committee and major exam
                 if student["committee_status"] == "Pending":
                     if st.button(f"Approve Committee for {student['name']}", key=f"comm_{student['student_number']}"):
                         df.loc[df["student_number"]==student["student_number"], "committee_status"] = "Approved"
@@ -671,7 +667,6 @@ elif role == "Faculty Adviser":
                             save_data(df)
                             add_notification(df, student["student_number"], st.session_state.display_name, f"Your major exam result: {new_status}", "Exam")
                             st.rerun()
-                # Send notification
                 with st.form(key=f"notif_{student['student_number']}"):
                     msg = st.text_area("Send message to student")
                     if st.form_submit_button("Send"):
@@ -688,9 +683,8 @@ elif role == "Student":
     if student_row is None:
         st.error("Student record not found.")
         st.stop()
-    
+
     st.subheader(f"🎓 Welcome, {student_row['name']}")
-    # Notifications
     notifs = get_notifications(student_row)
     if notifs:
         st.markdown("### 📬 Notifications")
@@ -700,28 +694,25 @@ elif role == "Student":
                 df = dismiss_notification(df, student_row["student_number"], i)
                 save_data(df)
                 st.rerun()
-    
-    # Progress dashboard
+
     progress, milestones = compute_milestone_progress(student_row)
     st.markdown("### Your Milestone Progress")
     st.progress(progress/100, text=f"{progress}% complete")
     cols = st.columns(4)
     for i, (name, done) in enumerate(milestones.items()):
         cols[i%4].metric(name, "✅" if done else "⌛")
-    
-    # Alerts
+
     alerts = check_deadline_alerts(student_row)
     for alert in alerts:
         st.error(alert)
     early_warnings = get_early_warning_indicators(student_row)
     for warn in early_warnings:
         st.warning(warn)
-    
-    # Tabs for student actions
+
     st.markdown("---")
     tab_admit, tab_cmt, tab_course, tab_exam, tab_thesis, tab_manu = st.tabs(
         ["Admission", "Committee", "Coursework & Grades", "Exams", "Thesis/Defense", "Manuscript"])
-    
+
     with tab_admit:
         st.subheader("Upload Admission Acceptance Letter")
         uploaded = st.file_uploader("Upload PDF/JPG", type=["pdf","jpg","jpeg","png"])
@@ -729,7 +720,6 @@ elif role == "Student":
             path = save_uploaded_file("admission_letters", student_row["student_number"], uploaded, "admission")
             if path:
                 df.loc[df["student_number"]==student_row["student_number"], "admission_letter_path"] = path
-                # If adviser assigned, set pending adviser validation; else staff
                 if student_row["advisor"] and student_row["advisor"] != "Not assigned":
                     df.loc[df["student_number"]==student_row["student_number"], "admission_status"] = "Pending"
                     add_notification(df, student_row["student_number"], "System", "Your admission letter is pending adviser validation.")
@@ -740,7 +730,7 @@ elif role == "Student":
                 st.success("Admission letter uploaded. Awaiting validation.")
                 st.rerun()
         st.info(f"Current status: {student_row['admission_status']}")
-    
+
     with tab_cmt:
         st.subheader("Advisory Committee Formation")
         st.write(f"Deadline: {student_row['committee_deadline']}")
@@ -755,7 +745,7 @@ elif role == "Student":
                 add_notification(df, student_row["student_number"], "System", "Committee document uploaded. Pending adviser validation.")
                 st.success("Document uploaded. Waiting for validation.")
                 st.rerun()
-    
+
     with tab_course:
         st.subheader("Semester Coursework & Grades")
         sem_records = json.loads(student_row["semester_records"])
@@ -782,17 +772,15 @@ elif role == "Student":
                 }
                 sem_records.append(new_record)
                 df.loc[df["student_number"]==student_row["student_number"], "semester_records"] = json.dumps(sem_records)
-                # Update cumulative totals
                 total_units = sum(r["units_taken"] for r in sem_records)
                 df.loc[df["student_number"]==student_row["student_number"], "total_units_taken"] = total_units
-                # Update GWA as average of recorded semesters (simple average)
                 if sem_records:
                     avg_gwa = sum(r["gwa"] for r in sem_records) / len(sem_records)
                     df.loc[df["student_number"]==student_row["student_number"], "gwa"] = avg_gwa
                 save_data(df)
-                st.success("Semester record saved. Adviser can validate later.")
+                st.success("Semester record saved.")
                 st.rerun()
-    
+
     with tab_exam:
         st.subheader("Major Examination")
         if is_master_program(student_row["program"]):
@@ -815,7 +803,7 @@ elif role == "Student":
         else:
             st.warning(reason)
         st.write(f"Current exam status: {student_row['major_exam_status']}")
-    
+
     with tab_thesis:
         st.subheader("Thesis/Dissertation Tracking")
         st.write(f"Proposal approved date: {student_row.get('proposal_approved_date', 'Not yet')}")
@@ -831,7 +819,7 @@ elif role == "Student":
                 add_notification(df, student_row["student_number"], st.session_state.display_name,
                                  "Final defense requested. Please coordinate with your committee.", "Request")
                 st.success("Request sent to adviser.")
-    
+
     with tab_manu:
         st.subheader("Final Manuscript & Publication Submission")
         pdf_file = st.file_uploader("Final Manuscript (PDF)", type=["pdf"])
@@ -856,7 +844,7 @@ elif role == "Student":
                 add_notification(df, student_row["student_number"], "System", "Manuscript submitted. Awaiting clearance.")
                 st.success("Manuscripts submitted!")
                 st.rerun()
-    
+
     st.markdown("---")
     st.caption("Need to update profile picture or AMIS screenshot? Use the sidebar (if available) or contact staff.")
 
