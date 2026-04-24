@@ -952,7 +952,7 @@ if role == "SESAM Staff":
                     st.success(f"✅ Student {full_name} (Number: {student_number}) registered successfully!")
                     st.rerun()
 
-# ==================== ADVISER VIEW ====================
+# ==================== ADVISER VIEW (fixed overlapping & duplicate exams) ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees")
     adviser_name = st.session_state.display_name
@@ -973,31 +973,29 @@ elif role == "Faculty Adviser":
             st.subheader("📌 Detailed Student Progress & Notifications")
             for _, row in filtered_advisees.iterrows():
                 with st.expander(f"📘 {row['name']} ({row['student_number']})", expanded=False):
-                    # --- PROFILE PICTURE at upper right corner ---
+                    # ----- PROFILE PICTURE at upper right (wider columns for metrics) -----
                     pic_path = get_profile_picture_path(row["student_number"])
-                    col_pic_left, col_pic_right = st.columns([3, 1])
+                    col_pic_left, col_pic_right = st.columns([4, 1])  # more space for metrics
                     with col_pic_right:
                         if pic_path and os.path.exists(pic_path):
                             st.image(pic_path, width=100, caption="Profile Picture")
                         else:
                             st.info("No picture")
                     with col_pic_left:
+                        # Metrics in 3 columns with better spacing
                         col1, col2, col3 = st.columns(3)
                         with col1:
                             st.metric("Program", row['program'])
                             st.metric("GWA", f"{row['gwa']:.2f}", delta="Good" if row['gwa'] <= 2.0 else "Alert", delta_color="normal")
-                            st.metric("Academic Year Admitted", format_ay(row['ay_start'], row['semester']))
+                            st.metric("Academic Year", format_ay(row['ay_start'], row['semester']))
                         with col2:
                             st.metric("Residency", f"{row['residency_years_used']} / {get_residency_max(row['program'])} years")
                             st.metric("Thesis Units", f"{row['thesis_units_taken']} / {row['thesis_units_limit']}")
                             st.metric("POS Status", row['pos_status'])
                         with col3:
-                            if is_master_program(row['program']):
-                                st.metric("General Exam", row['general_exam_status'])
-                            else:
-                                st.metric("Qualifying Exam", row['qualifying_exam_status'])
                             st.metric("Final Exam", row['final_exam_status'])
                             st.metric("Graduation Applied", row['graduation_applied'])
+                            # No exam metrics here – they are in the milestone table only
                     
                     st.markdown("---")
                     # === Coursework Progress ===
@@ -1009,7 +1007,7 @@ elif role == "Faculty Adviser":
                     st.caption(f"Remaining units: {max(0, units_required - units_taken)}")
                     
                     st.markdown("---")
-                    # === Milestone Table (correct academic progression) ===
+                    # === Milestone Table (exams appear only here) ===
                     st.subheader("📋 Milestone Status & Dates")
                     milestone_data = []
                     # 1. Plan of Study
@@ -1174,7 +1172,7 @@ elif role == "Student":
     else:
         st.success("\n".join(warnings))
 
-    # ----- PROFILE PICTURE at upper right corner (with upload/delete below) -----
+    # ----- PROFILE PICTURE at upper right (with upload/delete below) -----
     st.markdown("---")
     col_left, col_right = st.columns([3, 1])
     with col_right:
