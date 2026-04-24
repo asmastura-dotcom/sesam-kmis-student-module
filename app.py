@@ -3,8 +3,9 @@ SESAM KMIS - Graduate Student Lifecycle Management System (Enhanced UI)
 Author: [Your Name]
 Date: [Current Date]
 Description: Full workflow-based lifecycle management with beautiful, modern dashboard.
-Staff dashboard: "All Students" table + search + two toggle buttons for Update/Add.
+Staff dashboard: Student Directory table + search + two toggle buttons for Update/Add.
 Add student form simplified (no initial milestones, no academic year caption).
+Sidebar presentation enhanced with modern styling.
 """
 
 import streamlit as st
@@ -62,21 +63,6 @@ st.markdown("""
     }
     .dataframe th { background-color: #2c3e50 !important; color: white !important; }
     .dataframe tr:hover { background-color: #f1f9ff !important; }
-    .css-1d391kg { background-color: #f4f6f9; }
-    .notification-error {
-        border-left: 4px solid #dc3545;
-        background: #fff5f5;
-        padding: 0.75rem;
-        border-radius: 8px;
-        margin-bottom: 0.5rem;
-    }
-    .notification-warning {
-        border-left: 4px solid #ffc107;
-        background: #fffaf0;
-        padding: 0.75rem;
-        border-radius: 8px;
-        margin-bottom: 0.5rem;
-    }
     .stButton button {
         border-radius: 20px;
         font-weight: 500;
@@ -115,6 +101,69 @@ st.markdown("""
     .stTabs [aria-selected="true"] {
         background-color: #2c7da0;
         color: white;
+    }
+
+    /* ========== ENHANCED SIDEBAR STYLING ========== */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(135deg, #f8fafc 0%, #eef2f5 100%);
+        border-right: 1px solid rgba(0,0,0,0.05);
+    }
+    section[data-testid="stSidebar"] .css-1d391kg {
+        background: transparent;
+    }
+    /* Profile card */
+    .sidebar-profile {
+        background: white;
+        border-radius: 20px;
+        padding: 1.2rem 1rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        text-align: center;
+    }
+    .sidebar-profile h3 {
+        margin: 0 0 0.25rem 0;
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #1e293b;
+    }
+    .sidebar-role {
+        font-size: 0.8rem;
+        color: #2c7da0;
+        background: #e6f4f5;
+        display: inline-block;
+        padding: 0.2rem 0.8rem;
+        border-radius: 20px;
+        margin-top: 0.25rem;
+    }
+    /* Logout button */
+    .sidebar-logout button {
+        background: white !important;
+        border: 1px solid #e2e8f0 !important;
+        color: #475569 !important;
+        border-radius: 40px !important;
+        padding: 0.4rem 1rem !important;
+        font-weight: 500 !important;
+        transition: all 0.2s;
+    }
+    .sidebar-logout button:hover {
+        background: #f1f5f9 !important;
+        border-color: #cbd5e1 !important;
+        transform: none !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    /* Sidebar divider */
+    hr.sidebar-divider {
+        margin: 1rem 0;
+        border: 0;
+        height: 1px;
+        background: linear-gradient(to right, #cbd5e1, transparent);
+    }
+    /* Version and copyright */
+    .sidebar-footer {
+        font-size: 0.7rem;
+        color: #94a3b8;
+        text-align: center;
+        margin-top: 2rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -652,20 +701,36 @@ if not st.session_state.logged_in:
 # ==================== DATA LOAD ====================
 df = load_data()
 
-# ==================== SIDEBAR ====================
+# ==================== ENHANCED SIDEBAR ====================
 with st.sidebar:
-    st.markdown(f"### 👤 {st.session_state.display_name}")
-    st.markdown(f"**Role:** {st.session_state.role}")
-    st.markdown("---")
+    # Profile card
+    st.markdown(f"""
+    <div class="sidebar-profile">
+        <h3>👤 {st.session_state.display_name}</h3>
+        <div class="sidebar-role">{st.session_state.role}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Logout button with custom styling
+    st.markdown('<div class="sidebar-logout">', unsafe_allow_html=True)
     if st.button("🚪 Logout", use_container_width=True):
         st.session_state.logged_in = False
         for key in ["username", "role", "display_name", "selected_student"]:
             if key in st.session_state:
                 del st.session_state[key]
         st.rerun()
-    st.markdown("---")
-    st.caption("Version 3.0 | Lifecycle Management")
-    st.caption("© SESAM 2026")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Divider
+    st.markdown('<hr class="sidebar-divider">', unsafe_allow_html=True)
+    
+    # Version and copyright
+    st.markdown("""
+    <div class="sidebar-footer">
+        Version 3.0 | Lifecycle Management<br>
+        © SESAM 2026
+    </div>
+    """, unsafe_allow_html=True)
 
 # ==================== MAIN ====================
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
@@ -673,9 +738,9 @@ st.caption("Complete workflow tracking from admission to graduation")
 
 role = st.session_state.role
 
-# ==================== STAFF VIEW (with table + toggle buttons) ====================
+# ==================== STAFF VIEW (unchanged except sidebar) ====================
 if role == "SESAM Staff":
-    st.subheader("📋 Student Directory")   
+    st.subheader("📋 Student Directory")   # Title as requested
     
     # Search box
     search = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001", key="staff_search")
@@ -723,7 +788,6 @@ if role == "SESAM Staff":
         if len(filtered_df) == 0:
             st.warning("No students available to edit.")
         else:
-            # Select a student from the filtered list
             selected_student_name = st.selectbox(
                 "Select a student to edit",
                 options=filtered_df["name"].tolist(),
@@ -986,15 +1050,12 @@ if role == "SESAM Staff":
                 ay_start = int(selected_ay_range.split("-")[0])
             with col7:
                 semester = st.selectbox("Semester *", options=SEMESTERS)
-            # No caption – removed as requested
             
             col8, col9 = st.columns(2)
             with col8:
                 advisor = st.text_input("Advisor (optional)", placeholder="Dr. Faustino-Eslava")
             with col9:
                 st.empty()
-            
-            # No "Initial Milestone Status" section – removed as requested
             
             submitted = st.form_submit_button("Register Student")
             
