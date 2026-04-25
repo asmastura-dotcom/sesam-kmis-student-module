@@ -235,7 +235,7 @@ def add_semester_record(student_number, academic_year, semester, subjects_list, 
         "subjects_json": json.dumps(subjects_list),
         "total_units": total_units,
         "gwa": gwa,
-        "amis_file_path": amis_file_path
+        "amis_file_path": amis_file_path if amis_file_path else ""
     }])
     df = pd.concat([df, new_record], ignore_index=True)
     save_semester_records(df)
@@ -657,6 +657,7 @@ def compute_coursework_progress(row):
 
 # ==================== UI HELPER FUNCTIONS ====================
 def safe_index(options, value):
+    """Return index of value in options, or 0 if not found."""
     try:
         return options.index(value)
     except ValueError:
@@ -922,7 +923,12 @@ if role == "SESAM Staff":
                             default_role = "Chair (Major Professor)" if idx == 0 else "Member"
                         else:
                             default_role = "Chair (Adviser)" if idx == 0 else "Member"
-                        role = st.selectbox(f"Role", options=role_options, index=role_options.index(member["role"]) if member["role"] in role_options else role_options.index(default_role), key=f"role_{student['student_number']}_{idx}")
+                        current_role = member["role"]
+                        try:
+                            role_idx = role_options.index(current_role)
+                        except ValueError:
+                            role_idx = role_options.index(default_role)
+                        role = st.selectbox(f"Role", options=role_options, index=role_idx, key=f"role_{student['student_number']}_{idx}")
                     with col3:
                         if st.button("❌", key=f"remove_{student['student_number']}_{idx}"):
                             members.pop(idx)
@@ -990,8 +996,9 @@ if role == "SESAM Staff":
                             if subjects:
                                 st.table(pd.DataFrame(subjects))
                             st.caption(f"Total Units: {sem['total_units']}")
-                            if sem['amis_file_path'] and pd.notna(sem['amis_file_path']) and str(sem['amis_file_path']).strip():
-                                st.write(f"📎 AMIS: {os.path.basename(sem['amis_file_path'])}")
+                            amis_path = sem['amis_file_path']
+                            if pd.notna(amis_path) and str(amis_path).strip():
+                                st.write(f"📎 AMIS: {os.path.basename(amis_path)}")
                 st.subheader("➕ Add New Semester")
                 with st.form("add_semester_staff"):
                     col_ay, col_sem = st.columns(2)
@@ -1034,7 +1041,7 @@ if role == "SESAM Staff":
                         with st.expander(f"{req['milestone_label']} - Submitted on {req['submitted_date']}"):
                             st.write(f"**Submitted:** {req['submitted_date']}")
                             file_path = req['file_path']
-                            if os.path.exists(file_path):
+                            if pd.notna(file_path) and os.path.exists(file_path):
                                 if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
                                     st.image(file_path, width=200)
                                 else:
@@ -1185,10 +1192,10 @@ elif role == "Faculty Adviser":
                 if req["student_number"] in advisees["student_number"].values:
                     with st.expander(f"{req['student_name']} - {req['milestone_label']} ({req['submitted_date']})"):
                         file_path = req['file_path']
-                        if os.path.exists(file_path) and file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
+                        if pd.notna(file_path) and os.path.exists(file_path) and file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
                             st.image(file_path, width=200)
                         else:
-                            st.write(f"📎 {os.path.basename(file_path)}")
+                            st.write(f"📎 {os.path.basename(file_path) if pd.notna(file_path) else 'No file'}")
                         comment = st.text_area("Remarks", key=f"adv_comment_{req['request_id']}")
                         col_a, col_b = st.columns(2)
                         with col_a:
@@ -1272,9 +1279,11 @@ elif role == "Student":
     def get_student_alerts_and_next_action(student):
         alerts = []
         alerts.extend(get_all_warnings(student))
-        if student["pos_status"] == "Pending" and not student.get("pos_file"):
+        pos_file = student.get("pos_file")
+        if student["pos_status"] == "Pending" and (pd.isna(pos_file) or not pos_file):
             alerts.append("⚠️ Plan of Study (POS) file not uploaded. Please upload your POS for approval.")
-        if student["final_exam_status"] == "Passed" and not student.get("final_exam_file"):
+        final_file = student.get("final_exam_file")
+        if student["final_exam_status"] == "Passed" and (pd.isna(final_file) or not final_file):
             alerts.append("⚠️ Final exam result file missing. Please upload proof of passing.")
         if student["gwa"] > 2.00:
             alerts.append(f"⚠️ Your cumulative GWA ({student['gwa']:.2f}) is below the required 2.00 threshold.")
@@ -1350,8 +1359,12 @@ elif role == "Student":
                     if subjects:
                         st.table(pd.DataFrame(subjects))
                     st.caption(f"Total units: {sem['total_units']}")
-                    if sem['amis_file_path'] and pd.notna(sem['amis_file_path']) and str(sem['amis_file_path']).strip():
-                        st.image(sem['amis_file_path'], width=200, caption="AMIS Screenshot") if sem['amis_file_path'].lower().endswith(('.png','.jpg','.jpeg','.gif')) else st.write(f"📎 AMIS file: {os.path.basename(sem['amis_file_path'])}")
+                    amis_path = sem['amis_file_path']
+                    if pd.notna(amis_path) and str(amis_path).strip():
+                        if amis_path.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                            st.image(amis_path, width=200, caption="AMIS Screenshot")
+                        else:
+                            st.write(f"📎 AMIS file: {os.path.basename(amis_path)}")
         else:
             st.info("No semester records yet. Add your first semester below.")
         st.markdown("---")
@@ -1401,12 +1414,13 @@ elif role == "Student":
             if student["pos_approved_date"]:
                 st.markdown(f"**Approved:** {student['pos_approved_date']}")
         with col2:
-            if student["pos_file"] and os.path.exists(student["pos_file"]):
+            pos_file = student["pos_file"]
+            if pd.notna(pos_file) and os.path.exists(pos_file):
                 st.markdown("**Current POS File:**")
-                if student["pos_file"].lower().endswith(('.png','.jpg','.jpeg','.gif')):
-                    st.image(student["pos_file"], width=200)
+                if pos_file.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                    st.image(pos_file, width=200)
                 else:
-                    st.write(f"📎 {os.path.basename(student['pos_file'])}")
+                    st.write(f"📎 {os.path.basename(pos_file)}")
             uploaded_pos = st.file_uploader("Upload or update Plan of Study (PDF/image)", type=["pdf","png","jpg","jpeg"])
             if uploaded_pos:
                 filepath = save_student_file(student["student_number"], "pos_file", uploaded_pos)
@@ -1427,8 +1441,12 @@ elif role == "Student":
                 if student["qualifying_exam_passed_date"]:
                     st.markdown(f"**Date passed:** {student['qualifying_exam_passed_date']}")
             with col2:
-                if student["qualifying_exam_file"] and os.path.exists(student["qualifying_exam_file"]):
-                    st.image(student["qualifying_exam_file"], width=150) if student["qualifying_exam_file"].lower().endswith(('.png','.jpg','.jpeg','.gif')) else st.write(f"📎 {os.path.basename(student['qualifying_exam_file'])}")
+                q_file = student["qualifying_exam_file"]
+                if pd.notna(q_file) and os.path.exists(q_file):
+                    if q_file.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                        st.image(q_file, width=150)
+                    else:
+                        st.write(f"📎 {os.path.basename(q_file)}")
                 uploaded = st.file_uploader("Upload proof (result slip)", type=["pdf","png","jpg","jpeg"], key="qual_file")
                 if uploaded:
                     save_student_file(student["student_number"], "qualifying_exam_file", uploaded)
@@ -1442,8 +1460,12 @@ elif role == "Student":
                 if student["written_comprehensive_passed_date"]:
                     st.markdown(f"**Date passed:** {student['written_comprehensive_passed_date']}")
             with col2:
-                if student["written_comprehensive_file"] and os.path.exists(student["written_comprehensive_file"]):
-                    st.image(student["written_comprehensive_file"], width=150) if student["written_comprehensive_file"].lower().endswith(('.png','.jpg','.jpeg','.gif')) else st.write(f"📎 {os.path.basename(student['written_comprehensive_file'])}")
+                w_file = student["written_comprehensive_file"]
+                if pd.notna(w_file) and os.path.exists(w_file):
+                    if w_file.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                        st.image(w_file, width=150)
+                    else:
+                        st.write(f"📎 {os.path.basename(w_file)}")
                 uploaded = st.file_uploader("Upload proof", type=["pdf","png","jpg","jpeg"], key="written_file")
                 if uploaded:
                     save_student_file(student["student_number"], "written_comprehensive_file", uploaded)
@@ -1457,8 +1479,12 @@ elif role == "Student":
                 if student["oral_comprehensive_passed_date"]:
                     st.markdown(f"**Date passed:** {student['oral_comprehensive_passed_date']}")
             with col2:
-                if student["oral_comprehensive_file"] and os.path.exists(student["oral_comprehensive_file"]):
-                    st.image(student["oral_comprehensive_file"], width=150) if student["oral_comprehensive_file"].lower().endswith(('.png','.jpg','.jpeg','.gif')) else st.write(f"📎 {os.path.basename(student['oral_comprehensive_file'])}")
+                o_file = student["oral_comprehensive_file"]
+                if pd.notna(o_file) and os.path.exists(o_file):
+                    if o_file.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                        st.image(o_file, width=150)
+                    else:
+                        st.write(f"📎 {os.path.basename(o_file)}")
                 uploaded = st.file_uploader("Upload proof", type=["pdf","png","jpg","jpeg"], key="oral_file")
                 if uploaded:
                     save_student_file(student["student_number"], "oral_comprehensive_file", uploaded)
@@ -1472,8 +1498,12 @@ elif role == "Student":
                 if student["general_exam_passed_date"]:
                     st.markdown(f"**Date passed:** {student['general_exam_passed_date']}")
             with col2:
-                if student["general_exam_file"] and os.path.exists(student["general_exam_file"]):
-                    st.image(student["general_exam_file"], width=150) if student["general_exam_file"].lower().endswith(('.png','.jpg','.jpeg','.gif')) else st.write(f"📎 {os.path.basename(student['general_exam_file'])}")
+                g_file = student["general_exam_file"]
+                if pd.notna(g_file) and os.path.exists(g_file):
+                    if g_file.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                        st.image(g_file, width=150)
+                    else:
+                        st.write(f"📎 {os.path.basename(g_file)}")
                 uploaded = st.file_uploader("Upload proof (result slip)", type=["pdf","png","jpg","jpeg"], key="gen_file")
                 if uploaded:
                     save_student_file(student["student_number"], "general_exam_file", uploaded)
@@ -1488,8 +1518,12 @@ elif role == "Student":
             if student["final_exam_passed_date"]:
                 st.markdown(f"**Date passed:** {student['final_exam_passed_date']}")
         with col2:
-            if student["final_exam_file"] and os.path.exists(student["final_exam_file"]):
-                st.image(student["final_exam_file"], width=200) if student["final_exam_file"].lower().endswith(('.png','.jpg','.jpeg','.gif')) else st.write(f"📎 {os.path.basename(student['final_exam_file'])}")
+            f_file = student["final_exam_file"]
+            if pd.notna(f_file) and os.path.exists(f_file):
+                if f_file.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                    st.image(f_file, width=200)
+                else:
+                    st.write(f"📎 {os.path.basename(f_file)}")
             uploaded = st.file_uploader("Upload signed result form or proof", type=["pdf","png","jpg","jpeg"], key="final_file")
             if uploaded:
                 save_student_file(student["student_number"], "final_exam_file", uploaded)
@@ -1506,25 +1540,31 @@ elif role == "Student":
             if student["thesis_outline_approved_date"]:
                 st.markdown(f"**Outline approved:** {student['thesis_outline_approved_date']}")
         with col2:
-            if student["thesis_outline_file"] and os.path.exists(student["thesis_outline_file"]):
+            outline_file = student["thesis_outline_file"]
+            if pd.notna(outline_file) and os.path.exists(outline_file):
                 st.markdown("**Outline:**")
-                st.image(student["thesis_outline_file"], width=150) if student["thesis_outline_file"].lower().endswith(('.png','.jpg','.jpeg','.gif')) else st.write(f"📎 {os.path.basename(student['thesis_outline_file'])}")
+                if outline_file.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                    st.image(outline_file, width=150)
+                else:
+                    st.write(f"📎 {os.path.basename(outline_file)}")
             uploaded_outline = st.file_uploader("Upload outline", type=["pdf","png","jpg","jpeg","doc","docx"], key="outline_file")
             if uploaded_outline:
                 save_student_file(student["student_number"], "thesis_outline_file", uploaded_outline)
                 st.success("Outline uploaded.")
                 st.rerun()
-            if student["thesis_draft_file"] and os.path.exists(student["thesis_draft_file"]):
+            draft_file = student["thesis_draft_file"]
+            if pd.notna(draft_file) and os.path.exists(draft_file):
                 st.markdown("**Draft:**")
-                st.write(f"📎 {os.path.basename(student['thesis_draft_file'])}")
+                st.write(f"📎 {os.path.basename(draft_file)}")
             uploaded_draft = st.file_uploader("Upload draft", type=["pdf","doc","docx"], key="draft_file")
             if uploaded_draft:
                 save_student_file(student["student_number"], "thesis_draft_file", uploaded_draft)
                 st.success("Draft uploaded.")
                 st.rerun()
-            if student["thesis_manuscript_file"] and os.path.exists(student["thesis_manuscript_file"]):
+            manuscript_file = student["thesis_manuscript_file"]
+            if pd.notna(manuscript_file) and os.path.exists(manuscript_file):
                 st.markdown("**Final manuscript:**")
-                st.write(f"📎 {os.path.basename(student['thesis_manuscript_file'])}")
+                st.write(f"📎 {os.path.basename(manuscript_file)}")
             uploaded_manuscript = st.file_uploader("Upload final manuscript", type=["pdf"], key="manuscript_file")
             if uploaded_manuscript:
                 save_student_file(student["student_number"], "thesis_manuscript_file", uploaded_manuscript)
