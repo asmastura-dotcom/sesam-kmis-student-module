@@ -1080,16 +1080,16 @@ if role == "SESAM Staff":
     
     # ==================== UPDATE STUDENT FORM ====================
     if st.session_state.staff_show_update:
-    st.subheader("✏️ Update Student Record")
-    if len(filtered_df) == 0:
-        st.warning("No students available to edit.")
-    else:
-        selected_student_name = st.selectbox("Select a student to edit", options=filtered_df["name"].tolist(), key="staff_update_select")
-        student = filtered_df[filtered_df["name"] == selected_student_name].iloc[0].copy()
-        if st.button("❌ Cancel", key="cancel_update"):
-            st.session_state.staff_show_update = False
-            st.rerun()
-        st.markdown(f"### Editing: {student['name']} ({student['student_number']}) | Program: {student['program']}")
+        st.subheader("✏️ Update Student Record")
+        if len(filtered_df) == 0:
+            st.warning("No students available to edit.")
+        else:
+            selected_student_name = st.selectbox("Select a student to edit", options=filtered_df["name"].tolist(), key="staff_update_select")
+            student = filtered_df[filtered_df["name"] == selected_student_name].iloc[0].copy()
+            if st.button("❌ Cancel", key="cancel_update"):
+                st.session_state.staff_show_update = False
+                st.rerun()
+            st.markdown(f"### Editing: {student['name']} ({student['student_number']}) | Program: {student['program']}")
             
             # Workflow progress
             completed_steps = get_step_completion_status(student)
