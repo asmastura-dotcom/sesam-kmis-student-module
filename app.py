@@ -3,7 +3,7 @@ SESAM KMIS - Graduate Student Lifecycle Management System (Enhanced UI)
 Author: [Your Name]
 Date: [Current Date]
 Description: Full workflow-based lifecycle management.
-Includes committee rule enforcement per program type.
+Committee section now dynamic: Advisory (PhD) or Guidance (Masters) with structured member input.
 """
 
 import streamlit as st
@@ -187,7 +187,7 @@ PROGRAMS = [
     "PhD Environmental Diplomacy and Negotiations",
     "Master in Resilience Studies (M-ReS)",
     "Professional Masters in Tropical Marine Ecosystems Management (PM-TMEM)",
-    "PhD by Research Environmental Science"   # added for rule
+    "PhD by Research Environmental Science"
 ]
 
 SEMESTERS = ["1st Sem", "2nd Sem", "Summer"]
@@ -217,62 +217,6 @@ def get_thesis_pattern_description(program):
         return "💡 MS: 6 thesis units (2-2-2 or 3-3)"
     else:
         return "💡 PhD: 12 dissertation units (3-3-3-3 or 4-4-4)"
-
-# ==================== COMMITTEE RULES ====================
-def get_committee_info(program):
-    if is_master_program(program):
-        return {
-            "name": "Guidance Committee",
-            "min_members": 3,
-            "max_members": 4,
-            "chair": "Major Professor",
-            "requires_phd": False,
-            "has_voting_outcome": False
-        }
-    elif is_phd_program(program):
-        return {
-            "name": "Advisory Committee",
-            "min_members": 4,
-            "max_members": 5,
-            "chair": "Adviser",
-            "requires_phd": True,
-            "has_voting_outcome": False
-        }
-    elif is_phd_by_research(program):
-        return {
-            "name": "Evaluation Committee",
-            "min_members": 3,
-            "max_members": 5,
-            "chair": "Chair",
-            "requires_phd": False,
-            "has_voting_outcome": True
-        }
-    else:
-        return {
-            "name": "Committee",
-            "min_members": 3,
-            "max_members": 5,
-            "chair": "Chair",
-            "requires_phd": False,
-            "has_voting_outcome": False
-        }
-
-def validate_committee(program, members_text, voting_outcome=None):
-    info = get_committee_info(program)
-    members = [m.strip() for m in members_text.split('\n') if m.strip()]
-    count = len(members)
-    errors = []
-    if count < info["min_members"]:
-        errors.append(f"Need at least {info['min_members']} members (found {count}).")
-    if count > info["max_members"]:
-        errors.append(f"Maximum {info['max_members']} members allowed (found {count}).")
-    if info["requires_phd"]:
-        phd_missing = [m for m in members if "PhD" not in m and "Dr." not in m]
-        if phd_missing:
-            errors.append(f"All members must be PhD holders. Missing PhD/Dr. for: {', '.join(phd_missing)}")
-    if info["has_voting_outcome"] and not voting_outcome:
-        errors.append("Voting outcome is required for PhD by Research.")
-    return errors, info
 
 # ==================== WORKFLOW ENGINE (Admission removed) ====================
 WORKFLOW_STEPS = ["Committee", "Coursework", "Exams", "POS", "Thesis", "Defense", "Graduation"]
@@ -486,6 +430,31 @@ def get_profile_picture_path(student_number):
             return os.path.join(PIC_FOLDER, f)
     return None
 
+# ==================== COMMITTEE HELPER FUNCTIONS ====================
+def get_committee_title(program):
+    if is_phd_program(program) or is_phd_by_research(program):
+        return "Advisory Committee"
+    else:
+        return "Guidance Committee"
+
+def parse_committee_members(members_str):
+    """Parse stored committee members string (format: Name|Role\nName|Role) into list of dicts."""
+    if not members_str or pd.isna(members_str):
+        return []
+    members = []
+    for line in members_str.strip().split('\n'):
+        if '|' in line:
+            name, role = line.split('|', 1)
+            members.append({"name": name.strip(), "role": role.strip()})
+        else:
+            # fallback for old format: assume role "Member"
+            members.append({"name": line.strip(), "role": "Member"})
+    return members
+
+def format_committee_members(members_list):
+    """Convert list of member dicts to storage string (Name|Role per line)."""
+    return "\n".join([f"{m['name']}|{m['role']}" for m in members_list])
+
 # ==================== DATA LOADING ====================
 DATA_FILE = "students.csv"
 
@@ -501,9 +470,8 @@ def create_default_data():
         "ay_start": [2024, 2023, 2024, 2022, 2024],
         "semester": ["1st Sem", "1st Sem", "2nd Sem", "1st Sem", "1st Sem"],
         "profile_pic": ["", "", "", "", ""],
-        "committee_members": ["Dr. Eslava, Dr. Sanchez", "Dr. Sanchez, Dr. Eslava", "Dr. Eslava", "Dr. Sanchez, Dr. Eslava", "Dr. Eslava"],
+        "committee_members_structured": ["Dr. Eslava|Chair (Major Professor)\nDr. Sanchez|Member", "Dr. Sanchez|Chair (Adviser)\nDr. Eslava|Member\nDr. Reyes|Member", "Dr. Eslava|Chair", "Dr. Sanchez|Chair\nDr. Eslava|Member\nDr. Cruz|Member", "Dr. Eslava|Chair"],
         "committee_approval_date": ["2024-02-01", "2023-07-01", "", "2022-09-15", ""],
-        "committee_voting_outcome": ["", "", "", "", ""],   # new column
         "pos_status": ["Approved", "Approved", "Pending", "Approved", "Pending"],
         "pos_submitted_date": ["2024-01-15", "2023-06-10", "", "2022-09-01", ""],
         "pos_approved_date": ["2024-02-01", "2023-07-01", "", "2022-09-15", ""],
@@ -551,8 +519,21 @@ def load_data():
     for col in default_df.columns:
         if col not in df.columns:
             df[col] = default_df[col]
-    if "committee_voting_outcome" not in df.columns:
-        df["committee_voting_outcome"] = ""
+    # Migrate old committee column if needed
+    if "committee_members" in df.columns and "committee_members_structured" not in df.columns:
+        # Convert old plain text to structured format (assume each line is name, role = "Member")
+        def migrate(row):
+            old = row.get("committee_members", "")
+            if old and not any('|' in line for line in old.split('\n')):
+                lines = old.split('\n')
+                new_lines = [f"{line.strip()}|Member" for line in lines if line.strip()]
+                return "\n".join(new_lines)
+            return old
+        df["committee_members_structured"] = df.apply(migrate, axis=1)
+    if "committee_members_structured" not in df.columns:
+        df["committee_members_structured"] = ""
+    if "committee_approval_date" not in df.columns:
+        df["committee_approval_date"] = ""
     if "year_admitted" in df.columns and "ay_start" not in df.columns:
         df["ay_start"] = df["year_admitted"]
         df["semester"] = "1st Sem"
@@ -561,10 +542,6 @@ def load_data():
         df["ay_start"] = 2024
     if "semester" not in df.columns:
         df["semester"] = "1st Sem"
-    if "committee_members" not in df.columns:
-        df["committee_members"] = ""
-    if "committee_approval_date" not in df.columns:
-        df["committee_approval_date"] = ""
     numeric_int_cols = ["thesis_units_taken", "thesis_units_limit", "total_units_taken", "total_units_required", "residency_years_used", "residency_max_years", "extension_count", "loa_total_terms", "transfer_units_approved", "ay_start"]
     for col in numeric_int_cols:
         if col in df.columns:
@@ -977,47 +954,72 @@ if role == "SESAM Staff":
                         else:
                             st.error("Cannot approve graduation before Final Exam")
             
-            # ==================== UPDATED COMMITTEE TAB with rule enforcement ====================
+            # ==================== NEW COMMITTEE TAB (dynamic rows) ====================
             with tabs[5]:
-                committee_info = get_committee_info(student["program"])
-                st.subheader(f"{committee_info['name']} – Rules")
-                st.write(f"**Members:** {committee_info['min_members']}–{committee_info['max_members']} members")
-                st.write(f"**Chair:** {committee_info['chair']}")
-                if committee_info['requires_phd']:
-                    st.warning("All members must be PhD holders (indicate 'PhD' or 'Dr.' in their name).")
-                if committee_info['has_voting_outcome']:
-                    st.info("Voting outcome is required for this committee type.")
+                committee_title = get_committee_title(student["program"])
+                st.subheader(f"👥 {committee_title}")
                 
-                with st.form("staff_committee"):
-                    current_members = student.get("committee_members", "")
-                    # Convert stored newline-separated string to a format suitable for text_area
-                    committee_members = st.text_area(
-                        "Committee Members (one per line)",
-                        value=current_members,
-                        height=150,
-                        help="List each member on a new line."
-                    )
-                    committee_approval_date = st.text_input("Committee Approval Date (YYYY-MM-DD)", student.get("committee_approval_date", ""))
-                    
-                    voting_outcome = None
-                    if committee_info['has_voting_outcome']:
-                        voting_options = ["Passed", "Failed", "Pending", "Not Applicable"]
-                        current_voting = student.get("committee_voting_outcome", "")
-                        voting_outcome = st.selectbox("Voting Outcome", voting_options, index=safe_index(voting_options, current_voting))
-                    
-                    if st.form_submit_button("Update Committee"):
-                        errors, _ = validate_committee(student["program"], committee_members, voting_outcome)
-                        if errors:
-                            for err in errors:
-                                st.error(err)
+                # Parse existing members
+                existing_members = parse_committee_members(student.get("committee_members_structured", ""))
+                
+                # Use session state to manage dynamic list
+                if f"committee_members_{student['student_number']}" not in st.session_state:
+                    st.session_state[f"committee_members_{student['student_number']}"] = existing_members
+                
+                members = st.session_state[f"committee_members_{student['student_number']}"]
+                
+                # Display current members
+                st.write("**Current Committee Members:**")
+                for idx, member in enumerate(members):
+                    col1, col2, col3 = st.columns([3, 3, 1])
+                    with col1:
+                        name = st.text_input(f"Name", value=member["name"], key=f"name_{student['student_number']}_{idx}")
+                    with col2:
+                        role_options = ["Chair (Major Professor)", "Chair (Adviser)", "Member", "Co-Chair", "Secretary", "External Member"]
+                        if committee_title == "Guidance Committee":
+                            default_role = "Chair (Major Professor)" if idx == 0 else "Member"
                         else:
-                            df.loc[df["student_number"]==student["student_number"], "committee_members"] = committee_members
-                            df.loc[df["student_number"]==student["student_number"], "committee_approval_date"] = committee_approval_date
-                            if committee_info['has_voting_outcome'] and voting_outcome:
-                                df.loc[df["student_number"]==student["student_number"], "committee_voting_outcome"] = voting_outcome
-                            save_data(df)
-                            st.success("Committee information updated!")
+                            default_role = "Chair (Adviser)" if idx == 0 else "Member"
+                        role = st.selectbox(f"Role", options=role_options, index=role_options.index(member["role"]) if member["role"] in role_options else role_options.index(default_role), key=f"role_{student['student_number']}_{idx}")
+                    with col3:
+                        if st.button("❌", key=f"remove_{student['student_number']}_{idx}"):
+                            members.pop(idx)
                             st.rerun()
+                    # Update member dict
+                    members[idx] = {"name": name, "role": role}
+                
+                # Add new member button
+                if st.button("➕ Add Member", key=f"add_member_{student['student_number']}"):
+                    members.append({"name": "", "role": "Member"})
+                    st.rerun()
+                
+                # Approval date
+                committee_approval_date = st.text_input("Committee Approval Date (YYYY-MM-DD)", student.get("committee_approval_date", ""))
+                
+                # Save button
+                if st.button("💾 Save Committee", key=f"save_committee_{student['student_number']}"):
+                    # Filter out empty names
+                    valid_members = [m for m in members if m["name"].strip()]
+                    if not valid_members:
+                        st.error("At least one committee member is required.")
+                    else:
+                        # Save structured string
+                        structured_str = format_committee_members(valid_members)
+                        df.loc[df["student_number"] == student["student_number"], "committee_members_structured"] = structured_str
+                        df.loc[df["student_number"] == student["student_number"], "committee_approval_date"] = committee_approval_date
+                        save_data(df)
+                        st.success("Committee saved successfully!")
+                        st.rerun()
+                
+                # Preview display
+                st.markdown("---")
+                st.write("**Preview (as will appear in student profile):**")
+                if members:
+                    for m in members:
+                        if m["name"].strip():
+                            st.write(f"• {m['name']} – {m['role']}")
+                else:
+                    st.caption("No members added yet.")
             
             with tabs[6]:
                 st.subheader("📎 Document Submissions")
@@ -1094,7 +1096,7 @@ if role == "SESAM Staff":
                         else:
                             st.error("Add at least one subject")
     
-    # ==================== ADD NEW STUDENT FORM (simplified, unchanged) ====================
+    # ==================== ADD NEW STUDENT FORM (simplified) ====================
     if st.session_state.staff_show_add:
         st.subheader("➕ Register New Student")
         if st.button("❌ Cancel", key="cancel_add"):
@@ -1163,9 +1165,8 @@ if role == "SESAM Staff":
                         "thesis_units_taken": 0,
                         "thesis_units_limit": get_thesis_limit(program),
                         "residency_max_years": get_residency_max(program),
-                        "committee_members": "",
+                        "committee_members_structured": "",
                         "committee_approval_date": "",
-                        "committee_voting_outcome": "",
                         "profile_pic": "",
                         "pos_submitted_date": "",
                         "pos_approved_date": "",
@@ -1250,7 +1251,7 @@ elif role == "Faculty Adviser":
                         st.success(w)
         st.info("For updates, contact SESAM Staff.")
 
-# ==================== STUDENT VIEW (unchanged) ====================
+# ==================== STUDENT VIEW (committee display updated) ====================
 elif role == "Student":
     st.subheader(f"📘 Your Dashboard – {st.session_state.display_name}")
     student = df[df["name"] == st.session_state.display_name].iloc[0]
@@ -1325,13 +1326,18 @@ elif role == "Student":
                     st.table(pd.DataFrame(subjects))
                 st.caption(f"Total units: {sem['total_units']}")
     
-    if student.get("committee_members"):
-        with st.expander("👥 Your Committee"):
-            st.text(student["committee_members"])
+    # ==================== UPDATED COMMITTEE DISPLAY (structured) ====================
+    committee_title = get_committee_title(student["program"])
+    members = parse_committee_members(student.get("committee_members_structured", ""))
+    if members:
+        with st.expander(f"👥 {committee_title}"):
+            for m in members:
+                st.write(f"• {m['name']} – {m['role']}")
             if student.get("committee_approval_date"):
                 st.caption(f"Approved on: {student['committee_approval_date']}")
-            if student.get("committee_voting_outcome"):
-                st.caption(f"Voting Outcome: {student['committee_voting_outcome']}")
+    else:
+        with st.expander(f"👥 {committee_title}"):
+            st.info("No committee members assigned yet.")
     
     st.caption("For updates or corrections, contact your adviser or SESAM Staff.")
 
