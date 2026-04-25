@@ -1091,7 +1091,7 @@ if role == "SESAM Staff":
                 st.rerun()
             # Show program type (read-only, derived from program)
             program_type = get_program_type(student["program"])
-            st.markdown(f"### Editing: {student['name']} ({student['student_number']}))
+            st.markdown(f"### Editing: {student['name']} ({student['student_number']})")
             
             # Workflow progress
             completed_steps = get_step_completion_status(student)
