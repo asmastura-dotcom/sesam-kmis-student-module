@@ -3,6 +3,7 @@ SESAM KMIS - Graduate Student Lifecycle Management System (Enhanced)
 Author: [Your Name]
 Date: [Current Date]
 Description: Full academic record system with per-semester blocks, editable subjects, and document validation.
+Fixed: st.column_config.SelectboxColumn, file path NaN checks, no st.button inside forms.
 """
 
 import streamlit as st
@@ -1069,6 +1070,7 @@ def get_status_badge(status):
         return '<span class="status-pending">📄 No document uploaded</span>'
 
 def render_semester_block_student(student_number, semester_row):
+    """Student view: editable subjects, Add Subject button, and document upload."""
     ay = semester_row["academic_year"]
     sem = semester_row["semester"]
     subjects = json.loads(semester_row["subjects_json"])
@@ -1102,7 +1104,7 @@ def render_semester_block_student(student_number, semester_row):
                 "course_code": "Course Code",
                 "course_description": "Course Description",
                 "units": st.column_config.NumberColumn("Units", step=1, min_value=0),
-                "grade": st.column_config.SelectColumn("Grade", options=GRADE_OPTIONS)
+                "grade": st.column_config.SelectboxColumn("Grade", options=GRADE_OPTIONS)
             },
             key=f"editor_{student_number}_{ay}_{sem}"
         )
@@ -1119,8 +1121,9 @@ def render_semester_block_student(student_number, semester_row):
         st.caption("No subjects yet. Use 'Add Subject' below.")
 
     st.markdown(f"**Semester Total Units:** {total_units}  **Semester GWA:** {gwa:.2f}")
-
     st.markdown("---")
+
+    # Add Subject form (inside a form, but no st.button inside, only st.form_submit_button)
     st.markdown("**Add a new subject**")
     with st.form(key=f"add_subject_{student_number}_{ay}_{sem}"):
         col1, col2 = st.columns(2)
@@ -1141,7 +1144,8 @@ def render_semester_block_student(student_number, semester_row):
                     "units": int(units),
                     "grade": grade
                 }
-                if add_subject_to_semester(student_number, ay, sem, new_subject):
+                success = add_subject_to_semester(student_number, ay, sem, new_subject)
+                if success:
                     st.success("Subject added!")
                     st.rerun()
                 else:
@@ -1149,7 +1153,7 @@ def render_semester_block_student(student_number, semester_row):
 
     st.markdown("---")
     st.markdown("**Upload Supporting Document (AMIS Screenshot or Grade Report)**")
-    if doc_path and os.path.exists(doc_path):
+    if doc_path and pd.notna(doc_path) and os.path.exists(str(doc_path)):
         st.info(f"Currently uploaded: {os.path.basename(doc_path)} (uploaded on {semester_row.get('doc_upload_time', 'unknown')})")
         if doc_status == "Rejected":
             st.warning("Your document was rejected. Please upload a corrected version.")
@@ -1171,6 +1175,7 @@ def render_semester_block_student(student_number, semester_row):
                 st.error("Failed to update record.")
 
 def render_semester_section_staff(student_number, semester_row):
+    """Staff view: read-only subjects and document preview."""
     ay = semester_row["academic_year"]
     sem = semester_row["semester"]
     subjects = json.loads(semester_row["subjects_json"])
@@ -1191,9 +1196,9 @@ def render_semester_section_staff(student_number, semester_row):
         st.dataframe(df_display, use_container_width=True, hide_index=True)
     st.markdown(f"**Semester Total Units:** {total_units}  **Semester GWA:** {gwa:.2f}")
 
-    if doc_path and os.path.exists(doc_path):
+    if doc_path and pd.notna(doc_path) and os.path.exists(str(doc_path)):
         st.markdown("**Uploaded Document:**")
-        if doc_path.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
+        if str(doc_path).lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
             st.image(doc_path, width=300)
         else:
             with open(doc_path, "rb") as f:
@@ -1238,8 +1243,8 @@ def render_validation_panel(records_df, students_df, role):
                 ])
                 st.dataframe(df_subj, use_container_width=True, hide_index=True)
 
-            if doc_path and os.path.exists(doc_path):
-                if doc_path.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
+            if doc_path and pd.notna(doc_path) and os.path.exists(str(doc_path)):
+                if str(doc_path).lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
                     st.image(doc_path, width=300)
                 else:
                     with open(doc_path, "rb") as f:
@@ -1312,7 +1317,7 @@ with st.sidebar:
                 del st.session_state[key]
         st.rerun()
     st.markdown("---")
-    st.caption("Version 9.0 | Per-Semester Blocks | Editable Subjects | Document Validation")
+    st.caption("Version 10.0 | Fixed: SelectboxColumn, file path checks, form buttons")
     st.caption("© SESAM 2026")
 
 # ==================== MAIN ====================
@@ -1619,8 +1624,8 @@ if role == "SESAM Staff":
                         with st.expander(f"{req['milestone_label']} - Submitted on {req['submitted_date']}"):
                             st.write(f"**Submitted:** {req['submitted_date']}")
                             file_path = req['file_path']
-                            if pd.notna(file_path) and os.path.exists(file_path):
-                                if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
+                            if pd.notna(file_path) and os.path.exists(str(file_path)):
+                                if str(file_path).lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
                                     st.image(file_path, width=200)
                                 else:
                                     st.write(f"📎 {os.path.basename(file_path)}")
@@ -1970,9 +1975,9 @@ elif role == "Student":
                 st.markdown(f"**Approved:** {student['pos_approved_date']}")
         with col2:
             pos_file = student["pos_file"]
-            if pd.notna(pos_file) and os.path.exists(pos_file):
+            if pd.notna(pos_file) and os.path.exists(str(pos_file)):
                 st.markdown("**Current POS File:**")
-                if pos_file.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                if str(pos_file).lower().endswith(('.png','.jpg','.jpeg','.gif')):
                     st.image(pos_file, width=200)
                 else:
                     st.write(f"📎 {os.path.basename(pos_file)}")
@@ -2058,9 +2063,9 @@ elif role == "Student":
                     st.markdown(f"**Outline approved:** {student['thesis_outline_approved_date']}")
             with col2:
                 outline_file = student["thesis_outline_file"]
-                if pd.notna(outline_file) and os.path.exists(outline_file):
+                if pd.notna(outline_file) and os.path.exists(str(outline_file)):
                     st.markdown("**Outline:**")
-                    if outline_file.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                    if str(outline_file).lower().endswith(('.png','.jpg','.jpeg','.gif')):
                         st.image(outline_file, width=150)
                     else:
                         st.write(f"📎 {os.path.basename(outline_file)}")
@@ -2080,7 +2085,7 @@ elif role == "Student":
                     st.success("Outline uploaded.")
                     st.rerun()
                 draft_file = student["thesis_draft_file"]
-                if pd.notna(draft_file) and os.path.exists(draft_file):
+                if pd.notna(draft_file) and os.path.exists(str(draft_file)):
                     st.markdown("**Draft:**")
                     st.write(f"📎 {os.path.basename(draft_file)}")
                 uploaded_draft = st.file_uploader("Upload draft", type=["pdf","doc","docx"], key="draft_file")
@@ -2097,7 +2102,7 @@ elif role == "Student":
                     st.success("Draft uploaded.")
                     st.rerun()
                 manuscript_file = student["thesis_manuscript_file"]
-                if pd.notna(manuscript_file) and os.path.exists(manuscript_file):
+                if pd.notna(manuscript_file) and os.path.exists(str(manuscript_file)):
                     st.markdown("**Final manuscript:**")
                     st.write(f"📎 {os.path.basename(manuscript_file)}")
                 uploaded_manuscript = st.file_uploader("Upload final manuscript", type=["pdf"], key="manuscript_file")
@@ -2127,8 +2132,8 @@ elif role == "Student":
                         st.markdown(f"**Date passed:** {student['general_exam_passed_date']}")
                 with col2:
                     g_file = student["general_exam_file"]
-                    if pd.notna(g_file) and os.path.exists(g_file):
-                        if g_file.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                    if pd.notna(g_file) and os.path.exists(str(g_file)):
+                        if str(g_file).lower().endswith(('.png','.jpg','.jpeg','.gif')):
                             st.image(g_file, width=150)
                         else:
                             st.write(f"📎 {os.path.basename(g_file)}")
@@ -2156,8 +2161,8 @@ elif role == "Student":
                         st.markdown(f"**Date passed:** {student['qualifying_exam_passed_date']}")
                 with col2:
                     q_file = student["qualifying_exam_file"]
-                    if pd.notna(q_file) and os.path.exists(q_file):
-                        if q_file.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                    if pd.notna(q_file) and os.path.exists(str(q_file)):
+                        if str(q_file).lower().endswith(('.png','.jpg','.jpeg','.gif')):
                             st.image(q_file, width=150)
                         else:
                             st.write(f"📎 {os.path.basename(q_file)}")
@@ -2185,8 +2190,8 @@ elif role == "Student":
                         st.markdown(f"**Date passed:** {student['written_comprehensive_passed_date']}")
                 with col2:
                     w_file = student["written_comprehensive_file"]
-                    if pd.notna(w_file) and os.path.exists(w_file):
-                        if w_file.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                    if pd.notna(w_file) and os.path.exists(str(w_file)):
+                        if str(w_file).lower().endswith(('.png','.jpg','.jpeg','.gif')):
                             st.image(w_file, width=150)
                         else:
                             st.write(f"📎 {os.path.basename(w_file)}")
@@ -2211,8 +2216,8 @@ elif role == "Student":
                         st.markdown(f"**Date passed:** {student['oral_comprehensive_passed_date']}")
                 with col2:
                     o_file = student["oral_comprehensive_file"]
-                    if pd.notna(o_file) and os.path.exists(o_file):
-                        if o_file.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                    if pd.notna(o_file) and os.path.exists(str(o_file)):
+                        if str(o_file).lower().endswith(('.png','.jpg','.jpeg','.gif')):
                             st.image(o_file, width=150)
                         else:
                             st.write(f"📎 {os.path.basename(o_file)}")
@@ -2248,4 +2253,4 @@ elif role == "Student":
 
 # ==================== FOOTER ====================
 st.markdown("---")
-st.caption("SESAM Graduate Lifecycle Management v9.0 | Per-Semester Blocks | Editable Subjects | Document Validation")
+st.caption("SESAM Graduate Lifecycle Management v10.0 | Fixed: column_config, file checks, form buttons")
