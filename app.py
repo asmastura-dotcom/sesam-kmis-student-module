@@ -109,7 +109,6 @@ USERS = {
     "staff1": {"password": "admin123", "role": "SESAM Staff", "display_name": "SESAM Administrator"},
     "adviser1": {"password": "adv123", "role": "Faculty Adviser", "display_name": "Dr. Eslava"},
     "adviser2": {"password": "adv456", "role": "Faculty Adviser", "display_name": "Dr. Sanchez"},
-    # Demo students (password = student number)
     "S001": {"password": "S001", "role": "Student", "display_name": "Santos, Maria Concepcion R."},
     "S002": {"password": "S002", "role": "Student", "display_name": "Dela Cruz, Jose Mari P."},
     "S003": {"password": "S003", "role": "Student", "display_name": "Fernandez, Kristoffer Ivan M."},
@@ -410,7 +409,6 @@ def add_semester_record(student_number, academic_year, semester, subjects_list, 
     return gwa
 
 def update_semester_subjects(student_number, academic_year, semester, subjects_list):
-    """Replace the subjects list of an existing semester and recalc GWA/units."""
     df = load_semester_records()
     mask = (df["student_number"] == student_number) & (df["academic_year"] == academic_year) & (df["semester"] == semester)
     if mask.any():
@@ -420,7 +418,6 @@ def update_semester_subjects(student_number, academic_year, semester, subjects_l
         df.at[idx, "subjects_json"] = json.dumps(subjects_list)
         df.at[idx, "total_units"] = total_units
         df.at[idx, "gwa"] = gwa
-        # If document already approved and subjects changed, reset status to Pending
         if df.at[idx, "doc_status"] == "Approved":
             df.at[idx, "doc_status"] = "Pending"
             df.at[idx, "doc_remarks"] = "Subjects edited; re-upload required."
@@ -1072,7 +1069,6 @@ def get_status_badge(status):
         return '<span class="status-pending">📄 No document uploaded</span>'
 
 def render_semester_block_student(student_number, semester_row):
-    """Render a single semester block with editable subjects, Add Subject button, and document upload."""
     ay = semester_row["academic_year"]
     sem = semester_row["semester"]
     subjects = json.loads(semester_row["subjects_json"])
@@ -1082,104 +1078,99 @@ def render_semester_block_student(student_number, semester_row):
     doc_path = semester_row.get("doc_path", "")
     doc_remarks = semester_row.get("doc_remarks", "")
 
-    status_badge = get_status_badge(doc_status)
-    with st.container():
-        st.markdown(f"### 📅 {ay} | {sem}")
-        st.markdown(f"**Validation Status:** {status_badge}", unsafe_allow_html=True)
-        if doc_status == "Rejected" and doc_remarks:
-            st.warning(f"**Rejection reason:** {doc_remarks}")
+    st.markdown(f"### 📅 {ay} | {sem}")
+    st.markdown(f"**Validation Status:** {get_status_badge(doc_status)}", unsafe_allow_html=True)
+    if doc_status == "Rejected" and doc_remarks:
+        st.warning(f"**Rejection reason:** {doc_remarks}")
 
-        # Editable subjects table
-        if subjects:
-            df_edit = pd.DataFrame(subjects)
-            for col in ["course_code", "course_description", "units", "grade"]:
-                if col not in df_edit.columns:
-                    if col == "course_description":
-                        df_edit["course_description"] = df_edit.get("name", "")
-                    else:
-                        df_edit[col] = ""
-            df_edit = df_edit[["course_code", "course_description", "units", "grade"]]
+    # Editable subjects table
+    if subjects:
+        df_edit = pd.DataFrame(subjects)
+        for col in ["course_code", "course_description", "units", "grade"]:
+            if col not in df_edit.columns:
+                if col == "course_description":
+                    df_edit["course_description"] = df_edit.get("name", "")
+                else:
+                    df_edit[col] = ""
+        df_edit = df_edit[["course_code", "course_description", "units", "grade"]]
 
-            edited_df = st.data_editor(
-                df_edit,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "course_code": "Course Code",
-                    "course_description": "Course Description",
-                    "units": st.column_config.NumberColumn("Units", step=1, min_value=0),
-                    "grade": st.column_config.SelectColumn("Grade", options=GRADE_OPTIONS)
-                },
-                key=f"editor_{student_number}_{ay}_{sem}"
-            )
-            if st.button("💾 Save Subjects", key=f"save_subjects_{student_number}_{ay}_{sem}"):
-                new_subjects = edited_df.to_dict("records")
-                for s in new_subjects:
-                    s["units"] = int(s["units"])
-                if update_semester_subjects(student_number, ay, sem, new_subjects):
-                    st.success("Subjects updated!")
+        edited_df = st.data_editor(
+            df_edit,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "course_code": "Course Code",
+                "course_description": "Course Description",
+                "units": st.column_config.NumberColumn("Units", step=1, min_value=0),
+                "grade": st.column_config.SelectColumn("Grade", options=GRADE_OPTIONS)
+            },
+            key=f"editor_{student_number}_{ay}_{sem}"
+        )
+        if st.button("💾 Save Subjects", key=f"save_subjects_{student_number}_{ay}_{sem}"):
+            new_subjects = edited_df.to_dict("records")
+            for s in new_subjects:
+                s["units"] = int(s["units"])
+            if update_semester_subjects(student_number, ay, sem, new_subjects):
+                st.success("Subjects updated!")
+                st.rerun()
+            else:
+                st.error("Failed to update subjects.")
+    else:
+        st.caption("No subjects yet. Use 'Add Subject' below.")
+
+    st.markdown(f"**Semester Total Units:** {total_units}  **Semester GWA:** {gwa:.2f}")
+
+    st.markdown("---")
+    st.markdown("**Add a new subject**")
+    with st.form(key=f"add_subject_{student_number}_{ay}_{sem}"):
+        col1, col2 = st.columns(2)
+        with col1:
+            code = st.text_input("Course Code", key=f"code_{ay}_{sem}")
+            units = st.number_input("Units", min_value=0, max_value=12, step=1, value=3, key=f"units_{ay}_{sem}")
+        with col2:
+            desc = st.text_input("Course Description", key=f"desc_{ay}_{sem}")
+            grade = st.selectbox("Grade", options=GRADE_OPTIONS, index=0, key=f"grade_{ay}_{sem}")
+        add_submitted = st.form_submit_button("➕ Add Subject")
+        if add_submitted:
+            if not code.strip() and not desc.strip():
+                st.error("Please enter at least a course code or description.")
+            else:
+                new_subject = {
+                    "course_code": code.strip(),
+                    "course_description": desc.strip(),
+                    "units": int(units),
+                    "grade": grade
+                }
+                if add_subject_to_semester(student_number, ay, sem, new_subject):
+                    st.success("Subject added!")
                     st.rerun()
                 else:
-                    st.error("Failed to update subjects.")
-        else:
-            st.caption("No subjects yet. Use 'Add Subject' below.")
+                    st.error("Failed to add subject.")
 
-        st.markdown(f"**Semester Total Units:** {total_units}  **Semester GWA:** {gwa:.2f}")
-
-        st.markdown("---")
-        st.markdown("**Add a new subject**")
-        with st.form(key=f"add_subject_{student_number}_{ay}_{sem}"):
-            col1, col2 = st.columns(2)
-            with col1:
-                code = st.text_input("Course Code", key=f"code_{ay}_{sem}")
-                units = st.number_input("Units", min_value=0, max_value=12, step=1, value=3, key=f"units_{ay}_{sem}")
-            with col2:
-                desc = st.text_input("Course Description", key=f"desc_{ay}_{sem}")
-                grade = st.selectbox("Grade", options=GRADE_OPTIONS, index=0, key=f"grade_{ay}_{sem}")
-            add_submitted = st.form_submit_button("➕ Add Subject")
-            if add_submitted:
-                if not code.strip() and not desc.strip():
-                    st.error("Please enter at least a course code or description.")
-                else:
-                    new_subject = {
-                        "course_code": code.strip(),
-                        "course_description": desc.strip(),
-                        "units": int(units),
-                        "grade": grade
-                    }
-                    success = add_subject_to_semester(student_number, ay, sem, new_subject)
-                    if success:
-                        st.success(f"Subject added!")
-                        st.rerun()
-                    else:
-                        st.error("Failed to add subject.")
-
-        st.markdown("---")
-        st.markdown("**Upload Supporting Document (AMIS Screenshot or Grade Report)**")
-        if doc_path and os.path.exists(doc_path):
-            st.info(f"Currently uploaded: {os.path.basename(doc_path)} (uploaded on {semester_row.get('doc_upload_time', 'unknown')})")
-            if doc_status == "Rejected":
-                st.warning("Your document was rejected. Please upload a corrected version.")
-        with st.form(key=f"upload_doc_{student_number}_{ay}_{sem}"):
-            uploaded_file = st.file_uploader("Choose file (PDF, JPG, PNG)", type=["pdf", "jpg", "jpeg", "png"], key=f"upload_{ay}_{sem}")
-            submit_upload = st.form_submit_button("📎 Upload Document")
-            if submit_upload and uploaded_file:
-                student_folder = os.path.join(UPLOAD_FOLDER, student_number, "semester_docs")
-                os.makedirs(student_folder, exist_ok=True)
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"{ay}_{sem}_{timestamp}.{uploaded_file.name.split('.')[-1].lower()}"
-                filepath = os.path.join(student_folder, filename)
-                with open(filepath, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-                success = update_semester_document(student_number, ay, sem, filepath, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Pending")
-                if success:
-                    st.success("Document uploaded! Waiting for validation.")
-                    st.rerun()
-                else:
-                    st.error("Failed to update record.")
+    st.markdown("---")
+    st.markdown("**Upload Supporting Document (AMIS Screenshot or Grade Report)**")
+    if doc_path and os.path.exists(doc_path):
+        st.info(f"Currently uploaded: {os.path.basename(doc_path)} (uploaded on {semester_row.get('doc_upload_time', 'unknown')})")
+        if doc_status == "Rejected":
+            st.warning("Your document was rejected. Please upload a corrected version.")
+    with st.form(key=f"upload_doc_{student_number}_{ay}_{sem}"):
+        uploaded_file = st.file_uploader("Choose file (PDF, JPG, PNG)", type=["pdf", "jpg", "jpeg", "png"], key=f"upload_{ay}_{sem}")
+        submit_upload = st.form_submit_button("📎 Upload Document")
+        if submit_upload and uploaded_file:
+            student_folder = os.path.join(UPLOAD_FOLDER, student_number, "semester_docs")
+            os.makedirs(student_folder, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{ay}_{sem}_{timestamp}.{uploaded_file.name.split('.')[-1].lower()}"
+            filepath = os.path.join(student_folder, filename)
+            with open(filepath, "wb") as f:
+                f.write(uploaded_file.getbuffer())
+            if update_semester_document(student_number, ay, sem, filepath, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Pending"):
+                st.success("Document uploaded! Waiting for validation.")
+                st.rerun()
+            else:
+                st.error("Failed to update record.")
 
 def render_semester_section_staff(student_number, semester_row):
-    """Staff view: read-only subjects and document preview."""
     ay = semester_row["academic_year"]
     sem = semester_row["semester"]
     subjects = json.loads(semester_row["subjects_json"])
@@ -1190,33 +1181,30 @@ def render_semester_section_staff(student_number, semester_row):
     doc_upload_time = semester_row.get("doc_upload_time", "")
     doc_remarks = semester_row.get("doc_remarks", "")
 
-    status_badge = get_status_badge(doc_status)
-    with st.container():
-        st.markdown(f"### 📅 {ay} | {sem}")
-        st.markdown(f"**Validation Status:** {status_badge}", unsafe_allow_html=True)
-        if subjects:
-            df_display = pd.DataFrame([
-                {"Course Code": s.get("course_code", ""), "Course Description": s.get("course_description", s.get("name", "")),
-                 "Units": s["units"], "Grade": s["grade"]} for s in subjects
-            ])
-            st.dataframe(df_display, use_container_width=True, hide_index=True)
-        st.markdown(f"**Semester Total Units:** {total_units}  **Semester GWA:** {gwa:.2f}")
+    st.markdown(f"### 📅 {ay} | {sem}")
+    st.markdown(f"**Validation Status:** {get_status_badge(doc_status)}", unsafe_allow_html=True)
+    if subjects:
+        df_display = pd.DataFrame([
+            {"Course Code": s.get("course_code", ""), "Course Description": s.get("course_description", s.get("name", "")),
+             "Units": s["units"], "Grade": s["grade"]} for s in subjects
+        ])
+        st.dataframe(df_display, use_container_width=True, hide_index=True)
+    st.markdown(f"**Semester Total Units:** {total_units}  **Semester GWA:** {gwa:.2f}")
 
-        if doc_path and os.path.exists(doc_path):
-            st.markdown("**Uploaded Document:**")
-            if doc_path.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
-                st.image(doc_path, width=300)
-            else:
-                with open(doc_path, "rb") as f:
-                    st.download_button("Download Document", f, file_name=os.path.basename(doc_path))
-            st.caption(f"Uploaded on: {doc_upload_time}")
-            if doc_remarks:
-                st.write(f"**Remarks:** {doc_remarks}")
+    if doc_path and os.path.exists(doc_path):
+        st.markdown("**Uploaded Document:**")
+        if doc_path.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
+            st.image(doc_path, width=300)
         else:
-            st.info("No document uploaded for this semester.")
+            with open(doc_path, "rb") as f:
+                st.download_button("Download Document", f, file_name=os.path.basename(doc_path))
+        st.caption(f"Uploaded on: {doc_upload_time}")
+        if doc_remarks:
+            st.write(f"**Remarks:** {doc_remarks}")
+    else:
+        st.info("No document uploaded for this semester.")
 
 def render_validation_panel(records_df, students_df, role):
-    """Display all pending documents grouped by student for Staff/Adviser to approve/reject."""
     if records_df.empty:
         st.info("No semester records found.")
         return
@@ -1936,7 +1924,6 @@ elif role == "Student":
             st.write("")  # vertical alignment
             add_sem_btn = st.button("📌 Add Semester", use_container_width=True)
         if add_sem_btn:
-            # Check if semester already exists
             semesters_df = get_student_semesters(student["student_number"])
             if ((semesters_df["academic_year"] == new_ay) & (semesters_df["semester"] == new_semester)).any():
                 st.warning(f"Semester {new_ay} {new_semester} already exists.")
