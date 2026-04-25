@@ -1,8 +1,8 @@
 """
-SESAM KMIS - Graduate Student Lifecycle Management System (Complete)
+SESAM KMIS - Graduate Student Lifecycle Management System (Enhanced)
 Author: [Your Name]
 Date: [Current Date]
-Description: Full rule-based graduate student lifecycle management with program-specific milestones.
+Description: No manual program type selection; automatic inference from program name. Demo data is fully consistent.
 """
 
 import streamlit as st
@@ -122,7 +122,7 @@ USERS = {
     "S013": {"password": "S013", "role": "Student", "display_name": "Aquino, Francis Joseph T."}
 }
 
-# ==================== PROGRAM CLASSIFICATION ====================
+# ==================== PROGRAM CLASSIFICATION (automatic) ====================
 PROGRAMS = [
     "MS Environmental Science",
     "PhD Environmental Science",
@@ -132,17 +132,16 @@ PROGRAMS = [
     "PhD by Research Environmental Science"
 ]
 
-PROGRAM_TYPES = {
-    "MS Environmental Science": "MS_Thesis",
-    "Master in Resilience Studies (M-ReS)": "MS_NonThesis",
-    "Professional Masters in Tropical Marine Ecosystems Management (PM-TMEM)": "MS_NonThesis",
-    "PhD Environmental Science": "PhD_Regular",
-    "PhD Environmental Diplomacy and Negotiations": "PhD_Regular",
-    "PhD by Research Environmental Science": "PhD_Research"
-}
-
+# Infer program type from program name (no manual input)
 def get_program_type(program_name):
-    return PROGRAM_TYPES.get(program_name, "MS_Thesis")
+    if program_name.startswith("MS") or program_name.startswith("Master"):
+        return "MS_Thesis" if "Resilience" not in program_name or "Environmental Science" in program_name else "MS_NonThesis"
+    elif program_name.startswith("PhD by Research"):
+        return "PhD_Research"
+    elif program_name.startswith("PhD"):
+        return "PhD_Regular"
+    else:
+        return "MS_Thesis"  # default
 
 # ==================== MILESTONE DEFINITIONS PER PROGRAM ====================
 MILESTONE_DEFS = {
@@ -582,23 +581,23 @@ def format_committee_members(members_list):
 DATA_FILE = "students.csv"
 
 def create_demo_data():
-    """Create demo students with realistic names while preserving warning scenarios."""
+    """Create demo students with realistic names and fully consistent dates."""
     data = {
         "student_number": ["S001", "S002", "S003", "S004", "S005", "S006", "S007", "S008", "S009", "S010", "S011", "S012", "S013"],
         "name": [
-            "Santos, Maria Concepcion R.",    # S001 – fully compliant
-            "Dela Cruz, Jose Mari P.",        # S002 – missing POS
-            "Fernandez, Kristoffer Ivan M.",  # S003 – PhD written failed
-            "Lopez, Maria Isabella T.",       # S004 – low GWA
-            "Villanueva, Gabriel Angelo S.",  # S005 – thesis outline not approved
-            "Reyes, Patricia Anne G.",        # S006 – MS exam missing
-            "Gomez, Emmanuel D.",             # S007 – committee deadline near
-            "Mendoza, Catherine Joy L.",      # S008 – coursework incomplete
-            "Santiago, Rommel C.",            # S009 – PhD oral failed
-            "Ramirez, Maria Lourdes E.",      # S010 – committee changed
-            "Torres, Victor Emmanuel A.",     # S011 – coursework changed
-            "Bautista, Anna Patricia F.",     # S012 – defended MS
-            "Aquino, Francis Joseph T."       # S013 – graduation applied
+            "Santos, Maria Concepcion R.",
+            "Dela Cruz, Jose Mari P.",
+            "Fernandez, Kristoffer Ivan M.",
+            "Lopez, Maria Isabella T.",
+            "Villanueva, Gabriel Angelo S.",
+            "Reyes, Patricia Anne G.",
+            "Gomez, Emmanuel D.",
+            "Mendoza, Catherine Joy L.",
+            "Santiago, Rommel C.",
+            "Ramirez, Maria Lourdes E.",
+            "Torres, Victor Emmanuel A.",
+            "Bautista, Anna Patricia F.",
+            "Aquino, Francis Joseph T."
         ],
         "last_name": ["Santos", "Dela Cruz", "Fernandez", "Lopez", "Villanueva", "Reyes", "Gomez", "Mendoza", "Santiago", "Ramirez", "Torres", "Bautista", "Aquino"],
         "first_name": ["Maria Concepcion", "Jose Mari", "Kristoffer Ivan", "Maria Isabella", "Gabriel Angelo", "Patricia Anne", "Emmanuel", "Catherine Joy", "Rommel", "Maria Lourdes", "Victor Emmanuel", "Anna Patricia", "Francis Joseph"],
@@ -723,14 +722,13 @@ def create_demo_data():
         "coursework_changed": [False, False, False, False, False, False, False, False, False, False, True, False, False]
     }
     df = pd.DataFrame(data)
-    df["program_type"] = df["program"].apply(get_program_type)
+    # No program_type column stored – we compute on the fly
     return df
 
 def load_data():
     if os.path.exists(DATA_FILE):
         df = pd.read_csv(DATA_FILE)
-        # If the CSV is old or has fewer than 13 students, regenerate demo data
-        if len(df) < 13 or "program_type" not in df.columns:
+        if len(df) < 13:
             df = create_demo_data()
             save_data(df)
     else:
@@ -753,8 +751,6 @@ def load_data():
         df["committee_members_structured"] = ""
     if "committee_approval_date" not in df.columns:
         df["committee_approval_date"] = ""
-    if "program_type" not in df.columns:
-        df["program_type"] = df["program"].apply(get_program_type)
     if "year_admitted" in df.columns and "ay_start" not in df.columns:
         df["ay_start"] = df["year_admitted"]
         df["semester"] = "1st Sem"
@@ -780,7 +776,6 @@ def load_data():
             df.at[idx, "program"] = program
         df.at[idx, "residency_max_years"] = get_residency_max_from_program(program)
         df.at[idx, "thesis_units_limit"] = get_thesis_limit_from_program(program)
-        df.at[idx, "program_type"] = get_program_type(program)
         if row["ay_start"] >= 2025:
             df.at[idx, "total_units_taken"] = 0
             df.at[idx, "written_comprehensive_status"] = "N/A"
@@ -818,6 +813,38 @@ def get_thesis_limit(program):
 
 def get_residency_max(program):
     return get_residency_max_from_program(program)
+
+# ==================== VALIDATION FUNCTIONS (data consistency) ====================
+def validate_student_data(student):
+    warnings = []
+    # POS
+    if student["pos_status"] == "Approved" and (pd.isna(student["pos_approved_date"]) or not student["pos_approved_date"]):
+        warnings.append("POS is Approved but no approval date.")
+    # Thesis outline
+    if student["thesis_outline_approved"] == "Yes" and (pd.isna(student["thesis_outline_approved_date"]) or not student["thesis_outline_approved_date"]):
+        warnings.append("Thesis outline is approved but no approval date.")
+    # Committee
+    if student["committee_approval_date"] and student["committee_approval_date"] != "":
+        # OK
+        pass
+    elif student.get("committee_members_structured") and student.get("committee_members_structured") != "":
+        # Committee members exist but no approval date
+        warnings.append("Committee members are listed but committee approval date is missing.")
+    # Exams
+    if student["qualifying_exam_status"] == "Passed" and (pd.isna(student["qualifying_exam_passed_date"]) or not student["qualifying_exam_passed_date"]):
+        warnings.append("Qualifying Exam is Passed but no date.")
+    if student["written_comprehensive_status"] == "Passed" and (pd.isna(student["written_comprehensive_passed_date"]) or not student["written_comprehensive_passed_date"]):
+        warnings.append("Written Comprehensive Exam is Passed but no date.")
+    if student["oral_comprehensive_status"] == "Passed" and (pd.isna(student["oral_comprehensive_passed_date"]) or not student["oral_comprehensive_passed_date"]):
+        warnings.append("Oral Comprehensive Exam is Passed but no date.")
+    if student["general_exam_status"] == "Passed" and (pd.isna(student["general_exam_passed_date"]) or not student["general_exam_passed_date"]):
+        warnings.append("General Exam is Passed but no date.")
+    if student["final_exam_status"] == "Passed" and (pd.isna(student["final_exam_passed_date"]) or not student["final_exam_passed_date"]):
+        warnings.append("Final Exam is Passed but no date.")
+    # Graduation
+    if student["graduation_approved"] == "Yes" and (pd.isna(student["graduation_date"]) or not student["graduation_date"]):
+        warnings.append("Graduation is approved but no graduation date.")
+    return warnings
 
 # ==================== WARNING FUNCTIONS ====================
 def get_warning_text(program, units_taken):
@@ -998,7 +1025,7 @@ with st.sidebar:
                 del st.session_state[key]
         st.rerun()
     st.markdown("---")
-    st.caption("Version 4.0 | Program-Specific Milestones")
+    st.caption("Version 5.0 | Automatic Program Type | Consistent Demo Data")
     st.caption("© SESAM 2026")
 
 # ==================== MAIN ====================
@@ -1014,11 +1041,21 @@ if role == "SESAM Staff":
     filtered_df = filter_dataframe(search, df)
     filtered_df["admitted_year"] = filtered_df.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
     if len(filtered_df) > 0:
-        display_df = filtered_df[["student_number", "name", "program", "program_type", "admitted_year", "advisor", "gwa", "pos_status", "final_exam_status"]].copy()
+        display_df = filtered_df[["student_number", "name", "program", "admitted_year", "advisor", "gwa", "pos_status", "final_exam_status"]].copy()
         display_df.rename(columns={"admitted_year": "Admitted Year", "gwa": "Cumulative GWA"}, inplace=True)
         st.dataframe(display_df, use_container_width=True, height=350)
     else:
         st.info("No students match the current search.")
+    
+    # Show data consistency warnings for staff
+    with st.expander("⚠️ Data Consistency Warnings (Admin View)", expanded=False):
+        for idx, row in filtered_df.iterrows():
+            warnings = validate_student_data(row)
+            if warnings:
+                st.warning(f"**{row['name']} ({row['student_number']})**")
+                for w in warnings:
+                    st.write(f"- {w}")
+        st.info("These warnings indicate missing dates for approved/passed milestones.")
     
     st.markdown("---")
     col1, col2 = st.columns(2)
@@ -1052,7 +1089,11 @@ if role == "SESAM Staff":
             if st.button("❌ Cancel", key="cancel_update"):
                 st.session_state.staff_show_update = False
                 st.rerun()
-            st.markdown(f"### Editing: {student['name']} ({student['student_number']}) | Program Type: {student['program_type']}")
+            # Show program type (read-only, derived from program)
+            program_type = get_program_type(student["program"])
+            st.markdown(f"### Editing: {student['name']} ({student['student_number']}) | Program Type (automatic): {program_type}")
+            
+            # Workflow progress
             completed_steps = get_step_completion_status(student)
             next_step = get_next_required_step(student)
             st.markdown("#### 🚀 Milestone Workflow")
@@ -1080,7 +1121,6 @@ if role == "SESAM Staff":
                     st.markdown(f"**Student Number:** {student['student_number']}")
                     st.markdown(f"**Full Name:** {student['name']}")
                     st.markdown(f"**Program:** {student['program']}")
-                    st.markdown(f"**Program Type:** {student['program_type']}")
                     st.markdown(f"**Advisor:** {student['advisor']}")
                     st.markdown(f"**Admitted Year:** {format_ay(student['ay_start'], student['semester'])}")
                     st.markdown(f"**Cumulative GWA (from AMIS):** {student['gwa']:.2f}")
@@ -1393,7 +1433,6 @@ if role == "SESAM Staff":
                         "first_name": first_name.strip(),
                         "middle_name": middle_name.strip(),
                         "program": program,
-                        "program_type": get_program_type(program),
                         "advisor": advisor.strip() if advisor else "Not assigned",
                         "ay_start": ay_start,
                         "semester": semester,
@@ -1509,7 +1548,7 @@ elif role == "Faculty Adviser":
         search_adv = st.text_input("🔍 Filter advisees")
         filtered = filter_dataframe(search_adv, advisees)
         filtered["admitted_year"] = filtered.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
-        display_adv = filtered[["student_number","name","program","program_type","admitted_year","gwa","thesis_units_taken","pos_status","final_exam_status"]].copy()
+        display_adv = filtered[["student_number","name","program","admitted_year","gwa","thesis_units_taken","pos_status","final_exam_status"]].copy()
         display_adv.rename(columns={"admitted_year": "Admitted Year", "gwa": "Cumulative GWA"}, inplace=True)
         st.dataframe(display_adv, use_container_width=True)
         for _, row in filtered.iterrows():
@@ -1517,7 +1556,6 @@ elif role == "Faculty Adviser":
                 col1, col2 = st.columns(2)
                 with col1:
                     st.metric("Program", row["program"])
-                    st.metric("Program Type", row["program_type"])
                     st.metric("Cumulative GWA", f"{row['gwa']:.2f}")
                     st.metric("Thesis Units", f"{row['thesis_units_taken']}/{get_thesis_limit(row['program'])}")
                 with col2:
