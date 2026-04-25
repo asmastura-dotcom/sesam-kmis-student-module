@@ -2,7 +2,7 @@
 SESAM KMIS - Graduate Student Lifecycle Management System (Enhanced)
 Author: [Your Name]
 Date: [Current Date]
-Description: Full academic record system with manual semester creation and editable subjects.
+Description: Full academic record system with per-semester blocks, editable subjects, and document validation.
 """
 
 import streamlit as st
@@ -1071,8 +1071,8 @@ def get_status_badge(status):
     else:
         return '<span class="status-pending">📄 No document uploaded</span>'
 
-def render_semester_section_student(student_number, semester_row):
-    """Student view: editable subjects, upload document, show status."""
+def render_semester_block_student(student_number, semester_row):
+    """Render a single semester block with editable subjects, Add Subject button, and document upload."""
     ay = semester_row["academic_year"]
     sem = semester_row["semester"]
     subjects = json.loads(semester_row["subjects_json"])
@@ -1083,8 +1083,8 @@ def render_semester_section_student(student_number, semester_row):
     doc_remarks = semester_row.get("doc_remarks", "")
 
     status_badge = get_status_badge(doc_status)
-    expander_label = f"📅 {ay} | {sem} (Total Units: {total_units} | GWA: {gwa:.2f})"
-    with st.expander(expander_label, expanded=False):
+    with st.container():
+        st.markdown(f"### 📅 {ay} | {sem}")
         st.markdown(f"**Validation Status:** {status_badge}", unsafe_allow_html=True)
         if doc_status == "Rejected" and doc_remarks:
             st.warning(f"**Rejection reason:** {doc_remarks}")
@@ -1092,7 +1092,6 @@ def render_semester_section_student(student_number, semester_row):
         # Editable subjects table
         if subjects:
             df_edit = pd.DataFrame(subjects)
-            # Ensure columns exist
             for col in ["course_code", "course_description", "units", "grade"]:
                 if col not in df_edit.columns:
                     if col == "course_description":
@@ -1101,7 +1100,6 @@ def render_semester_section_student(student_number, semester_row):
                         df_edit[col] = ""
             df_edit = df_edit[["course_code", "course_description", "units", "grade"]]
 
-            # Use data_editor for inline editing
             edited_df = st.data_editor(
                 df_edit,
                 use_container_width=True,
@@ -1115,13 +1113,11 @@ def render_semester_section_student(student_number, semester_row):
                 key=f"editor_{student_number}_{ay}_{sem}"
             )
             if st.button("💾 Save Subjects", key=f"save_subjects_{student_number}_{ay}_{sem}"):
-                # Convert back to list of dicts
                 new_subjects = edited_df.to_dict("records")
-                # Ensure units are int
                 for s in new_subjects:
                     s["units"] = int(s["units"])
                 if update_semester_subjects(student_number, ay, sem, new_subjects):
-                    st.success("Subjects updated successfully!")
+                    st.success("Subjects updated!")
                     st.rerun()
                 else:
                     st.error("Failed to update subjects.")
@@ -1131,7 +1127,7 @@ def render_semester_section_student(student_number, semester_row):
         st.markdown(f"**Semester Total Units:** {total_units}  **Semester GWA:** {gwa:.2f}")
 
         st.markdown("---")
-        st.markdown("**Add a new subject to this semester**")
+        st.markdown("**Add a new subject**")
         with st.form(key=f"add_subject_{student_number}_{ay}_{sem}"):
             col1, col2 = st.columns(2)
             with col1:
@@ -1153,7 +1149,7 @@ def render_semester_section_student(student_number, semester_row):
                     }
                     success = add_subject_to_semester(student_number, ay, sem, new_subject)
                     if success:
-                        st.success(f"Subject added to {ay} {sem}!")
+                        st.success(f"Subject added!")
                         st.rerun()
                     else:
                         st.error("Failed to add subject.")
@@ -1195,17 +1191,13 @@ def render_semester_section_staff(student_number, semester_row):
     doc_remarks = semester_row.get("doc_remarks", "")
 
     status_badge = get_status_badge(doc_status)
-    expander_label = f"📅 {ay} | {sem} (Total Units: {total_units} | GWA: {gwa:.2f})"
-    with st.expander(expander_label, expanded=False):
+    with st.container():
+        st.markdown(f"### 📅 {ay} | {sem}")
         st.markdown(f"**Validation Status:** {status_badge}", unsafe_allow_html=True)
         if subjects:
             df_display = pd.DataFrame([
-                {
-                    "Course Code": s.get("course_code", ""),
-                    "Course Description": s.get("course_description", s.get("name", "")),
-                    "Units": s["units"],
-                    "Grade": s["grade"]
-                } for s in subjects
+                {"Course Code": s.get("course_code", ""), "Course Description": s.get("course_description", s.get("name", "")),
+                 "Units": s["units"], "Grade": s["grade"]} for s in subjects
             ])
             st.dataframe(df_display, use_container_width=True, hide_index=True)
         st.markdown(f"**Semester Total Units:** {total_units}  **Semester GWA:** {gwa:.2f}")
@@ -1332,7 +1324,7 @@ with st.sidebar:
                 del st.session_state[key]
         st.rerun()
     st.markdown("---")
-    st.caption("Version 8.0 | Editable Subjects | Manual Semester Creation")
+    st.caption("Version 9.0 | Per-Semester Blocks | Editable Subjects | Document Validation")
     st.caption("© SESAM 2026")
 
 # ==================== MAIN ====================
@@ -1448,7 +1440,7 @@ if role == "SESAM Staff":
                     st.markdown(f"**Admitted Year:** {format_ay(student['ay_start'], student['semester'])}")
                     st.markdown(f"**Cumulative GWA:** {student['gwa']:.2f}")
 
-            with tabs[1]:  # Coursework (Staff read-only with validation status)
+            with tabs[1]:  # Coursework (Staff view: read-only semester blocks)
                 st.subheader("Student's Academic Record")
                 semesters = get_student_semesters(student["student_number"])
                 if semesters.empty:
@@ -1820,7 +1812,7 @@ elif role == "Faculty Adviser":
                     st.warning(w) if "⚠️" in w else st.success(w)
         st.info("For updates, contact SESAM Staff.")
 
-# ==================== STUDENT VIEW ====================
+# ==================== STUDENT VIEW (ENHANCED) ====================
 elif role == "Student":
     st.subheader(f"📘 Your Dashboard – {st.session_state.display_name}")
     student = df[df["name"] == st.session_state.display_name].iloc[0].copy()
@@ -1929,28 +1921,29 @@ elif role == "Student":
             st.markdown(f"**Adviser:** {student['advisor']}")
             st.markdown(f"**Admitted Year:** {format_ay(student['ay_start'], student['semester'])}")
 
-    with tabs[tab_index]:  # Coursework (Student view with manual semester creation and editable subjects)
+    with tabs[tab_index]:  # Coursework (new top-level AY/Semester selection + Add Semester button)
         tab_index += 1
         st.subheader("📚 Your Academic Record")
 
-        # Manual semester creation
-        st.markdown("### Add a New Semester (Manual)")
-        with st.form(key="manual_semester_form"):
-            col_ay, col_sem = st.columns(2)
-            with col_ay:
-                new_ay = st.selectbox("Academic Year", ACADEMIC_YEARS, key="manual_ay")
-            with col_sem:
-                new_semester = st.selectbox("Semester", SEMESTERS, key="manual_sem")
-            create_btn = st.form_submit_button("📌 Create New Semester")
-            if create_btn:
-                # Check if semester already exists
-                semesters_df = get_student_semesters(student["student_number"])
-                if ((semesters_df["academic_year"] == new_ay) & (semesters_df["semester"] == new_semester)).any():
-                    st.warning(f"Semester {new_ay} {new_semester} already exists.")
-                else:
-                    add_semester_record(student["student_number"], new_ay, new_semester, [])
-                    st.success(f"Created new semester: {new_ay} {new_semester}")
-                    st.rerun()
+        # Top-level selection for AY and Semester (horizontal layout)
+        st.markdown("### Add a New Semester")
+        col_top1, col_top2, col_top3 = st.columns([2, 2, 1])
+        with col_top1:
+            new_ay = st.selectbox("Academic Year", ACADEMIC_YEARS, key="new_sem_ay")
+        with col_top2:
+            new_semester = st.selectbox("Semester", SEMESTERS, key="new_sem_sem")
+        with col_top3:
+            st.write("")  # vertical alignment
+            add_sem_btn = st.button("📌 Add Semester", use_container_width=True)
+        if add_sem_btn:
+            # Check if semester already exists
+            semesters_df = get_student_semesters(student["student_number"])
+            if ((semesters_df["academic_year"] == new_ay) & (semesters_df["semester"] == new_semester)).any():
+                st.warning(f"Semester {new_ay} {new_semester} already exists.")
+            else:
+                add_semester_record(student["student_number"], new_ay, new_semester, [])
+                st.success(f"Created new semester: {new_ay} {new_semester}")
+                st.rerun()
 
         st.markdown("---")
         st.subheader("Existing Semesters")
@@ -1959,7 +1952,7 @@ elif role == "Student":
             st.info("No semesters yet. Use the form above to add your first semester.")
         else:
             for _, sem_row in semesters.iterrows():
-                render_semester_section_student(student["student_number"], sem_row)
+                render_semester_block_student(student["student_number"], sem_row)
 
         st.markdown("---")
         st.subheader("📊 Cumulative Summary")
@@ -1977,8 +1970,7 @@ elif role == "Student":
         with col4:
             st.metric("Cumulative GWA", f"{cum_gwa:.2f}")
 
-    # The rest of the tabs (Plan of Study, Committee, Milestone Tracker, etc.) unchanged
-
+    # Rest of the tabs (Plan of Study, Committee, Milestone Tracker, etc.) unchanged
     with tabs[tab_index]:  # Plan of Study
         tab_index += 1
         st.subheader("📄 Plan of Study (POS)")
@@ -2134,7 +2126,7 @@ elif role == "Student":
                     st.rerun()
             st.caption(get_thesis_pattern_description(student["program"]))
 
-    # Examinations tab (if applicable)
+    # Examinations tab
     if program_type in ["MS_Thesis", "MS_NonThesis", "PhD_Regular", "PhD_Straight"] and tab_index < len(tabs):
         with tabs[tab_index]:
             tab_index += 1
@@ -2269,4 +2261,4 @@ elif role == "Student":
 
 # ==================== FOOTER ====================
 st.markdown("---")
-st.caption("SESAM Graduate Lifecycle Management v8.0 | Editable Subjects | Manual Semester Creation | Document Validation")
+st.caption("SESAM Graduate Lifecycle Management v9.0 | Per-Semester Blocks | Editable Subjects | Document Validation")
