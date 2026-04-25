@@ -1018,24 +1018,318 @@ if role == "SESAM Staff":
         st.session_state.staff_show_update = False
         st.rerun()
     
-    # ==================== UPDATE STUDENT FORM (simplified, keep existing but add program_type) ====================
-    if st.session_state.staff_show_update:
-        st.subheader("✏️ Update Student Record")
-        if len(filtered_df) == 0:
-            st.warning("No students available to edit.")
+# ==================== UPDATE STUDENT FORM (full) ====================
+if st.session_state.staff_show_update:
+    st.subheader("✏️ Update Student Record")
+    if len(filtered_df) == 0:
+        st.warning("No students available to edit.")
+    else:
+        selected_student_name = st.selectbox("Select a student to edit", options=filtered_df["name"].tolist(), key="staff_update_select")
+        student = filtered_df[filtered_df["name"] == selected_student_name].iloc[0].copy()
+        if st.button("❌ Cancel", key="cancel_update"):
+            st.session_state.staff_show_update = False
+            st.rerun()
+        st.markdown(f"### Editing: {student['name']} ({student['student_number']}) | Program Type: {student['program_type']}")
+        completed_steps = get_step_completion_status(student)
+        next_step = get_next_required_step(student)
+        st.markdown("#### 🚀 Milestone Workflow")
+        display_workflow_grid(completed_steps, next_step)
+        if next_step != "Complete":
+            if is_step_locked(student, next_step):
+                st.warning(f"🔒 **{next_step} is locked** – complete previous steps first.")
+            else:
+                st.info(f"🎯 **Next Required Step:** {next_step}")
         else:
-            selected_student_name = st.selectbox("Select a student to edit", options=filtered_df["name"].tolist(), key="staff_update_select")
-            student = filtered_df[filtered_df["name"] == selected_student_name].iloc[0].copy()
-            if st.button("❌ Cancel", key="cancel_update"):
-                st.session_state.staff_show_update = False
+            st.success("🎉 All milestones completed! Ready for graduation.")
+        
+        tab_labels = ["📝 Info", "📚 Coursework", "📝 Exams", "🏠 Residency", "🎓 Graduation", "👥 Committee", "📁 Docs", "📖 Semesters", "✅ Requests"]
+        tabs = st.tabs(tab_labels)
+        
+        with tabs[0]:  # Info
+            col1, col2 = st.columns([1,2])
+            with col1:
+                pic_path = get_profile_picture_path(student["student_number"])
+                if pic_path and os.path.exists(pic_path):
+                    st.image(pic_path, width=150)
+                else:
+                    st.info("No profile picture")
+            with col2:
+                st.markdown(f"**Student Number:** {student['student_number']}")
+                st.markdown(f"**Full Name:** {student['name']}")
+                st.markdown(f"**Program:** {student['program']}")
+                st.markdown(f"**Program Type:** {student['program_type']}")
+                st.markdown(f"**Advisor:** {student['advisor']}")
+                st.markdown(f"**Admitted Year:** {format_ay(student['ay_start'], student['semester'])}")
+                st.markdown(f"**Cumulative GWA (from AMIS):** {student['gwa']:.2f}")
+        
+        with tabs[1]:  # Coursework & Thesis
+            locked = is_step_locked(student, "Coursework")
+            if locked:
+                st.warning("🔒 Coursework step locked until Committee approved.")
+            with st.form("staff_coursework"):
+                st.subheader("Plan of Study")
+                pos_status = st.selectbox("POS Status", ["Not Filed","Pending","Approved"], index=safe_index(["Not Filed","Pending","Approved"], student["pos_status"]), disabled=locked)
+                pos_submitted = st.text_input("Submitted Date", student["pos_submitted_date"], disabled=locked)
+                pos_approved = st.text_input("Approved Date", student["pos_approved_date"], disabled=locked)
+                st.subheader("Coursework")
+                gwa_manual = st.number_input("GWA (manual fallback)", min_value=1.0, max_value=5.0, value=float(student["gwa"]), disabled=locked)
+                total_units_taken = st.number_input("Total Units Taken", min_value=0, value=int(student["total_units_taken"]), disabled=locked)
+                total_units_required = st.number_input("Required Units", min_value=0, value=int(student["total_units_required"]), disabled=locked)
+                progress = compute_coursework_progress(student)
+                st.progress(progress/100, text=f"Coursework completion: {progress}% ({student['total_units_taken']} / {student['total_units_required']} units)")
+                st.subheader("Thesis/Dissertation")
+                thesis_units = st.number_input("Thesis Units Taken", min_value=0, value=int(student["thesis_units_taken"]), disabled=locked)
+                st.caption(get_thesis_pattern_description(student["program"]))
+                outline_approved = st.selectbox("Outline Approved", ["Yes","No"], index=safe_index(["Yes","No"], student["thesis_outline_approved"]), disabled=locked)
+                outline_date = st.text_input("Outline Approval Date", student["thesis_outline_approved_date"], disabled=locked)
+                thesis_status = st.selectbox("Thesis Status", ["Not Started","In Progress","Draft with Adviser","For Committee Review","Approved","Submitted"], index=safe_index(["Not Started","In Progress","Draft with Adviser","For Committee Review","Approved","Submitted"], student["thesis_status"]), disabled=locked)
+                if st.form_submit_button("Update"):
+                    if not locked:
+                        df.loc[df["student_number"]==student["student_number"], 
+                               ["pos_status","pos_submitted_date","pos_approved_date","gwa","total_units_taken","total_units_required","thesis_units_taken","thesis_outline_approved","thesis_outline_approved_date","thesis_status"]] = \
+                               [pos_status, pos_submitted, pos_approved, gwa_manual, total_units_taken, total_units_required, thesis_units, outline_approved, outline_date, thesis_status]
+                        save_data(df)
+                        st.success("Updated")
+                        st.rerun()
+                    else:
+                        st.error("Locked step cannot be edited")
+        
+        with tabs[2]:  # Exams
+            locked = is_step_locked(student, "Exams")
+            if locked:
+                st.warning("🔒 Exams step locked until Coursework completed.")
+            with st.form("staff_exams"):
+                st.subheader("Examinations")
+                qual = st.selectbox("Qualifying Exam (PhD)", ["N/A","Not Taken","Passed","Failed","Re-exam Scheduled"], index=safe_index(["N/A","Not Taken","Passed","Failed","Re-exam Scheduled"], student["qualifying_exam_status"]), disabled=locked)
+                qual_date = st.text_input("Qualifying Passed Date", student["qualifying_exam_passed_date"], disabled=locked)
+                written = st.selectbox("Written Comprehensive", ["N/A","Not Taken","Passed","Failed"], index=safe_index(["N/A","Not Taken","Passed","Failed"], student["written_comprehensive_status"]), disabled=locked)
+                written_date = st.text_input("Written Passed Date", student["written_comprehensive_passed_date"], disabled=locked)
+                oral = st.selectbox("Oral Comprehensive", ["N/A","Not Taken","Passed","Failed"], index=safe_index(["N/A","Not Taken","Passed","Failed"], student["oral_comprehensive_status"]), disabled=locked)
+                oral_date = st.text_input("Oral Passed Date", student["oral_comprehensive_passed_date"], disabled=locked)
+                general = st.selectbox("General Exam (MS)", ["N/A","Not Taken","Passed","Failed"], index=safe_index(["N/A","Not Taken","Passed","Failed"], student["general_exam_status"]), disabled=locked)
+                general_date = st.text_input("General Passed Date", student["general_exam_passed_date"], disabled=locked)
+                final = st.selectbox("Final Exam", ["Not Taken","Passed","Failed","Re-exam Scheduled"], index=safe_index(["Not Taken","Passed","Failed","Re-exam Scheduled"], student["final_exam_status"]), disabled=locked)
+                final_date = st.text_input("Final Passed Date", student["final_exam_passed_date"], disabled=locked)
+                if st.form_submit_button("Update Exams"):
+                    if not locked:
+                        df.loc[df["student_number"]==student["student_number"], 
+                               ["qualifying_exam_status","qualifying_exam_passed_date","written_comprehensive_status","written_comprehensive_passed_date","oral_comprehensive_status","oral_comprehensive_passed_date","general_exam_status","general_exam_passed_date","final_exam_status","final_exam_passed_date"]] = \
+                               [qual, qual_date, written, written_date, oral, oral_date, general, general_date, final, final_date]
+                        save_data(df)
+                        st.success("Updated")
+                        st.rerun()
+                    else:
+                        st.error("Locked step cannot be edited")
+        
+        with tabs[3]:  # Residency
+            with st.form("staff_residency"):
+                residency_used = st.number_input("Years of Residence Used", min_value=0, value=int(student["residency_years_used"]))
+                max_years = get_residency_max(student["program"])
+                st.info(f"Maximum allowed: {max_years} years")
+                extension_count = st.number_input("Extensions Granted", min_value=0, value=int(student["extension_count"]))
+                extension_end = st.text_input("Extension End Date", student["extension_end_date"])
+                loa_start = st.text_input("LOA Start Date", student["loa_start_date"])
+                loa_end = st.text_input("LOA End Date", student["loa_end_date"])
+                loa_terms = st.number_input("Total LOA Terms", min_value=0, value=int(student["loa_total_terms"]))
+                awol = st.selectbox("AWOL Status", ["No","Yes"], index=safe_index(["No","Yes"], student["awol_status"]))
+                awol_lifted = st.text_input("AWOL Lifted Date", student["awol_lifted_date"])
+                if st.form_submit_button("Update Residency & Leave"):
+                    df.loc[df["student_number"]==student["student_number"], 
+                           ["residency_years_used","extension_count","extension_end_date","loa_start_date","loa_end_date","loa_total_terms","awol_status","awol_lifted_date"]] = \
+                           [residency_used, extension_count, extension_end, loa_start, loa_end, loa_terms, awol, awol_lifted]
+                    save_data(df)
+                    st.success("Updated")
+                    st.rerun()
+        
+        with tabs[4]:  # Graduation
+            defense_done = "Defense" in get_step_completion_status(student)
+            if not defense_done:
+                st.warning("🔒 Graduation locked until Final Exam passed.")
+            with st.form("staff_graduation"):
+                grad_applied = st.selectbox("Graduation Applied", ["No","Yes"], index=safe_index(["No","Yes"], student["graduation_applied"]), disabled=not defense_done)
+                grad_approved = st.selectbox("Graduation Approved", ["No","Yes"], index=safe_index(["No","Yes"], student["graduation_approved"]), disabled=not defense_done)
+                grad_date = st.text_input("Graduation Date", student["graduation_date"], disabled=not defense_done)
+                transfer_units = st.number_input("Transfer Credits Approved (max 9)", min_value=0, max_value=9, value=int(student["transfer_units_approved"]))
+                if st.form_submit_button("Update Graduation"):
+                    if defense_done or (grad_applied=="No" and grad_approved=="No"):
+                        df.loc[df["student_number"]==student["student_number"], 
+                               ["graduation_applied","graduation_approved","graduation_date","transfer_units_approved"]] = \
+                               [grad_applied, grad_approved, grad_date, transfer_units]
+                        save_data(df)
+                        st.success("Updated")
+                        st.rerun()
+                    else:
+                        st.error("Cannot approve graduation before Final Exam")
+        
+        with tabs[5]:  # Committee
+            committee_title = get_committee_title(student["program"])
+            st.subheader(f"👥 {committee_title}")
+            existing_members = parse_committee_members(student.get("committee_members_structured", ""))
+            if f"committee_members_{student['student_number']}" not in st.session_state:
+                st.session_state[f"committee_members_{student['student_number']}"] = existing_members
+            members = st.session_state[f"committee_members_{student['student_number']}"]
+            st.write("**Current Committee Members:**")
+            for idx, member in enumerate(members):
+                col1, col2, col3 = st.columns([3, 3, 1])
+                with col1:
+                    name = st.text_input(f"Name", value=member["name"], key=f"name_{student['student_number']}_{idx}")
+                with col2:
+                    role_options = ["Chair (Major Professor)", "Chair (Adviser)", "Member", "Co-Chair", "Secretary", "External Member"]
+                    if committee_title == "Guidance Committee":
+                        default_role = "Chair (Major Professor)" if idx == 0 else "Member"
+                    else:
+                        default_role = "Chair (Adviser)" if idx == 0 else "Member"
+                    try:
+                        role_idx = role_options.index(member["role"])
+                    except ValueError:
+                        role_idx = role_options.index(default_role)
+                    role = st.selectbox(f"Role", options=role_options, index=role_idx, key=f"role_{student['student_number']}_{idx}")
+                with col3:
+                    if st.button("❌", key=f"remove_{student['student_number']}_{idx}"):
+                        members.pop(idx)
+                        st.rerun()
+                members[idx] = {"name": name, "role": role}
+            if st.button("➕ Add Member", key=f"add_member_{student['student_number']}"):
+                members.append({"name": "", "role": "Member"})
                 st.rerun()
-            st.markdown(f"### Editing: {student['name']} ({student['student_number']}) | Type: {student['program_type']}")
-            # Keep the same tabs as before, but adding program_type is enough; the student view will adapt.
-            # We'll reuse the existing tabs (Info, Coursework, Exams, etc.) for staff.
-            # For brevity, we omit the full tab implementation here (it's identical to previous versions).
-            # In a full script, you would keep all the tabs from the previous compact version.
-            # I'll include a placeholder message; in the final code, these tabs are fully implemented.
-            st.info("Full update form available in the complete script (tabs for coursework, exams, residency, graduation, committee, documents, semesters, requests).")
+            committee_approval_date = st.text_input("Committee Approval Date (YYYY-MM-DD)", student.get("committee_approval_date", ""))
+            if st.button("💾 Save Committee", key=f"save_committee_{student['student_number']}"):
+                valid_members = [m for m in members if m["name"].strip()]
+                if not valid_members:
+                    st.error("At least one committee member is required.")
+                else:
+                    structured_str = format_committee_members(valid_members)
+                    df.loc[df["student_number"] == student["student_number"], "committee_members_structured"] = structured_str
+                    df.loc[df["student_number"] == student["student_number"], "committee_approval_date"] = committee_approval_date
+                    save_data(df)
+                    st.success("Committee saved!")
+                    st.rerun()
+        
+        with tabs[6]:  # Documents
+            st.subheader("📎 Document Submissions")
+            uploads = get_all_uploads_for_student(student["student_number"])
+            if len(uploads)==0:
+                st.info("No documents uploaded.")
+            else:
+                for _, doc in uploads.iterrows():
+                    with st.expander(f"{UPLOAD_DISPLAY_NAMES[doc['category']]} – {doc['original_filename']} (Status: {doc['status']})"):
+                        st.write(f"Uploaded: {doc['upload_date']}")
+                        if doc['status']=="Pending":
+                            comment = st.text_area("Reviewer Comment", key=f"comm_{doc['category']}_{doc['upload_date']}")
+                            col_a, col_b = st.columns(2)
+                            with col_a:
+                                if st.button("✅ Approve", key=f"app_{doc['category']}_{doc['upload_date']}"):
+                                    uploads.loc[doc.name, "status"] = "Approved"
+                                    uploads.loc[doc.name, "reviewer_comment"] = comment
+                                    uploads.loc[doc.name, "reviewed_by"] = st.session_state.display_name
+                                    uploads.loc[doc.name, "review_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    save_uploads(uploads)
+                                    st.rerun()
+                            with col_b:
+                                if st.button("❌ Reject", key=f"rej_{doc['category']}_{doc['upload_date']}"):
+                                    uploads.loc[doc.name, "status"] = "Rejected"
+                                    uploads.loc[doc.name, "reviewer_comment"] = comment
+                                    uploads.loc[doc.name, "reviewed_by"] = st.session_state.display_name
+                                    uploads.loc[doc.name, "review_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    save_uploads(uploads)
+                                    st.rerun()
+                        else:
+                            st.write(f"Reviewer: {doc['reviewed_by']} on {doc['review_date']}")
+                            st.write(f"Comment: {doc['reviewer_comment']}")
+        
+        with tabs[7]:  # Semester History
+            st.subheader("📚 Academic Semester Records")
+            semesters = get_student_semesters(student["student_number"])
+            if len(semesters)==0:
+                st.info("No semester records. Add below.")
+            else:
+                for _, sem in semesters.iterrows():
+                    with st.expander(f"📅 {sem['academic_year']} | {sem['semester']} | GWA: {sem['gwa']:.2f}"):
+                        subjects = json.loads(sem["subjects_json"])
+                        if subjects:
+                            st.table(pd.DataFrame(subjects))
+                        st.caption(f"Total Units: {sem['total_units']}")
+                        amis_path = sem['amis_file_path']
+                        if pd.notna(amis_path) and str(amis_path).strip():
+                            st.write(f"📎 AMIS: {os.path.basename(amis_path)}")
+            st.subheader("➕ Add New Semester")
+            with st.form("add_semester_staff"):
+                col_ay, col_sem = st.columns(2)
+                with col_ay:
+                    academic_year = st.selectbox("Academic Year", ACADEMIC_YEARS)
+                with col_sem:
+                    semester = st.selectbox("Semester", SEMESTERS)
+                num_subjects = st.number_input("Number of Subjects", min_value=1, max_value=10, value=1)
+                subjects = []
+                for i in range(num_subjects):
+                    cols = st.columns(3)
+                    with cols[0]:
+                        name = st.text_input(f"Subject {i+1} Name", key=f"subj_name_{i}")
+                    with cols[1]:
+                        units = st.number_input(f"Units", min_value=0.0, step=0.5, key=f"subj_units_{i}")
+                    with cols[2]:
+                        grade = st.number_input(f"Grade (1.0-5.0)", min_value=1.0, max_value=5.0, step=0.01, key=f"subj_grade_{i}")
+                    if name and units>0:
+                        subjects.append({"name": name, "units": units, "grade": grade})
+                amis_file = st.file_uploader("AMIS Screenshot (optional)", type=["png","jpg","jpeg","pdf"])
+                if st.form_submit_button("Save Semester"):
+                    if subjects:
+                        amis_path = save_uploaded_file(student["student_number"], "amis_screenshot", amis_file) if amis_file else ""
+                        add_semester_record(student["student_number"], academic_year, semester, subjects, amis_path)
+                        st.success("Semester added and GWA recalculated")
+                        st.rerun()
+                    else:
+                        st.error("Add at least one subject")
+        
+        with tabs[8]:  # Milestone Requests (validation of student submissions)
+            st.subheader("📌 Pending Milestone Validations")
+            requests_df = load_milestone_requests()
+            student_requests = requests_df[requests_df["student_number"] == student["student_number"]].copy()
+            pending = student_requests[student_requests["status"] == "Pending"]
+            if len(pending) == 0:
+                st.info("No pending milestone requests for this student.")
+            else:
+                for _, req in pending.iterrows():
+                    with st.expander(f"{req['milestone_label']} - Submitted on {req['submitted_date']}"):
+                        st.write(f"**Submitted:** {req['submitted_date']}")
+                        file_path = req['file_path']
+                        if pd.notna(file_path) and os.path.exists(file_path):
+                            if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
+                                st.image(file_path, width=200)
+                            else:
+                                st.write(f"📎 {os.path.basename(file_path)}")
+                        else:
+                            st.warning("File not found.")
+                        comment = st.text_area("Reviewer Remarks", key=f"review_comment_{req['request_id']}")
+                        col_a, col_b = st.columns(2)
+                        with col_a:
+                            if st.button("✅ Approve", key=f"approve_{req['request_id']}"):
+                                target_field = req['target_field']
+                                target_value = req['target_value']
+                                df.loc[df["student_number"] == student["student_number"], target_field] = target_value
+                                if target_field == "pos_status":
+                                    df.loc[df["student_number"] == student["student_number"], "pos_approved_date"] = datetime.now().strftime("%Y-%m-%d")
+                                elif target_field == "thesis_outline_approved":
+                                    df.loc[df["student_number"] == student["student_number"], "thesis_outline_approved_date"] = datetime.now().strftime("%Y-%m-%d")
+                                elif target_field == "graduation_applied":
+                                    df.loc[df["student_number"] == student["student_number"], "graduation_date"] = datetime.now().strftime("%Y-%m-%d")
+                                requests_df.loc[req.name, "status"] = "Approved"
+                                requests_df.loc[req.name, "reviewer_comment"] = comment
+                                requests_df.loc[req.name, "reviewed_by"] = st.session_state.display_name
+                                requests_df.loc[req.name, "review_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                save_milestone_requests(requests_df)
+                                save_data(df)
+                                st.success("Approved!")
+                                st.rerun()
+                        with col_b:
+                            if st.button("❌ Reject", key=f"reject_{req['request_id']}"):
+                                requests_df.loc[req.name, "status"] = "Rejected"
+                                requests_df.loc[req.name, "reviewer_comment"] = comment
+                                requests_df.loc[req.name, "reviewed_by"] = st.session_state.display_name
+                                requests_df.loc[req.name, "review_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                save_milestone_requests(requests_df)
+                                st.warning("Rejected.")
+                                st.rerun()
     
     # ==================== ADD NEW STUDENT FORM ====================
     if st.session_state.staff_show_add:
