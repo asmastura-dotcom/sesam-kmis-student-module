@@ -1080,7 +1080,7 @@ if role == "SESAM Staff":
     
     # ==================== UPDATE STUDENT FORM ====================
     if st.session_state.staff_show_update:
-    st.subheader("✏️ Update Student Record")
+     st.subheader("✏️ Update Student Record")
     if len(filtered_df) == 0:
         st.warning("No students available to edit.")
     else:
