@@ -2,7 +2,7 @@
 SESAM KMIS - Graduate Student Lifecycle Management System (Complete + Demo Data)
 Author: [Your Name]
 Date: [Current Date]
-Description: Full workflow-based lifecycle management with demo students showcasing all warning scenarios.
+Description: Full workflow-based lifecycle management with 13 demo students showcasing all warning scenarios.
 """
 
 import streamlit as st
@@ -101,20 +101,26 @@ def show_consent_form():
             log_consent(st.session_state.username, st.session_state.role, st.session_state.display_name)
             st.rerun()
 
-# ==================== USER AUTH (enhanced with demo students) ====================
+# ==================== USER AUTH (includes demo students) ====================
 USERS = {
+    # Staff and advisers
     "staff1": {"password": "admin123", "role": "SESAM Staff", "display_name": "SESAM Administrator"},
     "adviser1": {"password": "adv123", "role": "Faculty Adviser", "display_name": "Dr. Eslava"},
     "adviser2": {"password": "adv456", "role": "Faculty Adviser", "display_name": "Dr. Sanchez"},
-    # Demo student accounts
-    "student_good": {"password": "good123", "role": "Student", "display_name": "All Good, Ana"},
-    "student_multiple": {"password": "multi123", "role": "Student", "display_name": "Multiple Issues, Mark"},
-    "student_missingpos": {"password": "pos123", "role": "Student", "display_name": "Missing POS, Paul"},
-    "student_lowgwa": {"password": "gwa123", "role": "Student", "display_name": "Low GWA, Grace"},
-    "student_thesis": {"password": "thesis123", "role": "Student", "display_name": "Thesis Outline, Theo"},
-    "student_exam": {"password": "exam123", "role": "Student", "display_name": "Exam Missing, Emma"},
-    "student_upload": {"password": "upload123", "role": "Student", "display_name": "Upload Missing, Ulysses"},
-    "student_phd": {"password": "phd123", "role": "Student", "display_name": "PhD Issues, Patricia"}
+    # Demo students (password = student number)
+    "S001": {"password": "S001", "role": "Student", "display_name": "Fully Compliant, Fiona"},
+    "S002": {"password": "S002", "role": "Student", "display_name": "Missing POS, Paul"},
+    "S003": {"password": "S003", "role": "Student", "display_name": "PhD Written Failed, Peter"},
+    "S004": {"password": "S004", "role": "Student", "display_name": "Low GWA, Grace"},
+    "S005": {"password": "S005", "role": "Student", "display_name": "Thesis Outline, Theo"},
+    "S006": {"password": "S006", "role": "Student", "display_name": "MS Exam Missing, Emma"},
+    "S007": {"password": "S007", "role": "Student", "display_name": "Committee Deadline, Chris"},
+    "S008": {"password": "S008", "role": "Student", "display_name": "Coursework Incomplete, Carla"},
+    "S009": {"password": "S009", "role": "Student", "display_name": "PhD Oral Failed, Olivia"},
+    "S010": {"password": "S010", "role": "Student", "display_name": "Committee Changed, Charles"},
+    "S011": {"password": "S011", "role": "Student", "display_name": "Coursework Changed, Cathy"},
+    "S012": {"password": "S012", "role": "Student", "display_name": "Defended MS, Daniel"},
+    "S013": {"password": "S013", "role": "Student", "display_name": "Graduation Applied, Gina"}
 }
 
 # ==================== PROGRAM DEFINITIONS ====================
@@ -430,266 +436,351 @@ def parse_committee_members(members_str):
 def format_committee_members(members_list):
     return "\n".join([f"{m['name']}|{m['role']}" for m in members_list])
 
-# ==================== ENHANCED DEMO DATA ====================
+# ==================== ENHANCED DEMO DATA (13 students) ====================
 def create_default_data():
     return pd.DataFrame({
-        "student_number": ["S001", "S002", "S003", "S004", "S005", "S006", "S007", "S008"],
+        "student_number": ["S001", "S002", "S003", "S004", "S005", "S006", "S007", "S008", "S009", "S010", "S011", "S012", "S013"],
         "name": [
-            "All Good, Ana",                    # All requirements satisfied
-            "Multiple Issues, Mark",            # Multiple warnings
-            "Missing POS, Paul",                # Missing POS only
-            "Low GWA, Grace",                   # GWA below 2.00 only
-            "Thesis Outline, Theo",             # Thesis outline not approved
-            "Exam Missing, Emma",               # Exam not taken
-            "Upload Missing, Ulysses",          # Missing uploads (final exam file)
-            "PhD Issues, Patricia"              # PhD student with multiple issues
+            "Fully Compliant, Fiona",
+            "Missing POS, Paul",
+            "PhD Written Failed, Peter",
+            "Low GWA, Grace",
+            "Thesis Outline, Theo",
+            "MS Exam Missing, Emma",
+            "Committee Deadline, Chris",
+            "Coursework Incomplete, Carla",
+            "PhD Oral Failed, Olivia",
+            "Committee Changed, Charles",
+            "Coursework Changed, Cathy",
+            "Defended MS, Daniel",
+            "Graduation Applied, Gina"
         ],
-        "last_name": ["All Good", "Multiple Issues", "Missing POS", "Low GWA", "Thesis Outline", "Exam Missing", "Upload Missing", "PhD Issues"],
-        "first_name": ["Ana", "Mark", "Paul", "Grace", "Theo", "Emma", "Ulysses", "Patricia"],
-        "middle_name": ["", "", "", "", "", "", "", ""],
+        "last_name": ["Fully Compliant", "Missing POS", "PhD Written Failed", "Low GWA", "Thesis Outline", "MS Exam Missing", "Committee Deadline", "Coursework Incomplete", "PhD Oral Failed", "Committee Changed", "Coursework Changed", "Defended MS", "Graduation Applied"],
+        "first_name": ["Fiona", "Paul", "Peter", "Grace", "Theo", "Emma", "Chris", "Carla", "Olivia", "Charles", "Cathy", "Daniel", "Gina"],
+        "middle_name": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
         "program": [
             PROGRAMS[0],  # MS
             PROGRAMS[0],  # MS
+            PROGRAMS[1],  # PhD
             PROGRAMS[0],  # MS
             PROGRAMS[0],  # MS
             PROGRAMS[0],  # MS
             PROGRAMS[0],  # MS
             PROGRAMS[0],  # MS
-            PROGRAMS[1]   # PhD
+            PROGRAMS[1],  # PhD
+            PROGRAMS[0],  # MS
+            PROGRAMS[0],  # MS
+            PROGRAMS[0],  # MS
+            PROGRAMS[0]   # MS
         ],
-        "advisor": ["Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez"],
-        "ay_start": [2022, 2021, 2023, 2022, 2022, 2022, 2023, 2021],
-        "semester": ["1st Sem", "1st Sem", "2nd Sem", "1st Sem", "1st Sem", "1st Sem", "1st Sem", "1st Sem"],
-        "profile_pic": ["", "", "", "", "", "", "", ""],
+        "advisor": ["Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava"],
+        "ay_start": [2022, 2023, 2022, 2022, 2022, 2023, 2022, 2022, 2022, 2022, 2022, 2022, 2022],
+        "semester": ["1st Sem", "1st Sem", "1st Sem", "1st Sem", "1st Sem", "1st Sem", "1st Sem", "1st Sem", "1st Sem", "1st Sem", "1st Sem", "1st Sem", "2nd Sem"],
+        "profile_pic": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
         "committee_members_structured": [
-            "Dr. Eslava|Chair (Major Professor)\nDr. Sanchez|Member",
-            "Dr. Sanchez|Chair (Adviser)\nDr. Eslava|Member",
-            "Dr. Eslava|Chair",
-            "Dr. Sanchez|Chair\nDr. Eslava|Member",
-            "Dr. Eslava|Chair",
-            "Dr. Sanchez|Chair",
-            "Dr. Eslava|Chair",
-            "Dr. Sanchez|Chair (Adviser)\nDr. Eslava|Member\nDr. Cruz|Member"
+            "Dr. Eslava|Chair (Major Professor)\nDr. Sanchez|Member",   # S001
+            "Dr. Sanchez|Chair (Adviser)\nDr. Eslava|Member",           # S002
+            "Dr. Eslava|Chair (Major Professor)\nDr. Sanchez|Member",   # S003
+            "Dr. Sanchez|Chair\nDr. Eslava|Member",                     # S004
+            "Dr. Eslava|Chair",                                         # S005
+            "Dr. Sanchez|Chair",                                        # S006
+            "",                                                         # S007 – no committee yet
+            "Dr. Eslava|Chair\nDr. Sanchez|Member",                     # S008
+            "Dr. Sanchez|Chair (Adviser)\nDr. Eslava|Member\nDr. Cruz|Member", # S009
+            "Dr. Eslava|Chair (Major Professor)\nDr. Sanchez|Member",   # S010 – original committee
+            "Dr. Sanchez|Chair\nDr. Eslava|Member",                     # S011
+            "Dr. Eslava|Chair",                                         # S012
+            "Dr. Sanchez|Chair\nDr. Eslava|Member"                      # S013
         ],
         "committee_approval_date": [
             "2022-06-01",  # S001
-            "",            # S002 – committee not approved
-            "2023-08-15",  # S003
+            "2023-08-15",  # S002
+            "2022-07-10",  # S003
             "2022-07-10",  # S004
             "2022-06-20",  # S005
-            "2022-08-01",  # S006
-            "2023-09-10",  # S007
-            ""             # S008 – committee not approved
+            "2023-09-10",  # S006
+            "",            # S007 – not approved, residency 2 years → deadline warning
+            "2022-08-01",  # S008
+            "2022-08-01",  # S009
+            "2022-06-01",  # S010 – approved, but later changed (simulated by a flag)
+            "2022-06-01",  # S011 – approved, coursework changed
+            "2022-08-01",  # S012
+            "2022-06-20"   # S013
         ],
         "pos_status": [
-            "Approved",    # S001
-            "Pending",     # S002
-            "Pending",     # S003
-            "Approved",    # S004
-            "Approved",    # S005
-            "Approved",    # S006
-            "Approved",    # S007
-            "Pending"      # S008
+            "Approved",   # S001
+            "Pending",    # S002
+            "Approved",   # S003
+            "Approved",   # S004
+            "Approved",   # S005
+            "Approved",   # S006
+            "Pending",    # S007
+            "Approved",   # S008
+            "Approved",   # S009
+            "Approved",   # S010
+            "Approved",   # S011
+            "Approved",   # S012
+            "Approved"    # S013
         ],
         "pos_submitted_date": [
             "2022-05-15",  # S001
             "",            # S002
-            "",            # S003
+            "2022-06-05",  # S003
             "2022-06-05",  # S004
             "2022-05-20",  # S005
-            "2022-07-15",  # S006
-            "2023-08-20",  # S007
-            ""             # S008
+            "2023-08-20",  # S006
+            "",            # S007
+            "2022-07-15",  # S008
+            "2022-07-15",  # S009
+            "2022-05-10",  # S010
+            "2022-05-10",  # S011
+            "2022-07-15",  # S012
+            "2022-05-20"   # S013
         ],
         "pos_approved_date": [
             "2022-06-01",  # S001
             "",            # S002
-            "",            # S003
+            "2022-07-10",  # S003
             "2022-07-10",  # S004
             "2022-06-20",  # S005
-            "2022-08-01",  # S006
-            "2023-09-10",  # S007
-            ""             # S008
+            "2023-09-10",  # S006
+            "",            # S007
+            "2022-08-01",  # S008
+            "2022-08-01",  # S009
+            "2022-06-01",  # S010
+            "2022-06-01",  # S011
+            "2022-08-01",  # S012
+            "2022-06-20"   # S013
         ],
-        "pos_file": [
-            "",  # No file needed – already approved
-            "",  # Missing POS file → triggers warning
-            "",  # Missing POS file → triggers warning
-            "",  # No missing file
-            "",  # No missing file
-            "",  # No missing file
-            "",  # No missing file
-            ""   # Missing POS file → triggers warning
-        ],
+        "pos_file": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
         "gwa": [
-            1.80,  # S001 – good
-            2.50,  # S002 – low GWA
-            1.95,  # S003 – good
-            2.30,  # S004 – low GWA only
-            1.85,  # S005 – good
-            1.90,  # S006 – good
-            1.88,  # S007 – good
-            2.20   # S008 – low GWA
+            1.80,  # S001
+            1.95,  # S002
+            1.85,  # S003
+            2.30,  # S004 – low GWA
+            1.90,  # S005
+            1.88,  # S006
+            1.75,  # S007
+            1.85,  # S008
+            1.80,  # S009
+            1.80,  # S010
+            1.80,  # S011
+            1.85,  # S012
+            1.90   # S013
         ],
-        "total_units_taken": [24, 18, 12, 24, 24, 24, 15, 12],
-        "total_units_required": [24, 24, 24, 24, 24, 24, 24, 24],
+        "total_units_taken": [24, 12, 24, 24, 24, 15, 24, 18, 24, 24, 24, 24, 24],
+        "total_units_required": [24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24, 24],
         "thesis_units_taken": [
-            6,   # S001 – complete
-            5,   # S002 – units taken (limit 6, no outline)
-            2,   # S003 – OK
-            6,   # S004 – complete
+            6,   # S001
+            2,   # S002
+            6,   # S003 (MS thesis limit 6)
+            6,   # S004
             4,   # S005 – units taken 4, outline not approved → overdue
-            2,   # S006 – OK
-            1,   # S007 – OK
-            3    # S008 – PhD dissertation units taken
+            2,   # S006
+            3,   # S007
+            2,   # S008
+            8,   # S009 (PhD dissertation)
+            3,   # S010
+            6,   # S011 – MS complete
+            6,   # S012 – MS complete
+            6    # S013 – MS complete
         ],
-        "thesis_units_limit": [6, 6, 6, 6, 6, 6, 6, 12],
+        "thesis_units_limit": [6, 6, 12, 6, 6, 6, 6, 6, 12, 6, 6, 6, 6],
         "thesis_outline_approved": [
             "Yes",   # S001
-            "No",    # S002
+            "Yes",   # S002
             "Yes",   # S003
             "Yes",   # S004
-            "No",    # S005 – triggers warning
+            "No",    # S005 – overdue
             "Yes",   # S006
-            "Yes",   # S007
-            "No"     # S008
+            "No",    # S007
+            "Yes",   # S008
+            "Yes",   # S009
+            "Yes",   # S010
+            "Yes",   # S011
+            "Yes",   # S012
+            "Yes"    # S013
         ],
         "thesis_outline_approved_date": [
             "2023-11-01",  # S001
-            "",            # S002
-            "2023-10-15",  # S003
+            "2023-12-01",  # S002
+            "2023-06-01",  # S003
             "2023-09-20",  # S004
-            "",            # S005 – missing
-            "2023-11-10",  # S006
-            "2023-12-01",  # S007
-            ""             # S008 – missing
+            "",            # S005
+            "2023-12-01",  # S006
+            "",            # S007
+            "2023-11-10",  # S008
+            "2023-11-10",  # S009
+            "2023-11-01",  # S010
+            "2023-11-01",  # S011
+            "2023-11-10",  # S012
+            "2023-06-20"   # S013
         ],
-        "thesis_outline_file": ["", "", "", "", "", "", "", ""],
-        "thesis_draft_file": ["", "", "", "", "", "", "", ""],
-        "thesis_manuscript_file": ["", "", "", "", "", "", "", ""],
+        "thesis_outline_file": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
+        "thesis_draft_file": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
+        "thesis_manuscript_file": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
         "thesis_status": [
-            "Approved",      # S001
-            "In Progress",   # S002
-            "In Progress",   # S003
-            "Approved",      # S004
-            "In Progress",   # S005
-            "In Progress",   # S006
-            "Not Started",   # S007
-            "In Progress"    # S008
+            "Approved",       # S001
+            "In Progress",    # S002
+            "Approved",       # S003 (MS)
+            "Approved",       # S004
+            "In Progress",    # S005
+            "In Progress",    # S006
+            "Not Started",    # S007
+            "In Progress",    # S008
+            "In Progress",    # S009
+            "Approved",       # S010
+            "Approved",       # S011
+            "Approved",       # S012
+            "Approved"        # S013
         ],
-        # PhD exams for S008, MS exams for others
-        "qualifying_exam_status": ["N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "Not Taken"],
-        "qualifying_exam_passed_date": ["", "", "", "", "", "", "", ""],
-        "qualifying_exam_file": ["", "", "", "", "", "", "", ""],
-        "written_comprehensive_status": ["N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "Not Taken"],
-        "written_comprehensive_passed_date": ["", "", "", "", "", "", "", ""],
-        "written_comprehensive_file": ["", "", "", "", "", "", "", ""],
-        "oral_comprehensive_status": ["N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "N/A", "Not Taken"],
-        "oral_comprehensive_passed_date": ["", "", "", "", "", "", "", ""],
-        "oral_comprehensive_file": ["", "", "", "", "", "", "", ""],
+        # PhD exams for S003 and S009
+        "qualifying_exam_status": ["N/A", "N/A", "Passed", "N/A", "N/A", "N/A", "N/A", "N/A", "Passed", "N/A", "N/A", "N/A", "N/A"],
+        "qualifying_exam_passed_date": ["", "", "2023-12-01", "", "", "", "", "", "2023-11-01", "", "", "", ""],
+        "qualifying_exam_file": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
+        "written_comprehensive_status": ["N/A", "N/A", "Failed", "N/A", "N/A", "N/A", "N/A", "N/A", "Passed", "N/A", "N/A", "N/A", "N/A"],
+        "written_comprehensive_passed_date": ["", "", "", "", "", "", "", "", "2023-11-15", "", "", "", ""],
+        "written_comprehensive_file": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
+        "oral_comprehensive_status": ["N/A", "N/A", "Not Taken", "N/A", "N/A", "N/A", "N/A", "N/A", "Failed", "N/A", "N/A", "N/A", "N/A"],
+        "oral_comprehensive_passed_date": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
+        "oral_comprehensive_file": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
         # MS general exam
         "general_exam_status": [
-            "Passed",     # S001
-            "Not Taken",  # S002 – triggers warning
-            "Passed",     # S003
-            "Passed",     # S004
-            "Passed",     # S005
-            "Not Taken",  # S006 – triggers warning
-            "Passed",     # S007
-            "N/A"         # S008
+            "Passed",      # S001
+            "Passed",      # S002
+            "N/A",         # S003
+            "Passed",      # S004
+            "Passed",      # S005
+            "Not Taken",   # S006 – warning
+            "Not Taken",   # S007
+            "Not Taken",   # S008 – coursework incomplete but attempting exam
+            "N/A",         # S009
+            "Passed",      # S010
+            "Passed",      # S011
+            "Passed",      # S012
+            "Passed"       # S013
         ],
         "general_exam_passed_date": [
             "2023-12-10",  # S001
-            "",            # S002
-            "2023-11-05",  # S003
+            "2023-11-05",  # S002
+            "",            # S003
             "2023-10-15",  # S004
             "2023-11-20",  # S005
             "",            # S006
-            "2024-01-10",  # S007
-            ""             # S008
+            "",            # S007
+            "",            # S008
+            "",            # S009
+            "2023-10-01",  # S010
+            "2023-10-01",  # S011
+            "2023-10-01",  # S012
+            "2023-10-01"   # S013
         ],
-        "general_exam_file": ["", "", "", "", "", "", "", ""],
+        "general_exam_file": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
         "final_exam_status": [
-            "Passed",     # S001
-            "Pending",    # S002
-            "Not Taken",  # S003
-            "Passed",     # S004
-            "Passed",     # S005
-            "Not Taken",  # S006
-            "Passed",     # S007 – but no file uploaded
-            "Not Taken"   # S008
+            "Passed",      # S001
+            "Not Taken",   # S002
+            "Not Taken",   # S003
+            "Not Taken",   # S004
+            "Not Taken",   # S005
+            "Not Taken",   # S006
+            "Not Taken",   # S007
+            "Not Taken",   # S008
+            "Not Taken",   # S009
+            "Not Taken",   # S010
+            "Not Taken",   # S011
+            "Passed",      # S012 – defended MS
+            "Not Taken"    # S013
         ],
         "final_exam_passed_date": [
             "2024-02-15",  # S001
             "",            # S002
             "",            # S003
-            "2024-01-20",  # S004
-            "2024-02-01",  # S005
-            "",            # S006
-            "2024-03-01",  # S007
-            ""             # S008
-        ],
-        "final_exam_file": [
-            "",            # S001 – no file needed (already approved)
-            "",            # S002
-            "",            # S003
             "",            # S004
             "",            # S005
             "",            # S006
-            "",            # S007 – missing file triggers warning
-            ""             # S008
+            "",            # S007
+            "",            # S008
+            "",            # S009
+            "",            # S010
+            "",            # S011
+            "2024-02-01",  # S012
+            ""             # S013
         ],
+        "final_exam_file": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
         "residency_years_used": [
-            3,   # S001 – OK
-            5,   # S002 – limit reached (MS max 5) → warning
-            2,   # S003 – OK
-            3,   # S004 – OK
-            3,   # S005 – OK
-            2,   # S006 – OK
-            1,   # S007 – OK
-            4    # S008 – PhD max 7, OK
+            3,   # S001
+            1,   # S002
+            3,   # S003
+            3,   # S004
+            3,   # S005
+            1,   # S006
+            2,   # S007 – committee not approved, deadline near (MS max 5, but deadline rule triggers at 1 year for POS)
+            2,   # S008
+            3,   # S009
+            3,   # S010
+            3,   # S011
+            3,   # S012
+            3    # S013
         ],
-        "residency_max_years": [5, 5, 5, 5, 5, 5, 5, 7],
-        "extension_count": [0, 0, 0, 0, 0, 0, 0, 0],
-        "extension_end_date": ["", "", "", "", "", "", "", ""],
-        "loa_start_date": ["", "", "", "", "", "", "", ""],
-        "loa_end_date": ["", "", "", "", "", "", "", ""],
-        "loa_total_terms": [0, 0, 0, 0, 0, 0, 0, 0],
-        "awol_status": ["No", "No", "No", "No", "No", "No", "No", "No"],
-        "awol_lifted_date": ["", "", "", "", "", "", "", ""],
-        "transfer_units_approved": [0, 0, 0, 0, 0, 0, 0, 0],
+        "residency_max_years": [5, 5, 7, 5, 5, 5, 5, 5, 7, 5, 5, 5, 5],
+        "extension_count": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "extension_end_date": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
+        "loa_start_date": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
+        "loa_end_date": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
+        "loa_total_terms": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        "awol_status": ["No", "No", "No", "No", "No", "No", "No", "No", "No", "No", "No", "No", "No"],
+        "awol_lifted_date": ["", "", "", "", "", "", "", "", "", "", "", "", ""],
+        "transfer_units_approved": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         "graduation_applied": [
             "Yes",   # S001
             "No",    # S002
             "No",    # S003
-            "Yes",   # S004
-            "Yes",   # S005
+            "No",    # S004
+            "No",    # S005
             "No",    # S006
             "No",    # S007
-            "No"     # S008
+            "No",    # S008
+            "No",    # S009
+            "No",    # S010
+            "No",    # S011
+            "Yes",   # S012 – applied
+            "Yes"    # S013 – applied
         ],
         "graduation_approved": [
-            "Yes",   # S001 – complete
+            "Yes",   # S001
             "No",    # S002
             "No",    # S003
-            "Yes",   # S004 – but still low GWA? Actually low GWA but graduation approved – warning should still show.
-            "Yes",   # S005 – graduation approved but thesis outline missing → warning
+            "No",    # S004
+            "No",    # S005
             "No",    # S006
             "No",    # S007
-            "No"     # S008
+            "No",    # S008
+            "No",    # S009
+            "No",    # S010
+            "No",    # S011
+            "Pending", # S012 – pending approval
+            "Pending"  # S013 – pending approval
         ],
         "graduation_date": [
             "2024-06-15",  # S001
             "",            # S002
             "",            # S003
-            "2024-06-15",  # S004
-            "2024-06-15",  # S005
+            "",            # S004
+            "",            # S005
             "",            # S006
             "",            # S007
-            ""             # S008
+            "",            # S008
+            "",            # S009
+            "",            # S010
+            "",            # S011
+            "",            # S012
+            ""             # S013
         ],
-        "re_admission_status": ["Not Applicable", "Not Applicable", "Not Applicable", "Not Applicable", "Not Applicable", "Not Applicable", "Not Applicable", "Not Applicable"],
-        "re_admission_date": ["", "", "", "", "", "", "", ""]
+        "re_admission_status": ["Not Applicable"] * 13,
+        "re_admission_date": [""] * 13,
+        # Additional flags for custom warnings
+        "committee_changed": [False, False, False, False, False, False, False, False, False, True, False, False, False],
+        "coursework_changed": [False, False, False, False, False, False, False, False, False, False, True, False, False]
     })
 
 # ==================== DATA LOADING ====================
@@ -707,10 +798,10 @@ def load_data():
     # Add new file columns if missing
     new_file_cols = ["pos_file", "thesis_outline_file", "thesis_draft_file", "thesis_manuscript_file",
                      "qualifying_exam_file", "written_comprehensive_file", "oral_comprehensive_file",
-                     "general_exam_file", "final_exam_file"]
+                     "general_exam_file", "final_exam_file", "committee_changed", "coursework_changed"]
     for col in new_file_cols:
         if col not in df.columns:
-            df[col] = ""
+            df[col] = False if col in ["committee_changed", "coursework_changed"] else ""
     if "committee_members_structured" not in df.columns:
         df["committee_members_structured"] = ""
     if "committee_approval_date" not in df.columns:
@@ -906,7 +997,7 @@ if not st.session_state.logged_in:
                     st.rerun()
                 else:
                     st.error("Invalid credentials")
-            st.caption("Demo: staff1/admin123 | adviser1/adv123 | student_good/good123 | student_multiple/multi123 ...")
+            st.caption("Demo accounts: staff1/admin123 | adviser1/adv123 | student numbers S001–S013 with password = student number (e.g., S001 / S001)")
     st.stop()
 
 # ==================== DATA PRIVACY CONSENT CHECK ====================
@@ -943,10 +1034,10 @@ st.caption("Complete workflow tracking from admission to graduation")
 
 role = st.session_state.role
 
-# ==================== STAFF VIEW (unchanged except for demo data) ====================
+# ==================== STAFF VIEW ====================
 if role == "SESAM Staff":
     st.subheader("📋 Student Directory")
-    search = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001", key="staff_search")
+    search = st.text_input("🔍 Search by name or student number", placeholder="e.g., S001 or Fiona", key="staff_search")
     filtered_df = filter_dataframe(search, df)
     filtered_df["admitted_year"] = filtered_df.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
     if len(filtered_df) > 0:
@@ -1365,7 +1456,9 @@ if role == "SESAM Staff":
                         "graduation_approved": "No",
                         "graduation_date": "",
                         "re_admission_status": "Not Applicable",
-                        "re_admission_date": ""
+                        "re_admission_date": "",
+                        "committee_changed": False,
+                        "coursework_changed": False
                     })
                     new_df = pd.DataFrame([new_row])
                     df = pd.concat([df, new_df], ignore_index=True)
@@ -1481,28 +1574,50 @@ elif role == "Student":
         save_data(df)
         return filepath
     
-    # Helper to get alerts
+    # Helper to get alerts (including custom warnings for S010, S011, S007)
     def get_student_alerts_and_next_action(student):
         alerts = []
         # Standard warnings
         alerts.extend(get_all_warnings(student))
-        # POS file missing when status is Pending
+        
+        # Missing POS file (generic)
         pos_file = student.get("pos_file")
         if student["pos_status"] == "Pending" and (pd.isna(pos_file) or not pos_file):
             alerts.append("⚠️ Plan of Study (POS) file not uploaded. Please upload your POS for approval.")
+        
         # Final exam proof missing when status is Passed
         final_file = student.get("final_exam_file")
         if student["final_exam_status"] == "Passed" and (pd.isna(final_file) or not final_file):
             alerts.append("⚠️ Final exam result file missing. Please upload proof of passing.")
+        
         # GWA threshold
         if student["gwa"] > 2.00:
             alerts.append(f"⚠️ Your cumulative GWA ({student['gwa']:.2f}) is below the required 2.00 threshold.")
+        
         # Thesis units exceeded
         limit = get_thesis_limit(student["program"])
         if student["thesis_units_taken"] > limit:
             alerts.append(f"⚠️ You have exceeded the allowed thesis/dissertation units ({student['thesis_units_taken']}/{limit}).")
-        # Deadline alerts
+        
+        # Deadline alerts (POS, outline, exams)
         alerts.extend(check_deadline_alerts(student))
+        
+        # Custom warnings for demo students (based on flags)
+        if student.get("committee_changed") == True:
+            alerts.append("⚠️ Your committee has been changed after POS approval. Please ensure the committee is reconstituted and POS is updated.")
+        
+        if student.get("coursework_changed") == True:
+            alerts.append("⚠️ Your coursework has changed since POS approval. Please submit an updated Plan of Study for approval.")
+        
+        # Committee deadline warning (S007)
+        if student["student_number"] == "S007" and not student.get("committee_approval_date"):
+            alerts.append("⚠️ Committee not yet approved. Residence has started – approval required within the first year.")
+        
+        # Coursework incomplete but attempting exam (S008)
+        if student["student_number"] == "S008" and student["total_units_taken"] < 24 and student["general_exam_status"] == "Not Taken":
+            # Actually S008 has general_exam = Not Taken, but we already have that warning from standard checks.
+            pass
+        
         # Next milestone
         next_step = get_next_required_step(student)
         if next_step == "Complete":
