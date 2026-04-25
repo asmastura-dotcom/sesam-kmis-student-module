@@ -657,7 +657,6 @@ def compute_coursework_progress(row):
 
 # ==================== UI HELPER FUNCTIONS ====================
 def safe_index(options, value):
-    """Return index of value in options, or 0 if not found."""
     try:
         return options.index(value)
     except ValueError:
@@ -923,9 +922,8 @@ if role == "SESAM Staff":
                             default_role = "Chair (Major Professor)" if idx == 0 else "Member"
                         else:
                             default_role = "Chair (Adviser)" if idx == 0 else "Member"
-                        current_role = member["role"]
                         try:
-                            role_idx = role_options.index(current_role)
+                            role_idx = role_options.index(member["role"])
                         except ValueError:
                             role_idx = role_options.index(default_role)
                         role = st.selectbox(f"Role", options=role_options, index=role_idx, key=f"role_{student['student_number']}_{idx}")
@@ -1253,7 +1251,7 @@ elif role == "Faculty Adviser":
                     st.warning(w) if "⚠️" in w else st.success(w)
         st.info("For updates, contact SESAM Staff.")
 
-# ==================== ENHANCED STUDENT VIEW ====================
+# ==================== RESTRUCTURED STUDENT VIEW ====================
 elif role == "Student":
     st.subheader(f"📘 Your Dashboard – {st.session_state.display_name}")
     student = df[df["name"] == st.session_state.display_name].iloc[0].copy()
@@ -1298,8 +1296,21 @@ elif role == "Student":
             next_action = f"🎯 Your next required milestone: **{next_step}**"
         return alerts, next_action
     
-    # Tabs
-    tab_labels = ["👤 Student Info", "⚠️ Next Steps & Alerts", "📚 Coursework", "📄 Plan of Study", "📝 Examinations", "🎓 Final Exam", "📖 Thesis/Dissertation", "👥 Committee"]
+    # ========== DISPLAY ALERTS AND NEXT ACTION AT THE TOP ==========
+    alerts, next_action = get_student_alerts_and_next_action(student)
+    if next_action:
+        st.info(next_action)
+    if alerts:
+        for alert in alerts:
+            if "✅" not in alert:
+                st.error(alert)
+    else:
+        st.success("✅ All requirements are satisfied. No pending actions.")
+    
+    st.markdown("---")
+    
+    # ========== TABS (without the separate alerts tab) ==========
+    tab_labels = ["👤 Student Info", "📚 Coursework", "📄 Plan of Study", "📝 Examinations", "🎓 Final Exam", "📖 Thesis/Dissertation", "👥 Committee"]
     tabs = st.tabs(tab_labels)
     
     with tabs[0]:
@@ -1333,23 +1344,6 @@ elif role == "Student":
             st.markdown(f"**Cumulative GWA (from AMIS):** {student['gwa']:.2f}")
     
     with tabs[1]:
-        st.subheader("⚠️ Action Required & Next Steps")
-        alerts, next_action = get_student_alerts_and_next_action(student)
-        if next_action:
-            st.info(next_action)
-        if alerts:
-            for alert in alerts:
-                if "✅" not in alert:
-                    st.error(alert)
-        else:
-            st.success("✅ All requirements are satisfied. No pending actions.")
-        st.markdown("---")
-        st.subheader("📊 Your Milestone Progress")
-        completed = get_step_completion_status(student)
-        next_step_wf = get_next_required_step(student)
-        display_workflow_grid(completed, next_step_wf)
-    
-    with tabs[2]:
         st.subheader("📚 Enrolled Subjects per Semester")
         semesters = get_student_semesters(student["student_number"])
         if len(semesters) > 0:
@@ -1404,7 +1398,7 @@ elif role == "Student":
         st.progress(progress_pct / 100, text=f"{progress_pct}% completed ({total_taken} / {total_required} units)")
         st.caption(f"Remaining units: {max(0, total_required - total_taken)}")
     
-    with tabs[3]:
+    with tabs[2]:
         st.subheader("📄 Plan of Study (POS)")
         col1, col2 = st.columns(2)
         with col1:
@@ -1431,7 +1425,7 @@ elif role == "Student":
                     st.success("POS file uploaded. Staff will review.")
                     st.rerun()
     
-    with tabs[4]:
+    with tabs[3]:
         st.subheader("📝 Examination Status")
         if is_phd_program(student["program"]):
             st.markdown("##### Qualifying Exam")
@@ -1510,7 +1504,7 @@ elif role == "Student":
                     st.success("File uploaded.")
                     st.rerun()
     
-    with tabs[5]:
+    with tabs[4]:
         st.subheader("🎓 Final Examination / Defense")
         col1, col2 = st.columns(2)
         with col1:
@@ -1530,7 +1524,7 @@ elif role == "Student":
                 st.success("File uploaded. Staff will validate.")
                 st.rerun()
     
-    with tabs[6]:
+    with tabs[5]:
         st.subheader("📖 Thesis / Dissertation Progress")
         col1, col2 = st.columns(2)
         with col1:
@@ -1572,7 +1566,7 @@ elif role == "Student":
                 st.rerun()
         st.caption(get_thesis_pattern_description(student["program"]))
     
-    with tabs[7]:
+    with tabs[6]:
         committee_title = get_committee_title(student["program"])
         st.subheader(f"👥 {committee_title} (Read-only)")
         members = parse_committee_members(student.get("committee_members_structured", ""))
