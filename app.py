@@ -1646,8 +1646,6 @@ elif role == "Student":
     
     # ========== DYNAMIC TABS ==========
     tab_labels = ["👤 Student Info", "📚 Coursework", "📄 Plan of Study", "👥 Committee", "📌 Milestone Tracker"]
-    if program_type in ["MS_Thesis", "PhD_Regular", "PhD_Straight", "PhD_Research"]:
-        tab_labels.append("📖 Thesis/Dissertation")
     if program_type in ["MS_Thesis", "MS_NonThesis", "PhD_Regular", "PhD_Straight"]:
         tab_labels.append("📝 Examinations")
     if program_type == "PhD_Research":
@@ -1683,10 +1681,8 @@ elif role == "Student":
             st.markdown(f"**Student Number:** {student['student_number']}")
             st.markdown(f"**Full Name:** {student['name']}")
             st.markdown(f"**Program:** {student['program']}")
-            st.markdown(f"**Program Type:** {program_type}")
             st.markdown(f"**Adviser:** {student['advisor']}")
             st.markdown(f"**Admitted Year:** {format_ay(student['ay_start'], student['semester'])}")
-            st.markdown(f"**Cumulative GWA (from AMIS):** {student['gwa']:.2f}")
     
     with tabs[tab_index]:  # Coursework
         tab_index += 1
