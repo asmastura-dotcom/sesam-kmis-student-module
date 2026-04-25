@@ -2,8 +2,7 @@
 SESAM KMIS - Graduate Student Lifecycle Management System (Enhanced UI)
 Author: [Your Name]
 Date: [Current Date]
-Description: Full workflow-based lifecycle management with milestone validation and data privacy.
-Now with compact, organised layout: inline buttons, reduced whitespace, cohesive sections.
+Description: Full workflow-based lifecycle management with milestone validation and data privacy consent.
 """
 
 import streamlit as st
@@ -20,53 +19,170 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ==================== COMPACT LAYOUT CUSTOM CSS ====================
+# ==================== CUSTOM CSS FOR MODERN UI ====================
 st.markdown("""
 <style>
-    /* Reduce default Streamlit spacing */
-    .main > div {
-        padding-top: 0.5rem;
+    .main > div { padding: 0 1rem; }
+    .css-1r6slb0, .element-container, .stExpander {
+        background: white;
+        border-radius: 12px;
+        padding: 0.5rem;
+        margin-bottom: 1rem;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        transition: all 0.2s ease;
     }
-    .block-container {
-        padding-top: 1rem;
-        padding-bottom: 0rem;
+    .stExpander:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    [data-testid="stMetric"] {
+        background: #f8f9fa;
+        border-radius: 12px;
+        padding: 1rem;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
-    /* Tighter margins for elements */
-    .stMarkdown, .stTextInput, .stSelectbox, .stButton, .stDataFrame {
-        margin-bottom: 0.5rem !important;
+    h1, h2, h3 { font-weight: 600 !important; letter-spacing: -0.01em; }
+    .badge {
+        display: inline-block;
+        padding: 0.25rem 0.75rem;
+        border-radius: 20px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        margin-right: 0.5rem;
     }
-    /* Compact expanders */
-    .streamlit-expanderHeader {
-        font-size: 0.9rem;
-        padding: 0.4rem;
-    }
-    /* Sidebar tighter */
-    section[data-testid="stSidebar"] .block-container {
-        padding-top: 1rem;
-        padding-bottom: 1rem;
-    }
-    /* Buttons inline spacing */
-    div.row-widget.stButton > button {
-        margin: 0.2rem;
-    }
-    /* Hide extra padding around columns */
-    div[data-testid="column"] {
-        padding: 0 0.2rem !important;
-    }
-    /* Less spacing between tabs */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 0.5rem;
-    }
-    /* Table compact */
+    .badge-success { background: #d4edda; color: #155724; }
+    .badge-warning { background: #fff3cd; color: #856404; }
+    .badge-danger { background: #f8d7da; color: #721c24; }
+    .badge-info { background: #d1ecf1; color: #0c5460; }
+    .stProgress > div > div { background-color: #2c7da0; border-radius: 10px; }
     .dataframe {
-        font-size: 0.85rem;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
-    /* Form rows closer */
-    .stForm {
-        gap: 0.3rem;
+    .dataframe th { background-color: #2c3e50 !important; color: white !important; }
+    .dataframe tr:hover { background-color: #f1f9ff !important; }
+    .stButton button {
+        border-radius: 20px;
+        font-weight: 500;
+        transition: 0.2s;
     }
-    hr {
-        margin: 0.5rem 0;
+    .stButton button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    button[data-testid="baseButton-secondary"] {
+        padding: 0.25rem 0.75rem !important;
+        font-size: 0.8rem !important;
+        min-height: 32px !important;
+    }
+    .stButton button[kind="secondary"] {
+        padding: 0.2rem 0.6rem !important;
+        font-size: 0.75rem !important;
+    }
+    div[data-testid="column"]:has(> div > button) button {
+        padding: 0.2rem 0.8rem !important;
+        font-size: 0.75rem !important;
+        min-height: 30px !important;
+    }
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 1rem;
+        background: #f8f9fa;
+        border-radius: 12px;
+        padding: 0.5rem;
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 20px;
+        padding: 0.5rem 1rem;
+        font-weight: 500;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #2c7da0;
+        color: white;
+    }
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(135deg, #f8fafc 0%, #eef2f5 100%);
+        border-right: 1px solid rgba(0,0,0,0.05);
+    }
+    section[data-testid="stSidebar"] .css-1d391kg {
+        background: transparent;
+    }
+    .sidebar-profile {
+        background: white;
+        border-radius: 20px;
+        padding: 1.2rem 1rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        text-align: center;
+    }
+    .sidebar-profile h3 {
+        margin: 0 0 0.25rem 0;
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #1e293b;
+    }
+    .sidebar-role {
+        font-size: 0.8rem;
+        color: #2c7da0;
+        background: #e6f4f5;
+        display: inline-block;
+        padding: 0.2rem 0.8rem;
+        border-radius: 20px;
+        margin-top: 0.25rem;
+    }
+    .sidebar-logout button {
+        background: white !important;
+        border: 1px solid #e2e8f0 !important;
+        color: #475569 !important;
+        border-radius: 40px !important;
+        padding: 0.4rem 1rem !important;
+        font-weight: 500 !important;
+        transition: all 0.2s;
+    }
+    .sidebar-logout button:hover {
+        background: #f1f5f9 !important;
+        border-color: #cbd5e1 !important;
+        transform: none !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+    hr.sidebar-divider {
+        margin: 1rem 0;
+        border: 0;
+        height: 1px;
+        background: linear-gradient(to right, #cbd5e1, transparent);
+    }
+    .sidebar-footer {
+        font-size: 0.7rem;
+        color: #94a3b8;
+        text-align: center;
+        margin-top: 2rem;
+    }
+    /* Consent modal style */
+    .consent-container {
+        background: white;
+        border-radius: 24px;
+        padding: 2rem;
+        max-width: 800px;
+        margin: 2rem auto;
+        box-shadow: 0 20px 35px rgba(0,0,0,0.1);
+        border: 1px solid #e2e8f0;
+    }
+    .consent-header {
+        text-align: center;
+        margin-bottom: 1.5rem;
+    }
+    .consent-header h2 {
+        color: #1e293b;
+        margin-bottom: 0.5rem;
+    }
+    .consent-text {
+        background: #f8fafc;
+        padding: 1.5rem;
+        border-radius: 16px;
+        margin: 1rem 0;
+        max-height: 300px;
+        overflow-y: auto;
+        font-size: 0.9rem;
+        line-height: 1.5;
+        color: #334155;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -82,10 +198,66 @@ if "display_name" not in st.session_state:
     st.session_state.display_name = None
 if "selected_student" not in st.session_state:
     st.session_state.selected_student = None
-if "data_consent_given" not in st.session_state:
-    st.session_state.data_consent_given = False
+if "consent_given" not in st.session_state:
+    st.session_state.consent_given = False
 
-# ==================== USER AUTH (unchanged) ====================
+# ==================== DATA PRIVACY CONSENT FUNCTIONS ====================
+CONSENT_LOG_FILE = "consent_log.csv"
+
+def log_consent(username, role, display_name):
+    """Log consent event to CSV for audit trail."""
+    if not os.path.exists(CONSENT_LOG_FILE):
+        df = pd.DataFrame(columns=["timestamp", "username", "role", "display_name", "ip_address"])
+    else:
+        df = pd.read_csv(CONSENT_LOG_FILE)
+    new_entry = pd.DataFrame([{
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "username": username,
+        "role": role,
+        "display_name": display_name,
+        "ip_address": st.request.client_ip if hasattr(st, 'request') else "unknown"
+    }])
+    df = pd.concat([df, new_entry], ignore_index=True)
+    df.to_csv(CONSENT_LOG_FILE, index=False)
+
+def show_consent_form():
+    """Display the data privacy consent form. Returns True if consent given."""
+    st.markdown("""
+    <div class="consent-container">
+        <div class="consent-header">
+            <h2>📜 Data Privacy Consent</h2>
+            <p>Please read and accept our Data Privacy Policy</p>
+        </div>
+        <div class="consent-text">
+            <strong>Data Privacy Notice</strong><br><br>
+            In compliance with the Data Privacy Act of 2012 (Republic Act No. 10173), SESAM KMIS collects and processes the following personal and academic information:
+            <ul>
+                <li>Full name, student number, program, adviser</li>
+                <li>Academic records (GWA, units taken, exam results, thesis progress)</li>
+                <li>Uploaded documents (profile pictures, proof of milestones, AMIS screenshots)</li>
+                <li>Committee membership details</li>
+            </ul>
+            <strong>Purpose of Collection</strong><br>
+            Your data is used solely for academic monitoring, degree progress tracking, and reporting as required by the Graduate School. We do not share your data with third parties without your explicit consent, except as required by law.<br><br>
+            <strong>Your Rights</strong><br>
+            You have the right to access, correct, and request deletion of your personal data. You may withdraw consent at any time by contacting the SESAM Data Protection Officer.<br><br>
+            <strong>Consent</strong><br>
+            By clicking "I Consent", you acknowledge that you have read and understood this notice and agree to the processing of your personal data as described.
+        </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1,2,1])
+    with col2:
+        agree = st.checkbox("I have read and agree to the Data Privacy Policy")
+        if st.button("✅ I Consent", use_container_width=True, disabled=not agree):
+            st.session_state.consent_given = True
+            log_consent(st.session_state.username, st.session_state.role, st.session_state.display_name)
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+        return False
+    return False
+
+# ==================== USER AUTH ====================
 USERS = {
     "staff1": {"password": "admin123", "role": "SESAM Staff", "display_name": "SESAM Administrator"},
     "adviser1": {"password": "adv123", "role": "Faculty Adviser", "display_name": "Dr. Eslava"},
@@ -127,9 +299,12 @@ def format_ay(ay_start, semester):
     return f"A.Y. {ay_start}-{ay_start+1} ({semester})"
 
 def get_thesis_pattern_description(program):
-    return "💡 MS: 6 thesis units (2-2-2 or 3-3)" if is_master_program(program) else "💡 PhD: 12 dissertation units (3-3-3-3 or 4-4-4)"
+    if is_master_program(program):
+        return "💡 MS: 6 thesis units (2-2-2 or 3-3)"
+    else:
+        return "💡 PhD: 12 dissertation units (3-3-3-3 or 4-4-4)"
 
-# ==================== WORKFLOW ENGINE (unchanged) ====================
+# ==================== WORKFLOW ENGINE ====================
 WORKFLOW_STEPS = ["Committee", "Coursework", "Exams", "POS", "Thesis", "Defense", "Graduation"]
 
 def get_step_completion_status(student_row):
@@ -173,7 +348,7 @@ def is_step_locked(student_row, step_name):
     completed = get_step_completion_status(student_row)
     return previous_step not in completed
 
-# ==================== SEMESTER TRACKING (unchanged) ====================
+# ==================== SEMESTER TRACKING ====================
 SEMESTER_FILE = "semester_records.csv"
 
 def load_semester_records():
@@ -248,7 +423,7 @@ def update_main_student_gwa_and_units(student_number, cumulative_gwa, total_unit
         df.loc[idx, "total_units_taken"] = total_units
         save_data(df)
 
-# ==================== DOCUMENT UPLOAD SYSTEM (unchanged) ====================
+# ==================== DOCUMENT UPLOAD SYSTEM (General) ====================
 UPLOAD_FOLDER = "student_uploads"
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
@@ -331,7 +506,7 @@ def save_milestone_file(student_number, milestone_label, uploaded_file):
         f.write(uploaded_file.getbuffer())
     return filepath
 
-# ==================== NOTIFICATION SYSTEM (unchanged) ====================
+# ==================== NOTIFICATION SYSTEM ====================
 def get_adviser_notifications(adviser_name):
     df = load_data()
     advisees = df[df["advisor"] == adviser_name].copy()
@@ -351,7 +526,7 @@ def get_adviser_notifications(adviser_name):
             notifications.append({"student": student["name"], "student_number": student["student_number"], "type": "Milestone Overdue", "message": "Exams due by 2nd year", "severity": "error"})
     return notifications
 
-# ==================== PROFILE PICTURE (unchanged) ====================
+# ==================== PROFILE PICTURE ====================
 PIC_FOLDER = "profile_pics"
 if not os.path.exists(PIC_FOLDER):
     os.makedirs(PIC_FOLDER)
@@ -530,7 +705,7 @@ def get_thesis_limit(program):
 def get_residency_max(program):
     return get_residency_max_from_program(program)
 
-# ==================== WARNING FUNCTIONS (unchanged, abbreviated) ====================
+# ==================== WARNING FUNCTIONS ====================
 def get_warning_text(program, units_taken):
     limit = get_thesis_limit(program)
     try:
@@ -634,51 +809,15 @@ def filter_dataframe(search_term, data):
     return data[mask]
 
 def display_workflow_grid(completed_steps, next_step):
-    cols = st.columns(len(WORKFLOW_STEPS))
+    cols = st.columns(4)
     for i, step in enumerate(WORKFLOW_STEPS):
-        with cols[i]:
+        with cols[i % 4]:
             if step in completed_steps:
-                st.markdown(f'<div style="background:#e8f5e9; border-radius:12px; padding:0.5rem; text-align:center; font-size:0.8rem;"><span style="font-weight:500;">✅ {step}</span></div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="background:#e8f5e9; border-radius:12px; padding:0.75rem; text-align:center; margin:0.25rem;"><div style="font-size:1.2rem;">✅</div><div style="font-weight:500;">{step}</div><div style="font-size:0.7rem; color:#2e7d32;">Completed</div></div>', unsafe_allow_html=True)
             elif step == next_step:
-                st.markdown(f'<div style="background:#fff3e0; border:2px solid #ff9800; border-radius:12px; padding:0.5rem; text-align:center; font-size:0.8rem;"><span style="font-weight:500;">⏳ {step}</span></div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="background:#fff3e0; border:2px solid #ff9800; border-radius:12px; padding:0.75rem; text-align:center; margin:0.25rem;"><div style="font-size:1.2rem;">⏳</div><div style="font-weight:500;">{step}</div><div style="font-size:0.7rem; color:#e65100;">Next Required</div></div>', unsafe_allow_html=True)
             else:
-                st.markdown(f'<div style="background:#f5f5f5; border-radius:12px; padding:0.5rem; text-align:center; opacity:0.6; font-size:0.8rem;"><span style="font-weight:500;">🔒 {step}</span></div>', unsafe_allow_html=True)
-
-# ==================== DATA PRIVACY CONSENT UI ====================
-def show_consent_ui():
-    st.markdown("""
-    <div style="background:white; border-radius:20px; padding:2rem; max-width:800px; margin:2rem auto; box-shadow:0 10px 25px rgba(0,0,0,0.1);">
-        <div style="font-size:1.5rem; font-weight:600; margin-bottom:1rem;">🔒 Data Privacy Consent</div>
-        <p>In compliance with the Data Privacy Act, we need your consent to collect, process, and store your personal information as part of the SESAM Graduate Student Lifecycle Management System.</p>
-        <div style="max-height:300px; overflow-y:auto; background:#f8fafc; padding:1rem; border-radius:12px; margin:1rem 0; font-size:0.9rem; border:1px solid #e2e8f0;">
-            <strong>What data we collect:</strong><br>
-            - Personal information (name, student number, contact details)<br>
-            - Academic records (program, grades, milestones, thesis progress)<br>
-            - Uploaded documents (proofs, forms, letters)<br>
-            - System activity logs<br><br>
-            <strong>How we use your data:</strong><br>
-            - Managing your academic milestones and records<br>
-            - Facilitating communication between students, advisers, and staff<br>
-            - Generating reports and compliance with university policies<br><br>
-            <strong>Your rights:</strong><br>
-            - You may request access, correction, or deletion of your data<br>
-            - You may withdraw consent at any time (your data will be anonymized)<br>
-            - Data is stored securely and not shared without your permission<br><br>
-            <strong>Retention period:</strong> As required by university regulations (minimum 5 years after graduation).<br><br>
-            By clicking "I Consent", you agree to the collection and processing of your personal data as described above.
-        </div>
-        <div style="display:flex; justify-content:center; gap:1rem; margin-top:1.5rem;">
-    """, unsafe_allow_html=True)
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("❌ I Do Not Consent", use_container_width=True):
-            st.session_state.logged_in = False
-            st.rerun()
-    with col2:
-        if st.button("✅ I Consent", use_container_width=True):
-            st.session_state.data_consent_given = True
-            st.rerun()
-    st.markdown("</div></div>", unsafe_allow_html=True)
+                st.markdown(f'<div style="background:#f5f5f5; border-radius:12px; padding:0.75rem; text-align:center; margin:0.25rem; opacity:0.6;"><div style="font-size:1.2rem;">🔒</div><div style="font-weight:500;">{step}</div><div style="font-size:0.7rem; color:#757575;">Locked</div></div>', unsafe_allow_html=True)
 
 # ==================== LOGIN PAGE ====================
 if not st.session_state.logged_in:
@@ -695,42 +834,49 @@ if not st.session_state.logged_in:
                     st.session_state.username = username
                     st.session_state.role = USERS[username]["role"]
                     st.session_state.display_name = USERS[username]["display_name"]
-                    st.session_state.data_consent_given = False
+                    st.session_state.consent_given = False  # reset consent for new login
                     st.rerun()
                 else:
                     st.error("Invalid credentials")
             st.caption("Demo: staff1/admin123 | adviser1/adv123 | student1/stu123")
     st.stop()
 
-# ==================== AFTER LOGIN: CHECK CONSENT ====================
-if not st.session_state.data_consent_given:
-    show_consent_ui()
+# ==================== DATA PRIVACY CONSENT CHECK ====================
+if st.session_state.logged_in and not st.session_state.consent_given:
+    show_consent_form()
     st.stop()
 
 # ==================== DATA LOAD ====================
 df = load_data()
 
-# ==================== SIDEBAR ====================
+# ==================== SIDEBAR (enhanced with consent status) ====================
 with st.sidebar:
     st.markdown(f"""
-    <div style="background:white; border-radius:20px; padding:1rem; margin-bottom:1rem; text-align:center; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
-        <h3 style="margin:0; font-size:1.1rem;">👤 {st.session_state.display_name}</h3>
-        <div style="font-size:0.8rem; color:#2c7da0; background:#e6f4f5; display:inline-block; padding:0.2rem 0.8rem; border-radius:20px;">{st.session_state.role}</div>
+    <div class="sidebar-profile">
+        <h3>👤 {st.session_state.display_name}</h3>
+        <div class="sidebar-role">{st.session_state.role}</div>
+        <div style="font-size:0.7rem; margin-top:0.5rem; color:#22c55e;">✅ Consent given</div>
     </div>
     """, unsafe_allow_html=True)
+    
+    st.markdown('<div class="sidebar-logout">', unsafe_allow_html=True)
     if st.button("🚪 Logout", use_container_width=True):
         st.session_state.logged_in = False
-        st.session_state.data_consent_given = False
+        st.session_state.consent_given = False
         for key in ["username", "role", "display_name", "selected_student"]:
             if key in st.session_state:
                 del st.session_state[key]
         st.rerun()
-    if st.button("🔐 Revoke Data Consent", use_container_width=True):
-        st.session_state.data_consent_given = False
-        st.session_state.logged_in = False
-        st.rerun()
-    st.markdown("---")
-    st.caption("Version 3.0 | Lifecycle Management\n© SESAM 2026")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('<hr class="sidebar-divider">', unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class="sidebar-footer">
+        Version 3.0 | Lifecycle Management<br>
+        © SESAM 2026
+    </div>
+    """, unsafe_allow_html=True)
 
 # ==================== MAIN ====================
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
@@ -741,17 +887,22 @@ role = st.session_state.role
 # ==================== STAFF VIEW ====================
 if role == "SESAM Staff":
     st.subheader("📋 Student Directory")
+    
     search = st.text_input("🔍 Search by name or student number", placeholder="e.g., Cruz or S001", key="staff_search")
     filtered_df = filter_dataframe(search, df)
     filtered_df["academic_year"] = filtered_df.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
+    
     if len(filtered_df) > 0:
-        st.dataframe(filtered_df[["student_number", "name", "program", "academic_year", "advisor", "gwa", "pos_status", "final_exam_status"]], use_container_width=True, height=350)
+        # Rename column header for display
+        display_df = filtered_df[["student_number", "name", "program", "academic_year", "advisor", "gwa", "pos_status", "final_exam_status"]].copy()
+        display_df.rename(columns={"academic_year": "Admitted Year", "gwa": "Cumulative GWA"}, inplace=True)
+        st.dataframe(display_df, use_container_width=True, height=400)
     else:
         st.info("No students match the current search.")
+    
     st.markdown("---")
     
-    # Two buttons side by side
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns([1,1,2])
     with col1:
         btn_update = st.button("✏️ Update Student", use_container_width=True, key="staff_btn_update")
     with col2:
@@ -771,21 +922,25 @@ if role == "SESAM Staff":
         st.session_state.staff_show_update = False
         st.rerun()
     
-    # ------------------------------------------------------------
-    # UPDATE STUDENT FORM (compact, with cancel inline)
+    # ==================== UPDATE STUDENT FORM ====================
     if st.session_state.staff_show_update:
         st.subheader("✏️ Update Student Record")
         if len(filtered_df) == 0:
             st.warning("No students available to edit.")
         else:
-            selected_student_name = st.selectbox("Select student", options=filtered_df["name"].tolist(), key="staff_update_select")
+            selected_student_name = st.selectbox(
+                "Select a student to edit",
+                options=filtered_df["name"].tolist(),
+                key="staff_update_select"
+            )
             student = filtered_df[filtered_df["name"] == selected_student_name].iloc[0].copy()
-            col_cancel, _ = st.columns([1,5])
-            with col_cancel:
-                if st.button("❌ Cancel", key="cancel_update"):
-                    st.session_state.staff_show_update = False
-                    st.rerun()
+            
+            if st.button("❌ Cancel", key="cancel_update"):
+                st.session_state.staff_show_update = False
+                st.rerun()
+            
             st.markdown(f"### Editing: {student['name']} ({student['student_number']})")
+            
             completed_steps = get_step_completion_status(student)
             next_step = get_next_required_step(student)
             st.markdown("#### 🚀 Milestone Workflow")
@@ -798,39 +953,28 @@ if role == "SESAM Staff":
             else:
                 st.success("🎉 All milestones completed! Ready for graduation.")
             
-            tab_labels = ["📝 Info", "📚 Coursework", "📝 Exams", "🏠 Residency", "🎓 Graduation", "👥 Committee", "📁 Docs", "📖 Semesters", "✅ Milestones"]
+            # 9 tabs (including Milestone Requests)
+            tab_labels = ["📝 Student Info", "📚 Coursework & Thesis", "📝 Exams", "🏠 Residency", "🎓 Graduation", "👥 Committee", "📁 Documents", "📖 Semester History", "✅ Milestone Requests"]
             tabs = st.tabs(tab_labels)
             
-            # Tab 0: Student Info
+            # Tab 0: Student Info (no upload/delete buttons, only display picture)
             with tabs[0]:
                 col1, col2 = st.columns([1,2])
                 with col1:
                     pic_path = get_profile_picture_path(student["student_number"])
                     if pic_path and os.path.exists(pic_path):
-                        st.image(pic_path, width=150)
+                        st.image(pic_path, width=180, caption="Student's Profile Picture")
                     else:
-                        st.info("No profile picture")
-                    uploaded_file = st.file_uploader("Upload new picture", type=["jpg","jpeg","png"], key="staff_pic")
-                    if uploaded_file:
-                        fn = save_profile_picture(student["student_number"], uploaded_file)
-                        if fn:
-                            df.loc[df["student_number"]==student["student_number"], "profile_pic"] = fn
-                            save_data(df)
-                            st.rerun()
-                    if st.button("🗑️ Delete picture"):
-                        if delete_profile_picture(student["student_number"]):
-                            df.loc[df["student_number"]==student["student_number"], "profile_pic"] = ""
-                            save_data(df)
-                            st.rerun()
+                        st.info("No profile picture uploaded by student.")
                 with col2:
                     st.markdown(f"**Student Number:** {student['student_number']}")
                     st.markdown(f"**Full Name:** {student['name']}")
                     st.markdown(f"**Program:** {student['program']}")
                     st.markdown(f"**Advisor:** {student['advisor']}")
-                    st.markdown(f"**Academic Year:** {format_ay(student['ay_start'], student['semester'])}")
-                    st.markdown(f"**GWA (Official):** {student['gwa']:.2f}")
+                    st.markdown(f"**Admitted Year:** {format_ay(student['ay_start'], student['semester'])}")
+                    st.markdown(f"**Cumulative GWA (from AMIS):** {student['gwa']:.2f}")
             
-            # Tab 1: Coursework & Thesis (unchanged, but compact)
+            # Tab 1: Coursework & Thesis (unchanged)
             with tabs[1]:
                 locked = is_step_locked(student, "Coursework")
                 if locked:
@@ -845,7 +989,7 @@ if role == "SESAM Staff":
                     total_units_taken = st.number_input("Total Units Taken", min_value=0, value=int(student["total_units_taken"]), disabled=locked)
                     total_units_required = st.number_input("Required Units", min_value=0, value=int(student["total_units_required"]), disabled=locked)
                     progress = compute_coursework_progress(student)
-                    st.progress(progress/100, text=f"Completion: {progress}% ({student['total_units_taken']}/{student['total_units_required']} units)")
+                    st.progress(progress/100, text=f"Coursework completion: {progress}% ({student['total_units_taken']} / {student['total_units_required']} units)")
                     st.subheader("Thesis/Dissertation")
                     thesis_units = st.number_input("Thesis Units Taken", min_value=0, value=int(student["thesis_units_taken"]), disabled=locked)
                     st.caption(get_thesis_pattern_description(student["program"]))
@@ -861,7 +1005,7 @@ if role == "SESAM Staff":
                         else:
                             st.error("Locked step cannot be edited")
             
-            # Tab 2: Exams
+            # Tab 2: Exams (unchanged)
             with tabs[2]:
                 locked = is_step_locked(student, "Exams")
                 if locked:
@@ -887,7 +1031,7 @@ if role == "SESAM Staff":
                         else:
                             st.error("Locked step cannot be edited")
             
-            # Tab 3: Residency
+            # Tab 3: Residency (unchanged)
             with tabs[3]:
                 with st.form("staff_residency"):
                     residency_used = st.number_input("Years of Residence Used", min_value=0, value=int(student["residency_years_used"]))
@@ -906,7 +1050,7 @@ if role == "SESAM Staff":
                         st.success("Updated")
                         st.rerun()
             
-            # Tab 4: Graduation
+            # Tab 4: Graduation (unchanged)
             with tabs[4]:
                 defense_done = "Defense" in get_step_completion_status(student)
                 if not defense_done:
@@ -925,7 +1069,7 @@ if role == "SESAM Staff":
                         else:
                             st.error("Cannot approve graduation before Final Exam")
             
-            # Tab 5: Committee (structured)
+            # Tab 5: Committee (dynamic)
             with tabs[5]:
                 committee_title = get_committee_title(student["program"])
                 st.subheader(f"👥 {committee_title}")
@@ -963,10 +1107,10 @@ if role == "SESAM Staff":
                         df.loc[df["student_number"] == student["student_number"], "committee_members_structured"] = structured_str
                         df.loc[df["student_number"] == student["student_number"], "committee_approval_date"] = committee_approval_date
                         save_data(df)
-                        st.success("Committee saved!")
+                        st.success("Committee saved successfully!")
                         st.rerun()
                 st.markdown("---")
-                st.write("**Preview:**")
+                st.write("**Preview (as will appear in student profile):**")
                 if members:
                     for m in members:
                         if m["name"].strip():
@@ -974,7 +1118,7 @@ if role == "SESAM Staff":
                 else:
                     st.caption("No members added yet.")
             
-            # Tab 6: Documents
+            # Tab 6: Documents (unchanged)
             with tabs[6]:
                 st.subheader("📎 Document Submissions")
                 uploads = get_all_uploads_for_student(student["student_number"])
@@ -982,7 +1126,7 @@ if role == "SESAM Staff":
                     st.info("No documents uploaded.")
                 else:
                     for _, doc in uploads.iterrows():
-                        with st.expander(f"{UPLOAD_DISPLAY_NAMES[doc['category']]} – {doc['original_filename']} ({doc['status']})"):
+                        with st.expander(f"{UPLOAD_DISPLAY_NAMES[doc['category']]} – {doc['original_filename']} (Status: {doc['status']})"):
                             st.write(f"Uploaded: {doc['upload_date']}")
                             if doc['status']=="Pending":
                                 comment = st.text_area("Reviewer Comment", key=f"comm_{doc['category']}_{doc['upload_date']}")
@@ -1007,7 +1151,7 @@ if role == "SESAM Staff":
                                 st.write(f"Reviewer: {doc['reviewed_by']} on {doc['review_date']}")
                                 st.write(f"Comment: {doc['reviewer_comment']}")
             
-            # Tab 7: Semester History
+            # Tab 7: Semester History (unchanged)
             with tabs[7]:
                 st.subheader("📚 Academic Semester Records")
                 semesters = get_student_semesters(student["student_number"])
@@ -1051,7 +1195,7 @@ if role == "SESAM Staff":
                         else:
                             st.error("Add at least one subject")
             
-            # Tab 8: Milestone Requests
+            # Tab 8: Milestone Requests (staff validation)
             with tabs[8]:
                 st.subheader("📌 Pending Milestone Validations")
                 requests_df = load_milestone_requests()
@@ -1077,6 +1221,7 @@ if role == "SESAM Staff":
                             col_a, col_b = st.columns(2)
                             with col_a:
                                 if st.button("✅ Approve", key=f"approve_{req['request_id']}"):
+                                    # Update student record
                                     target_field = req['target_field']
                                     target_value = req['target_value']
                                     df.loc[df["student_number"] == student["student_number"], target_field] = target_value
@@ -1104,15 +1249,13 @@ if role == "SESAM Staff":
                                     st.warning("Milestone rejected. Student can resubmit.")
                                     st.rerun()
     
-    # ------------------------------------------------------------
-    # ADD NEW STUDENT FORM (compact)
+    # ==================== ADD NEW STUDENT FORM (unchanged) ====================
     if st.session_state.staff_show_add:
         st.subheader("➕ Register New Student")
-        col_cancel, _ = st.columns([1,5])
-        with col_cancel:
-            if st.button("❌ Cancel", key="cancel_add"):
-                st.session_state.staff_show_add = False
-                st.rerun()
+        if st.button("❌ Cancel", key="cancel_add"):
+            st.session_state.staff_show_add = False
+            st.rerun()
+        
         with st.form(key="add_student_form_staff"):
             col1, col2, col3 = st.columns(3)
             with col1:
@@ -1121,27 +1264,41 @@ if role == "SESAM Staff":
                 first_name = st.text_input("First Name *", placeholder="Juan")
             with col3:
                 middle_name = st.text_input("Middle Name", placeholder="Santos (optional)")
+            
             col4, col5 = st.columns(2)
             with col4:
                 student_number = st.text_input("Student Number *", placeholder="2025-00123")
             with col5:
                 program = st.selectbox("Program *", options=PROGRAMS)
+            
             col6, col7 = st.columns(2)
             with col6:
                 selected_ay_range = st.selectbox("Academic Year *", options=ACADEMIC_YEARS, index=ACADEMIC_YEARS.index(f"{current_year}-{current_year+1}") if f"{current_year}-{current_year+1}" in ACADEMIC_YEARS else 0)
                 ay_start = int(selected_ay_range.split("-")[0])
             with col7:
                 semester = st.selectbox("Semester *", options=SEMESTERS)
-            advisor = st.text_input("Advisor (optional)", placeholder="Dr. Faustino-Eslava")
+            
+            col8, col9 = st.columns(2)
+            with col8:
+                advisor = st.text_input("Advisor (optional)", placeholder="Dr. Faustino-Eslava")
+            with col9:
+                st.empty()
+            
             submitted = st.form_submit_button("Register Student")
+            
             if submitted:
                 errors = []
-                if not last_name: errors.append("Last Name is required.")
-                if not first_name: errors.append("First Name is required.")
-                if not student_number: errors.append("Student Number is required.")
-                if student_number in df["student_number"].values: errors.append("Student number already exists.")
+                if not last_name:
+                    errors.append("Last Name is required.")
+                if not first_name:
+                    errors.append("First Name is required.")
+                if not student_number:
+                    errors.append("Student Number is required.")
+                if student_number in df["student_number"].values:
+                    errors.append("Student number already exists. Please use a unique number.")
                 if errors:
-                    for err in errors: st.error(err)
+                    for err in errors:
+                        st.error(err)
                 else:
                     middle = f" {middle_name.strip()}" if middle_name.strip() else ""
                     full_name = f"{last_name.strip()}, {first_name.strip()}{middle}"
@@ -1164,23 +1321,37 @@ if role == "SESAM Staff":
                         "committee_members_structured": "",
                         "committee_approval_date": "",
                         "profile_pic": "",
+                        "pos_submitted_date": "",
+                        "pos_approved_date": "",
                         "total_units_taken": 0,
                         "total_units_required": 24,
                         "thesis_outline_approved": "No",
+                        "thesis_outline_approved_date": "",
                         "thesis_status": "Not Started",
                         "qualifying_exam_status": "N/A",
+                        "qualifying_exam_passed_date": "",
                         "written_comprehensive_status": "N/A",
+                        "written_comprehensive_passed_date": "",
                         "oral_comprehensive_status": "N/A",
+                        "oral_comprehensive_passed_date": "",
                         "general_exam_status": "N/A",
+                        "general_exam_passed_date": "",
                         "final_exam_status": "Not Taken",
+                        "final_exam_passed_date": "",
                         "residency_years_used": 0,
                         "extension_count": 0,
+                        "extension_end_date": "",
+                        "loa_start_date": "",
+                        "loa_end_date": "",
                         "loa_total_terms": 0,
                         "awol_status": "No",
+                        "awol_lifted_date": "",
                         "transfer_units_approved": 0,
                         "graduation_applied": "No",
                         "graduation_approved": "No",
-                        "re_admission_status": "Not Applicable"
+                        "graduation_date": "",
+                        "re_admission_status": "Not Applicable",
+                        "re_admission_date": ""
                     })
                     new_df = pd.DataFrame([new_row])
                     df = pd.concat([df, new_df], ignore_index=True)
@@ -1189,7 +1360,7 @@ if role == "SESAM Staff":
                     st.session_state.staff_show_add = False
                     st.rerun()
 
-# ==================== ADVISER VIEW ====================
+# ==================== ADVISER VIEW (unchanged, but labels updated) ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees – {st.session_state.display_name}")
     advisees = df[df["advisor"] == st.session_state.display_name].copy()
@@ -1205,6 +1376,7 @@ elif role == "Faculty Adviser":
                 else:
                     st.warning(f"**{n['student']}** ({n['student_number']}): {n['message']}")
             st.markdown("---")
+        # Pending milestone requests
         requests_df = load_milestone_requests()
         pending_requests = requests_df[requests_df["status"] == "Pending"]
         if len(pending_requests) > 0:
@@ -1252,16 +1424,20 @@ elif role == "Faculty Adviser":
                                 st.warning("Rejected.")
                                 st.rerun()
             st.markdown("---")
+        
         search_adv = st.text_input("🔍 Filter advisees")
         filtered = filter_dataframe(search_adv, advisees)
         filtered["academic_year"] = filtered.apply(lambda row: format_ay(row["ay_start"], row["semester"]), axis=1)
-        st.dataframe(filtered[["student_number","name","program","academic_year","gwa","thesis_units_taken","pos_status","final_exam_status"]], use_container_width=True)
+        # Rename columns for display
+        display_adv = filtered[["student_number","name","program","academic_year","gwa","thesis_units_taken","pos_status","final_exam_status"]].copy()
+        display_adv.rename(columns={"academic_year": "Admitted Year", "gwa": "Cumulative GWA"}, inplace=True)
+        st.dataframe(display_adv, use_container_width=True)
         for _, row in filtered.iterrows():
             with st.expander(f"📌 {row['name']} ({row['student_number']})"):
                 col1, col2 = st.columns(2)
                 with col1:
                     st.metric("Program", row["program"])
-                    st.metric("GWA", f"{row['gwa']:.2f}")
+                    st.metric("Cumulative GWA", f"{row['gwa']:.2f}")
                     st.metric("Thesis Units", f"{row['thesis_units_taken']}/{get_thesis_limit(row['program'])}")
                 with col2:
                     st.metric("Residency", f"{row['residency_years_used']}/{get_residency_max(row['program'])}")
@@ -1280,14 +1456,16 @@ elif role == "Faculty Adviser":
                         st.success(w)
         st.info("For updates, contact SESAM Staff.")
 
-# ==================== STUDENT VIEW ====================
+# ==================== STUDENT VIEW (with profile picture upload, labels updated) ====================
 elif role == "Student":
     st.subheader(f"📘 Your Dashboard – {st.session_state.display_name}")
     student = df[df["name"] == st.session_state.display_name].iloc[0]
+    
     completed = get_step_completion_status(student)
     next_step = get_next_required_step(student)
     st.markdown("#### 🚀 Your Milestone Journey")
     display_workflow_grid(completed, next_step)
+    
     for alert in check_deadline_alerts(student):
         st.error(alert)
     for w in get_all_warnings(student):
@@ -1298,26 +1476,43 @@ elif role == "Student":
     
     colp1, colp2 = st.columns([1,3])
     with colp1:
-        pic = get_profile_picture_path(student["student_number"])
-        if pic:
-            st.image(pic, width=150)
+        pic_path = get_profile_picture_path(student["student_number"])
+        if pic_path and os.path.exists(pic_path):
+            st.image(pic_path, width=150, caption="Your Profile Picture")
         else:
             st.info("No profile picture")
+        # Allow student to upload/change their own profile picture
+        uploaded_file = st.file_uploader("Upload/Update your profile picture", type=["jpg","jpeg","png"], key="student_pic_upload")
+        if uploaded_file:
+            fn = save_profile_picture(student["student_number"], uploaded_file)
+            if fn:
+                df.loc[df["student_number"]==student["student_number"], "profile_pic"] = fn
+                save_data(df)
+                st.success("Profile picture updated!")
+                st.rerun()
+        if st.button("🗑️ Delete my picture", key="student_del_pic"):
+            if delete_profile_picture(student["student_number"]):
+                df.loc[df["student_number"]==student["student_number"], "profile_pic"] = ""
+                save_data(df)
+                st.success("Profile picture deleted.")
+                st.rerun()
     with colp2:
         metrics = st.columns(4)
         metrics[0].metric("Student Number", student["student_number"])
         metrics[1].metric("Program", student["program"])
-        metrics[2].metric("GWA", f"{student['gwa']:.2f}")
+        metrics[2].metric("Cumulative GWA", f"{student['gwa']:.2f}")
         metrics[3].metric("Advisor", student["advisor"])
         metrics2 = st.columns(4)
         metrics2[0].metric("Thesis Units", f"{student['thesis_units_taken']}/{get_thesis_limit(student['program'])}")
         metrics2[1].metric("Residency", f"{student['residency_years_used']}/{get_residency_max(student['program'])}")
         metrics2[2].metric("POS Status", student["pos_status"])
         metrics2[3].metric("Final Exam", student["final_exam_status"])
+        st.markdown(f"**Admitted Year:** {format_ay(student['ay_start'], student['semester'])}")
     
     prog = compute_coursework_progress(student)
     st.progress(prog/100, text=f"Coursework completion: {prog}% ({student['total_units_taken']}/{student['total_units_required']} units)")
     
+    # ==================== MILESTONE SUBMISSION SECTION (unchanged) ====================
     st.markdown("#### 📌 Submit Milestone Update")
     with st.expander("Request a milestone update (with supporting document)", expanded=False):
         milestone_options = [m["label"] for m in MILESTONE_TYPES]
@@ -1325,9 +1520,9 @@ elif role == "Student":
         selected_milestone = next(m for m in MILESTONE_TYPES if m["label"] == selected_milestone_label)
         current_value = student[selected_milestone["field"]]
         if current_value == selected_milestone["value"]:
-            st.success(f"✅ Already {current_value}. No need to submit.")
+            st.success(f"✅ This milestone is already marked as {current_value}. No need to submit.")
         else:
-            uploaded_file = st.file_uploader("Upload Proof (image/PDF)", type=["png","jpg","jpeg","pdf"])
+            uploaded_file = st.file_uploader("Upload Proof (screenshot, PDF, etc.)", type=["png","jpg","jpeg","pdf"])
             if uploaded_file and st.button("Submit for Validation"):
                 file_path = save_milestone_file(student["student_number"], selected_milestone_label, uploaded_file)
                 if file_path:
@@ -1350,7 +1545,7 @@ elif role == "Student":
                     }])
                     requests_df = pd.concat([requests_df, new_request], ignore_index=True)
                     save_milestone_requests(requests_df)
-                    st.success("Submitted! Staff/Adviser will validate.")
+                    st.success("Milestone update submitted! Staff/Adviser will validate.")
                     st.rerun()
     
     st.markdown("#### 📋 Your Milestone Submission History")
@@ -1360,11 +1555,11 @@ elif role == "Student":
         st.info("No milestone submissions yet.")
     else:
         for _, req in my_requests.iterrows():
-            status_emoji = "🟡" if req["status"] == "Pending" else ("✅" if req["status"] == "Approved" else "❌")
-            with st.expander(f"{status_emoji} {req['milestone_label']} - {req['status']} (Submitted: {req['submitted_date']})"):
+            status_color = "🟡" if req["status"] == "Pending" else ("✅" if req["status"] == "Approved" else "❌")
+            with st.expander(f"{status_color} {req['milestone_label']} - {req['status']} (Submitted: {req['submitted_date']})"):
                 st.write(f"**Status:** {req['status']}")
                 if req["status"] == "Pending":
-                    st.info("Under review.")
+                    st.info("Your request is pending review.")
                 elif req["status"] == "Approved":
                     st.success(f"Approved on {req['review_date']} by {req['reviewed_by']}.")
                     if req["reviewer_comment"]:
@@ -1373,11 +1568,12 @@ elif role == "Student":
                     st.error(f"Rejected on {req['review_date']} by {req['reviewed_by']}.")
                     if req["reviewer_comment"]:
                         st.write(f"**Reason:** {req['reviewer_comment']}")
-                    st.write("You may resubmit.")
+                    st.write("You may resubmit using the form above.")
                 st.write(f"**Proof:** {os.path.basename(req['file_path'])}")
                 if os.path.exists(req['file_path']) and req['file_path'].lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
                     st.image(req['file_path'], width=200)
     
+    # General document uploads (unchanged)
     st.markdown("#### 📎 Submit General Documents")
     with st.expander("Upload other documents (admission letter, AMIS, etc.)"):
         category = st.selectbox("Document Type", UPLOAD_CATEGORIES, format_func=lambda x: UPLOAD_DISPLAY_NAMES[x])
@@ -1413,6 +1609,7 @@ elif role == "Student":
                     st.table(pd.DataFrame(subjects))
                 st.caption(f"Total units: {sem['total_units']}")
     
+    # Committee display
     committee_title = get_committee_title(student["program"])
     members = parse_committee_members(student.get("committee_members_structured", ""))
     if members:
@@ -1429,4 +1626,4 @@ elif role == "Student":
 
 # ==================== FOOTER ====================
 st.markdown("---")
-st.caption("SESAM Graduate Student Lifecycle Management v3.0 | Workflow + Document Management + Data Privacy")
+st.caption("SESAM Graduate Student Lifecycle Management v3.0 | Workflow + Document Management + Milestone Validation + Data Privacy Consent")
