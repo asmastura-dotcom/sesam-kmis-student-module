@@ -1,8 +1,9 @@
 """
-SESAM KMIS - Graduate Student Lifecycle Management System (Fixed & Enhanced)
+SESAM KMIS - Graduate Student Lifecycle Management System (Complete)
 Author: [Your Name]
 Date: [Current Date]
 Description: Full workflow-based lifecycle management with consent, milestone validation, committee rules, etc.
+Student dashboard shows alerts at the top.
 """
 
 import streamlit as st
@@ -1251,7 +1252,7 @@ elif role == "Faculty Adviser":
                     st.warning(w) if "⚠️" in w else st.success(w)
         st.info("For updates, contact SESAM Staff.")
 
-# ==================== RESTRUCTURED STUDENT VIEW ====================
+# ==================== RESTRUCTURED STUDENT VIEW (alerts at top) ====================
 elif role == "Student":
     st.subheader(f"📘 Your Dashboard – {st.session_state.display_name}")
     student = df[df["name"] == st.session_state.display_name].iloc[0].copy()
@@ -1264,7 +1265,7 @@ elif role == "Student":
         if not os.path.exists(student_folder):
             os.makedirs(student_folder)
         ext = uploaded_file.name.split('.')[-1].lower()
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y%md_%H%M%S")
         filename = f"{column_name}_{timestamp}.{ext}"
         filepath = os.path.join(student_folder, filename)
         with open(filepath, "wb") as f:
@@ -1276,26 +1277,33 @@ elif role == "Student":
     # Helper to get alerts
     def get_student_alerts_and_next_action(student):
         alerts = []
+        # Standard warnings (GWA, residency, thesis units, etc.)
         alerts.extend(get_all_warnings(student))
+        # POS file missing when status is Pending
         pos_file = student.get("pos_file")
         if student["pos_status"] == "Pending" and (pd.isna(pos_file) or not pos_file):
             alerts.append("⚠️ Plan of Study (POS) file not uploaded. Please upload your POS for approval.")
+        # Final exam proof missing when status is Passed
         final_file = student.get("final_exam_file")
         if student["final_exam_status"] == "Passed" and (pd.isna(final_file) or not final_file):
             alerts.append("⚠️ Final exam result file missing. Please upload proof of passing.")
+        # GWA threshold
         if student["gwa"] > 2.00:
             alerts.append(f"⚠️ Your cumulative GWA ({student['gwa']:.2f}) is below the required 2.00 threshold.")
+        # Thesis units exceeded
         limit = get_thesis_limit(student["program"])
         if student["thesis_units_taken"] > limit:
             alerts.append(f"⚠️ You have exceeded the allowed thesis/dissertation units ({student['thesis_units_taken']}/{limit}).")
+        # Deadline alerts (POS, outline, exams)
         alerts.extend(check_deadline_alerts(student))
+        # Next milestone from workflow
         next_step = get_next_required_step(student)
         if next_step == "Complete":
             next_action = "🎉 All milestones completed! You are ready for graduation."
         else:
             next_action = f"🎯 Your next required milestone: **{next_step}**"
         return alerts, next_action
-    
+
     # ========== DISPLAY ALERTS AND NEXT ACTION AT THE TOP ==========
     alerts, next_action = get_student_alerts_and_next_action(student)
     if next_action:
@@ -1307,7 +1315,7 @@ elif role == "Student":
     else:
         st.success("✅ All requirements are satisfied. No pending actions.")
     
-    st.markdown("---")
+    st.markdown("---")  # separator before tabs
     
     # ========== TABS (without the separate alerts tab) ==========
     tab_labels = ["👤 Student Info", "📚 Coursework", "📄 Plan of Study", "📝 Examinations", "🎓 Final Exam", "📖 Thesis/Dissertation", "👥 Committee"]
