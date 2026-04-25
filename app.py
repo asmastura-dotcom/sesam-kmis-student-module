@@ -578,11 +578,11 @@ def parse_committee_members(members_str):
 def format_committee_members(members_list):
     return "\n".join([f"{m['name']}|{m['role']}" for m in members_list])
 
-# ==================== DATA LOADING (with demo data) ====================
+# ==================== DATA LOADING ====================
 DATA_FILE = "students.csv"
 
 def create_demo_data():
-    """Create demo students with realistic names and all warning scenarios."""
+    """Create demo students with realistic names while preserving warning scenarios."""
     data = {
         "student_number": ["S001", "S002", "S003", "S004", "S005", "S006", "S007", "S008", "S009", "S010", "S011", "S012", "S013"],
         "name": [
@@ -604,9 +604,9 @@ def create_demo_data():
         "first_name": ["Maria Concepcion", "Jose Mari", "Kristoffer Ivan", "Maria Isabella", "Gabriel Angelo", "Patricia Anne", "Emmanuel", "Catherine Joy", "Rommel", "Maria Lourdes", "Victor Emmanuel", "Anna Patricia", "Francis Joseph"],
         "middle_name": ["R.", "P.", "M.", "T.", "S.", "G.", "D.", "L.", "C.", "E.", "A.", "F.", "T."],
         "program": [
+            PROGRAMS[0],  # MS Environmental Science
             PROGRAMS[0],  # MS
-            PROGRAMS[0],  # MS
-            PROGRAMS[1],  # PhD
+            PROGRAMS[1],  # PhD Environmental Science
             PROGRAMS[0],  # MS
             PROGRAMS[0],  # MS
             PROGRAMS[0],  # MS
