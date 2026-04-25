@@ -2,7 +2,7 @@
 SESAM KMIS - Graduate Student Lifecycle Management System (Enhanced)
 Author: [Your Name]
 Date: [Current Date]
-Description: Full academic record system with course code, description, grade dropdown, semester grouping, and automatic GWA.
+Description: Full academic record system with semester grouping, add subject per semester, and add next semester button.
 """
 
 import streamlit as st
@@ -132,7 +132,6 @@ PROGRAMS = [
     "PhD by Research Environmental Science"
 ]
 
-# Infer program type from program name (no manual input)
 def get_program_type(program_name):
     if program_name.startswith("MS") or program_name.startswith("Master"):
         return "MS_Thesis" if "Resilience" not in program_name or "Environmental Science" in program_name else "MS_NonThesis"
@@ -141,9 +140,9 @@ def get_program_type(program_name):
     elif program_name.startswith("PhD"):
         return "PhD_Regular"
     else:
-        return "MS_Thesis"  # default
+        return "MS_Thesis"
 
-# ==================== MILESTONE DEFINITIONS PER PROGRAM ====================
+# ==================== MILESTONE DEFINITIONS (unchanged) ====================
 MILESTONE_DEFS = {
     "MS_Thesis": [
         "Admission", "Registration", "Guidance Committee Formation", "Plan of Study (POS)",
@@ -171,7 +170,7 @@ MILESTONE_DEFS = {
     ]
 }
 
-# ==================== MILESTONE TRACKING FILE ====================
+# ==================== MILESTONE TRACKING (unchanged) ====================
 MILESTONE_FILE = "milestone_tracking.csv"
 
 def load_milestone_tracking():
@@ -298,7 +297,7 @@ def get_thesis_pattern_description(program):
     else:
         return "💡 PhD: 12 dissertation units (3-3-3-3 or 4-4-4)."
 
-# ==================== WORKFLOW ENGINE ====================
+# ==================== WORKFLOW ENGINE (unchanged) ====================
 WORKFLOW_STEPS = ["Committee", "Coursework", "Exams", "POS", "Thesis", "Defense", "Graduation"]
 
 def get_step_completion_status(student_row):
@@ -374,7 +373,6 @@ def compute_gwa_from_subjects(subjects_list):
             total_units += units
             total_grade_points += units * grade
         except (ValueError, TypeError):
-            # Non‑numeric grade – skip for GWA calculation
             continue
     return total_grade_points / total_units if total_units > 0 else 0.0
 
@@ -383,7 +381,7 @@ def get_student_semesters(student_number):
     return df[df["student_number"] == student_number].copy()
 
 def add_semester_record(student_number, academic_year, semester, subjects_list, amis_file_path=""):
-    """subjects_list: list of dicts with keys: course_code, course_description, units, grade"""
+    """Add a new semester record (overwrites if duplicate? We'll append; duplicates allowed by design?)"""
     df = load_semester_records()
     gwa = compute_gwa_from_subjects(subjects_list)
     total_units = sum(float(s.get("units", 0)) for s in subjects_list)
@@ -400,6 +398,71 @@ def add_semester_record(student_number, academic_year, semester, subjects_list, 
     save_semester_records(df)
     update_student_academic_summary(student_number)
     return gwa
+
+def update_semester_record(student_number, academic_year, semester, subjects_list, amis_file_path=None):
+    """Replace existing semester record with updated subjects list."""
+    df = load_semester_records()
+    mask = (df["student_number"] == student_number) & (df["academic_year"] == academic_year) & (df["semester"] == semester)
+    if mask.any():
+        gwa = compute_gwa_from_subjects(subjects_list)
+        total_units = sum(float(s.get("units", 0)) for s in subjects_list)
+        idx = df[mask].index[0]
+        df.at[idx, "subjects_json"] = json.dumps(subjects_list)
+        df.at[idx, "total_units"] = total_units
+        df.at[idx, "gwa"] = gwa
+        if amis_file_path:
+            df.at[idx, "amis_file_path"] = amis_file_path
+        save_semester_records(df)
+        update_student_academic_summary(student_number)
+    else:
+        # If not found, create new record
+        add_semester_record(student_number, academic_year, semester, subjects_list, amis_file_path or "")
+
+def add_subject_to_semester(student_number, academic_year, semester, new_subject):
+    """Add a subject to an existing semester. new_subject: dict with course_code, course_description, units, grade."""
+    df = load_semester_records()
+    mask = (df["student_number"] == student_number) & (df["academic_year"] == academic_year) & (df["semester"] == semester)
+    if not mask.any():
+        st.error("Semester not found. Create semester first.")
+        return False
+    idx = df[mask].index[0]
+    subjects = json.loads(df.at[idx, "subjects_json"])
+    subjects.append(new_subject)
+    gwa = compute_gwa_from_subjects(subjects)
+    total_units = sum(float(s.get("units", 0)) for s in subjects)
+    df.at[idx, "subjects_json"] = json.dumps(subjects)
+    df.at[idx, "total_units"] = total_units
+    df.at[idx, "gwa"] = gwa
+    save_semester_records(df)
+    update_student_academic_summary(student_number)
+    return True
+
+def get_next_semester_sequence(academic_year, semester):
+    """Return (next_academic_year, next_semester) following the order: 1st Sem -> 2nd Sem -> Summer -> next year 1st Sem."""
+    sem_order = ["1st Sem", "2nd Sem", "Summer"]
+    if semester not in sem_order:
+        return academic_year, "1st Sem"
+    idx = sem_order.index(semester)
+    if idx < 2:
+        return academic_year, sem_order[idx+1]
+    else:
+        # Summer -> next year 1st Sem
+        start_year = int(academic_year.split("-")[0])
+        next_ay = f"{start_year+1}-{start_year+2}"
+        return next_ay, "1st Sem"
+
+def create_next_semester(student_number, current_ay, current_sem):
+    """Create a new empty semester after the given one."""
+    next_ay, next_sem = get_next_semester_sequence(current_ay, current_sem)
+    df = load_semester_records()
+    # Check if already exists
+    mask = (df["student_number"] == student_number) & (df["academic_year"] == next_ay) & (df["semester"] == next_sem)
+    if mask.any():
+        st.warning(f"Semester {next_ay} {next_sem} already exists.")
+        return False
+    add_semester_record(student_number, next_ay, next_sem, [], amis_file_path="")
+    st.success(f"Created new semester: {next_ay} {next_sem}")
+    return True
 
 def update_student_academic_summary(student_number):
     semesters = get_student_semesters(student_number)
@@ -429,7 +492,7 @@ def update_main_student_gwa_and_units(student_number, cumulative_gwa, total_unit
         df.loc[idx, "total_units_taken"] = total_units
         save_data(df)
 
-# ==================== DOCUMENT UPLOAD SYSTEM ====================
+# ==================== DOCUMENT UPLOAD SYSTEM (unchanged) ====================
 UPLOAD_FOLDER = "student_uploads"
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
@@ -471,7 +534,7 @@ def get_all_uploads_for_student(student_number):
     df = load_uploads()
     return df[df["student_number"] == student_number].copy()
 
-# ==================== MILESTONE SUBMISSION & VALIDATION ====================
+# ==================== MILESTONE SUBMISSION & VALIDATION (unchanged) ====================
 MILESTONE_REQUESTS_FILE = "milestone_requests.csv"
 
 MILESTONE_TYPES = [
@@ -589,7 +652,6 @@ def format_committee_members(members_list):
 DATA_FILE = "students.csv"
 
 def create_demo_data():
-    """Create demo students with realistic names and fully consistent dates."""
     data = {
         "student_number": ["S001", "S002", "S003", "S004", "S005", "S006", "S007", "S008", "S009", "S010", "S011", "S012", "S013"],
         "name": [
@@ -611,21 +673,11 @@ def create_demo_data():
         "first_name": ["Maria Concepcion", "Jose Mari", "Kristoffer Ivan", "Maria Isabella", "Gabriel Angelo", "Patricia Anne", "Emmanuel", "Catherine Joy", "Rommel", "Maria Lourdes", "Victor Emmanuel", "Anna Patricia", "Francis Joseph"],
         "middle_name": ["R.", "P.", "M.", "T.", "S.", "G.", "D.", "L.", "C.", "E.", "A.", "F.", "T."],
         "program": [
-            PROGRAMS[0],  # MS Environmental Science
-            PROGRAMS[0],  # MS
-            PROGRAMS[1],  # PhD Environmental Science
-            PROGRAMS[0],  # MS
-            PROGRAMS[0],  # MS
-            PROGRAMS[0],  # MS
-            PROGRAMS[0],  # MS
-            PROGRAMS[0],  # MS
-            PROGRAMS[1],  # PhD
-            PROGRAMS[0],  # MS
-            PROGRAMS[0],  # MS
-            PROGRAMS[0],  # MS
-            PROGRAMS[0]   # MS
+            PROGRAMS[0], PROGRAMS[0], PROGRAMS[1], PROGRAMS[0], PROGRAMS[0], PROGRAMS[0],
+            PROGRAMS[0], PROGRAMS[0], PROGRAMS[1], PROGRAMS[0], PROGRAMS[0], PROGRAMS[0], PROGRAMS[0]
         ],
-        "advisor": ["Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava"],
+        "advisor": ["Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez",
+                    "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava", "Dr. Sanchez", "Dr. Eslava"],
         "ay_start": [2022, 2023, 2022, 2022, 2022, 2023, 2022, 2022, 2022, 2022, 2022, 2022, 2022],
         "semester": ["1st Sem"] * 13,
         "profile_pic": [""] * 13,
@@ -729,8 +781,7 @@ def create_demo_data():
         "committee_changed": [False, False, False, False, False, False, False, False, False, True, False, False, False],
         "coursework_changed": [False, False, False, False, False, False, False, False, False, False, True, False, False]
     }
-    df = pd.DataFrame(data)
-    return df
+    return pd.DataFrame(data)
 
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -742,7 +793,6 @@ def load_data():
         df = create_demo_data()
         save_data(df)
 
-    # Ensure all required columns exist
     default_df = create_demo_data()
     for col in default_df.columns:
         if col not in df.columns:
@@ -824,22 +874,17 @@ def get_thesis_limit(program):
 def get_residency_max(program):
     return get_residency_max_from_program(program)
 
-# ==================== VALIDATION FUNCTIONS (data consistency) ====================
+# ==================== VALIDATION FUNCTIONS (unchanged) ====================
 def validate_student_data(student):
     warnings = []
-    # POS
     if student["pos_status"] == "Approved" and (pd.isna(student["pos_approved_date"]) or not student["pos_approved_date"]):
         warnings.append("POS is Approved but no approval date.")
-    # Thesis outline
     if student["thesis_outline_approved"] == "Yes" and (pd.isna(student["thesis_outline_approved_date"]) or not student["thesis_outline_approved_date"]):
         warnings.append("Thesis outline is approved but no approval date.")
-    # Committee
     if student["committee_approval_date"] and student["committee_approval_date"] != "":
-        # OK
         pass
     elif student.get("committee_members_structured") and student.get("committee_members_structured") != "":
         warnings.append("Committee members are listed but committee approval date is missing.")
-    # Exams
     if student["qualifying_exam_status"] == "Passed" and (pd.isna(student["qualifying_exam_passed_date"]) or not student["qualifying_exam_passed_date"]):
         warnings.append("Qualifying Exam is Passed but no date.")
     if student["written_comprehensive_status"] == "Passed" and (pd.isna(student["written_comprehensive_passed_date"]) or not student["written_comprehensive_passed_date"]):
@@ -850,12 +895,11 @@ def validate_student_data(student):
         warnings.append("General Exam is Passed but no date.")
     if student["final_exam_status"] == "Passed" and (pd.isna(student["final_exam_passed_date"]) or not student["final_exam_passed_date"]):
         warnings.append("Final Exam is Passed but no date.")
-    # Graduation
     if student["graduation_approved"] == "Yes" and (pd.isna(student["graduation_date"]) or not student["graduation_date"]):
         warnings.append("Graduation is approved but no graduation date.")
     return warnings
 
-# ==================== WARNING FUNCTIONS ====================
+# ==================== WARNING FUNCTIONS (unchanged) ====================
 def get_warning_text(program, units_taken):
     limit = get_thesis_limit(program)
     try:
@@ -963,110 +1007,6 @@ def compute_coursework_progress(row):
     required = row.get("total_units_required", 24)
     return min(100, int((taken / required) * 100)) if required > 0 else 0
 
-# ==================== DYNAMIC SUBJECT INPUT HELPERS (ENHANCED) ====================
-# Grade options for dropdown
-GRADE_OPTIONS = ["1.00", "1.25", "1.50", "1.75", "2.00", "2.25", "2.50", "2.75", "3.00", "INC", "DRP", "5.00", "P", "IP"]
-
-def get_all_subjects_table(student_number: str) -> pd.DataFrame:
-    """Return a DataFrame with columns: Course Code, Course Description, Units, Grade, Academic Year, Semester"""
-    semesters = get_student_semesters(student_number)
-    all_rows = []
-    for _, sem in semesters.iterrows():
-        subjects = json.loads(sem["subjects_json"])
-        for subj in subjects:
-            all_rows.append({
-                "Course Code": subj.get("course_code", ""),
-                "Course Description": subj.get("course_description", subj.get("name", "")),  # backward compatibility
-                "Units": subj["units"],
-                "Grade": subj["grade"],
-                "Academic Year": sem["academic_year"],
-                "Semester": sem["semester"]
-            })
-    return pd.DataFrame(all_rows)
-
-def dynamic_subject_inputs(key_prefix: str):
-    """
-    Render dynamic subject rows with: Course Code, Course Description, Units (int), Grade (dropdown).
-    Must be called OUTSIDE any st.form.
-    """
-    if f"{key_prefix}_subjects" not in st.session_state:
-        st.session_state[f"{key_prefix}_subjects"] = [{"course_code": "", "course_description": "", "units": 3, "grade": "1.00"}]
-
-    subjects = st.session_state[f"{key_prefix}_subjects"]
-
-    # Display existing rows
-    for i, subj in enumerate(subjects):
-        cols = st.columns([1.2, 2, 0.8, 1.2, 0.5])
-        with cols[0]:
-            code = st.text_input("Course Code", value=subj.get("course_code", ""), key=f"{key_prefix}_code_{i}")
-        with cols[1]:
-            desc = st.text_input("Course Description", value=subj.get("course_description", ""), key=f"{key_prefix}_desc_{i}")
-        with cols[2]:
-            units = st.number_input("Units", min_value=0, max_value=12, step=1, value=int(subj.get("units", 3)), key=f"{key_prefix}_units_{i}")
-        with cols[3]:
-            grade = st.selectbox("Grade", options=GRADE_OPTIONS, index=GRADE_OPTIONS.index(subj.get("grade", "1.00")), key=f"{key_prefix}_grade_{i}")
-        with cols[4]:
-            if st.button("🗑️", key=f"{key_prefix}_del_{i}"):
-                subjects.pop(i)
-                st.rerun()
-        subjects[i] = {"course_code": code, "course_description": desc, "units": units, "grade": grade}
-
-    # Add new subject button
-    if st.button("➕ Add Subject", key=f"{key_prefix}_add"):
-        subjects.append({"course_code": "", "course_description": "", "units": 3, "grade": "1.00"})
-        st.rerun()
-
-    return subjects
-
-def display_semester_subjects(student_number):
-    """Display all semesters with formatted tables and per-semester totals."""
-    semesters = get_student_semesters(student_number)
-    if semesters.empty:
-        st.info("No semester records yet.")
-        return
-
-    for _, sem in semesters.iterrows():
-        with st.expander(f"📅 {sem['academic_year']} | {sem['semester']} (GWA: {sem['gwa']:.2f})", expanded=False):
-            subjects = json.loads(sem["subjects_json"])
-            if subjects:
-                df_display = pd.DataFrame([
-                    {
-                        "Course Code": s.get("course_code", ""),
-                        "Course Description": s.get("course_description", s.get("name", "")),
-                        "Units": s["units"],
-                        "Grade": s["grade"]
-                    } for s in subjects
-                ])
-                st.dataframe(df_display, use_container_width=True, hide_index=True)
-                # Compute numeric units for GWA (only numeric grades)
-                numeric_units = 0
-                for s in subjects:
-                    try:
-                        float(s["grade"])
-                        numeric_units += s["units"]
-                    except:
-                        pass
-                st.caption(f"📊 **Semester Total Units:** {sem['total_units']} | **GWA (numeric only):** {sem['gwa']:.2f}")
-            else:
-                st.caption("No subjects in this semester.")
-
-def display_cumulative_summary(student):
-    """Show cumulative units taken, required units, remaining, and cumulative GWA."""
-    total_taken = student["total_units_taken"]
-    total_required = student["total_units_required"]
-    remaining = max(0, total_required - total_taken)
-    cum_gwa = student["gwa"]
-
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Total Units Taken", total_taken)
-    with col2:
-        st.metric("Required Units", total_required)
-    with col3:
-        st.metric("Remaining Units", remaining)
-    with col4:
-        st.metric("Cumulative GWA", f"{cum_gwa:.2f}")
-
 # ==================== UI HELPER FUNCTIONS ====================
 def safe_index(options, value):
     try:
@@ -1090,6 +1030,77 @@ def display_workflow_grid(completed_steps, next_step):
                 st.markdown(f'<div style="background:#fff3e0; border:2px solid #ff9800; border-radius:12px; padding:0.5rem; text-align:center; margin:0.2rem;"><div style="font-size:1rem;">⏳</div><div style="font-weight:500;">{step}</div><div style="font-size:0.7rem; color:#e65100;">Next Required</div></div>', unsafe_allow_html=True)
             else:
                 st.markdown(f'<div style="background:#f5f5f5; border-radius:12px; padding:0.5rem; text-align:center; margin:0.2rem; opacity:0.6;"><div style="font-size:1rem;">🔒</div><div style="font-weight:500;">{step}</div><div style="font-size:0.7rem; color:#757575;">Locked</div></div>', unsafe_allow_html=True)
+
+# ==================== COURSEWORK DISPLAY & ADD FUNCTIONS ====================
+GRADE_OPTIONS = ["1.00", "1.25", "1.50", "1.75", "2.00", "2.25", "2.50", "2.75", "3.00", "INC", "DRP", "5.00", "P", "IP"]
+
+def render_semester_section(student_number, semester_row):
+    """Display a single semester with its subjects, total units, GWA, and an Add Subject form inside expander."""
+    ay = semester_row["academic_year"]
+    sem = semester_row["semester"]
+    subjects = json.loads(semester_row["subjects_json"])
+    total_units = semester_row["total_units"]
+    gwa = semester_row["gwa"]
+
+    expander_label = f"📅 {ay} | {sem} (Total Units: {total_units} | GWA: {gwa:.2f})"
+    with st.expander(expander_label, expanded=False):
+        if subjects:
+            df_display = pd.DataFrame([
+                {
+                    "Course Code": s.get("course_code", ""),
+                    "Course Description": s.get("course_description", s.get("name", "")),
+                    "Units": s["units"],
+                    "Grade": s["grade"]
+                } for s in subjects
+            ])
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
+        else:
+            st.caption("No subjects yet.")
+
+        st.markdown(f"**Semester Total Units:** {total_units}  **Semester GWA:** {gwa:.2f}")
+
+        st.markdown("---")
+        st.markdown("**Add a new subject to this semester**")
+        with st.form(key=f"add_subject_{student_number}_{ay}_{sem}"):
+            col1, col2 = st.columns(2)
+            with col1:
+                code = st.text_input("Course Code", key=f"code_{ay}_{sem}")
+                units = st.number_input("Units", min_value=0, max_value=12, step=1, value=3, key=f"units_{ay}_{sem}")
+            with col2:
+                desc = st.text_input("Course Description", key=f"desc_{ay}_{sem}")
+                grade = st.selectbox("Grade", options=GRADE_OPTIONS, index=0, key=f"grade_{ay}_{sem}")
+            add_submitted = st.form_submit_button("➕ Add Subject")
+            if add_submitted:
+                if not code.strip() and not desc.strip():
+                    st.error("Please enter at least a course code or description.")
+                else:
+                    new_subject = {
+                        "course_code": code.strip(),
+                        "course_description": desc.strip(),
+                        "units": int(units),
+                        "grade": grade
+                    }
+                    success = add_subject_to_semester(student_number, ay, sem, new_subject)
+                    if success:
+                        st.success(f"Subject added to {ay} {sem}!")
+                        st.rerun()
+                    else:
+                        st.error("Failed to add subject.")
+
+def render_cumulative_summary(student):
+    total_taken = student["total_units_taken"]
+    total_required = student["total_units_required"]
+    remaining = max(0, total_required - total_taken)
+    cum_gwa = student["gwa"]
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Units Taken", total_taken)
+    with col2:
+        st.metric("Required Units", total_required)
+    with col3:
+        st.metric("Remaining Units", remaining)
+    with col4:
+        st.metric("Cumulative GWA", f"{cum_gwa:.2f}")
 
 # ==================== LOGIN PAGE ====================
 if not st.session_state.logged_in:
@@ -1147,7 +1158,7 @@ st.caption("Complete workflow tracking from admission to graduation")
 
 role = st.session_state.role
 
-# ==================== STAFF VIEW ====================
+# ==================== STAFF VIEW (simplified – only update student form remains) ====================
 if role == "SESAM Staff":
     st.subheader("📋 Student Directory")
     search = st.text_input("🔍 Search by name or student number", placeholder="e.g., S001 or Santos", key="staff_search")
@@ -1190,7 +1201,7 @@ if role == "SESAM Staff":
         st.session_state.staff_show_update = False
         st.rerun()
 
-    # ==================== UPDATE STUDENT FORM ====================
+    # Update student form (simplified – only exams, residency, graduation, committee, documents, milestone requests)
     if st.session_state.staff_show_update:
         st.subheader("✏️ Update Student Record")
         if len(filtered_df) == 0:
@@ -1215,7 +1226,7 @@ if role == "SESAM Staff":
             else:
                 st.success("🎉 All milestones completed! Ready for graduation.")
 
-            tab_labels = ["📝 Info", "📚 Coursework", "📝 Exams", "🏠 Residency", "🎓 Graduation", "👥 Committee", "📁 Docs", "📖 Semesters", "✅ Requests"]
+            tab_labels = ["📝 Info", "📚 Coursework", "📝 Exams", "🏠 Residency", "🎓 Graduation", "👥 Committee", "📁 Docs", "✅ Requests"]
             tabs = st.tabs(tab_labels)
 
             with tabs[0]:  # Info
@@ -1232,57 +1243,40 @@ if role == "SESAM Staff":
                     st.markdown(f"**Program:** {student['program']}")
                     st.markdown(f"**Advisor:** {student['advisor']}")
                     st.markdown(f"**Admitted Year:** {format_ay(student['ay_start'], student['semester'])}")
-                    st.markdown(f"**Cumulative GWA (from AMIS):** {student['gwa']:.2f}")
+                    st.markdown(f"**Cumulative GWA:** {student['gwa']:.2f}")
 
-            with tabs[1]:  # Coursework (Staff view with enhanced academic record)
-                locked = is_step_locked(student, "Coursework")
-                if locked:
-                    st.warning("🔒 Coursework step locked until Committee approved.")
-
-                # Display all subjects grouped by semester
-                st.subheader("📚 Academic Record")
-                display_semester_subjects(student["student_number"])
+            with tabs[1]:  # Coursework (Staff view – read-only display of semesters, add subject & create semester)
+                st.subheader("Student's Academic Record")
+                semesters = get_student_semesters(student["student_number"])
+                if semesters.empty:
+                    st.info("No semesters yet.")
+                else:
+                    for _, sem_row in semesters.iterrows():
+                        render_semester_section(student["student_number"], sem_row)
                 st.markdown("---")
-                st.subheader("📊 Cumulative Summary")
-                display_cumulative_summary(student)
-
-                st.markdown("---")
-                st.subheader("➕ Add New Semester (Staff)")
-
-                # Render dynamic subjects OUTSIDE the form
-                subjects = dynamic_subject_inputs(f"staff_{student['student_number']}_new_sem")
-
-                with st.form(key=f"staff_dynamic_semester_form_{student['student_number']}"):
-                    col_ay, col_sem = st.columns(2)
-                    with col_ay:
-                        academic_year = st.selectbox("Academic Year", ACADEMIC_YEARS)
-                    with col_sem:
-                        semester = st.selectbox("Semester", SEMESTERS)
-
-                    amis_file = st.file_uploader("AMIS Screenshot (optional)", type=["png","jpg","jpeg","pdf"])
-
-                    if st.form_submit_button("Save Semester", disabled=locked):
-                        valid_subjects = [s for s in subjects if s["course_code"].strip() or s["course_description"].strip()]
-                        if not valid_subjects:
-                            st.error("Add at least one subject with a course code or description.")
-                        else:
-                            # Convert units to int, ensure grade is string
-                            for s in valid_subjects:
-                                s["units"] = int(s["units"])
-                                s["grade"] = str(s["grade"])
-                            amis_path = save_uploaded_file(student["student_number"], "amis_screenshot", amis_file) if amis_file else ""
-                            add_semester_record(student["student_number"], academic_year, semester, valid_subjects, amis_path)
-                            st.success("Semester added!")
-                            st.session_state[f"staff_{student['student_number']}_new_sem_subjects"] = [{"course_code": "", "course_description": "", "units": 3, "grade": "1.00"}]
+                st.subheader("➕ Add Next Semester")
+                if st.button("➕ Add Next Semester", key=f"staff_next_sem_{student['student_number']}"):
+                    # Determine last semester
+                    last_sem = semesters.iloc[-1] if not semesters.empty else None
+                    if last_sem is None:
+                        # No semesters yet – create first semester using current/default AY
+                        default_ay = f"{current_year}-{current_year+1}"
+                        default_sem = "1st Sem"
+                        success = add_semester_record(student["student_number"], default_ay, default_sem, [])
+                        if success is not None:
+                            st.success(f"Created first semester: {default_ay} {default_sem}")
                             st.rerun()
-
-                # Manual override
+                    else:
+                        next_ay, next_sem = get_next_semester_sequence(last_sem["academic_year"], last_sem["semester"])
+                        success = create_next_semester(student["student_number"], last_sem["academic_year"], last_sem["semester"])
+                        if success:
+                            st.rerun()
                 st.markdown("---")
                 st.subheader("Manual Override (GWA / Units)")
                 with st.form("staff_coursework_override"):
-                    gwa_manual = st.number_input("GWA (override)", min_value=1.0, max_value=5.0, value=float(student["gwa"]), disabled=locked)
-                    total_units_taken = st.number_input("Total Units Taken (override)", min_value=0, value=int(student["total_units_taken"]), disabled=locked)
-                    if st.form_submit_button("Update Totals", disabled=locked):
+                    gwa_manual = st.number_input("GWA (override)", min_value=1.0, max_value=5.0, value=float(student["gwa"]))
+                    total_units_taken = st.number_input("Total Units Taken (override)", min_value=0, value=int(student["total_units_taken"]))
+                    if st.form_submit_button("Update Totals"):
                         df.loc[df["student_number"]==student["student_number"], ["gwa","total_units_taken"]] = [gwa_manual, total_units_taken]
                         save_data(df)
                         st.success("Totals updated manually.")
@@ -1315,7 +1309,7 @@ if role == "SESAM Staff":
                         else:
                             st.error("Locked step cannot be edited")
 
-            with tabs[3]:  # Residency
+            with tabs[3]:  # Residency (unchanged)
                 with st.form("staff_residency"):
                     residency_used = st.number_input("Years of Residence Used", min_value=0, value=int(student["residency_years_used"]))
                     max_years = get_residency_max(student["program"])
@@ -1335,7 +1329,7 @@ if role == "SESAM Staff":
                         st.success("Updated")
                         st.rerun()
 
-            with tabs[4]:  # Graduation
+            with tabs[4]:  # Graduation (unchanged)
                 defense_done = "Defense" in get_step_completion_status(student)
                 if not defense_done:
                     st.warning("🔒 Graduation locked until Final Exam passed.")
@@ -1355,7 +1349,7 @@ if role == "SESAM Staff":
                         else:
                             st.error("Cannot approve graduation before Final Exam")
 
-            with tabs[5]:  # Committee
+            with tabs[5]:  # Committee (unchanged)
                 committee_title = get_committee_title(student["program"])
                 st.subheader(f"👥 {committee_title}")
                 existing_members = parse_committee_members(student.get("committee_members_structured", ""))
@@ -1399,7 +1393,7 @@ if role == "SESAM Staff":
                         st.success("Committee saved!")
                         st.rerun()
 
-            with tabs[6]:  # Documents
+            with tabs[6]:  # Documents (unchanged)
                 st.subheader("📎 Document Submissions")
                 uploads = get_all_uploads_for_student(student["student_number"])
                 if len(uploads)==0:
@@ -1431,11 +1425,7 @@ if role == "SESAM Staff":
                                 st.write(f"Reviewer: {doc['reviewed_by']} on {doc['review_date']}")
                                 st.write(f"Comment: {doc['reviewer_comment']}")
 
-            with tabs[7]:  # Semester History (detailed view already shown in Coursework tab, but keep for completeness)
-                st.subheader("📚 Semester Records (Detailed)")
-                display_semester_subjects(student["student_number"])
-
-            with tabs[8]:  # Milestone Requests
+            with tabs[7]:  # Milestone Requests (unchanged)
                 st.subheader("📌 Pending Milestone Validations")
                 requests_df = load_milestone_requests()
                 student_requests = requests_df[requests_df["student_number"] == student["student_number"]].copy()
@@ -1485,7 +1475,7 @@ if role == "SESAM Staff":
                                     st.warning("Rejected.")
                                     st.rerun()
 
-    # ==================== ADD NEW STUDENT FORM ====================
+    # Add new student form (unchanged)
     if st.session_state.staff_show_add:
         st.subheader("➕ Register New Student")
         if st.button("❌ Cancel", key="cancel_add"):
@@ -1577,7 +1567,7 @@ if role == "SESAM Staff":
                     st.session_state.staff_show_add = False
                     st.rerun()
 
-# ==================== ADVISER VIEW ====================
+# ==================== ADVISER VIEW (unchanged) ====================
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Your Advisees – {st.session_state.display_name}")
     advisees = df[df["advisor"] == st.session_state.display_name].copy()
@@ -1661,7 +1651,7 @@ elif role == "Faculty Adviser":
                     st.warning(w) if "⚠️" in w else st.success(w)
         st.info("For updates, contact SESAM Staff.")
 
-# ==================== STUDENT VIEW ====================
+# ==================== STUDENT VIEW (ENHANCED COURSEWORK) ====================
 elif role == "Student":
     st.subheader(f"📘 Your Dashboard – {st.session_state.display_name}")
     student = df[df["name"] == st.session_state.display_name].iloc[0].copy()
@@ -1770,44 +1760,39 @@ elif role == "Student":
             st.markdown(f"**Adviser:** {student['advisor']}")
             st.markdown(f"**Admitted Year:** {format_ay(student['ay_start'], student['semester'])}")
 
-    with tabs[tab_index]:  # Coursework (Student view with enhanced academic record)
+    with tabs[tab_index]:  # Coursework (Student view – structured per semester)
         tab_index += 1
         st.subheader("📚 Your Academic Record")
-        display_semester_subjects(student["student_number"])
-        st.markdown("---")
-        st.subheader("📊 Cumulative Summary")
-        display_cumulative_summary(student)
+
+        semesters = get_student_semesters(student["student_number"])
+        if semesters.empty:
+            st.info("No semesters yet. Click 'Add Next Semester' to start.")
+        else:
+            for _, sem_row in semesters.iterrows():
+                render_semester_section(student["student_number"], sem_row)
 
         st.markdown("---")
-        st.subheader("➕ Add New Semester")
-
-        subjects = dynamic_subject_inputs("student_new_sem")
-
-        with st.form(key="student_dynamic_semester_form"):
-            col_ay, col_sem = st.columns(2)
-            with col_ay:
-                academic_year = st.selectbox("Academic Year", ACADEMIC_YEARS)
-            with col_sem:
-                semester = st.selectbox("Semester", SEMESTERS)
-
-            amis_file = st.file_uploader("AMIS Screenshot (proof of grades)", type=["png","jpg","jpeg","pdf"])
-
-            submitted = st.form_submit_button("Save Semester")
-            if submitted:
-                valid_subjects = [s for s in subjects if s["course_code"].strip() or s["course_description"].strip()]
-                if not valid_subjects:
-                    st.error("Please add at least one subject with a course code or description.")
-                else:
-                    for s in valid_subjects:
-                        s["units"] = int(s["units"])
-                        s["grade"] = str(s["grade"])
-                    amis_path = save_uploaded_file(student["student_number"], "amis_screenshot", amis_file) if amis_file else ""
-                    add_semester_record(student["student_number"], academic_year, semester, valid_subjects, amis_path)
-                    st.success(f"Semester {academic_year} - {semester} saved successfully!")
-                    st.session_state["student_new_sem_subjects"] = [{"course_code": "", "course_description": "", "units": 3, "grade": "1.00"}]
+        st.subheader("➕ Add Next Semester")
+        if st.button("➕ Add Next Semester", key="student_next_sem"):
+            last_sem = semesters.iloc[-1] if not semesters.empty else None
+            if last_sem is None:
+                default_ay = f"{current_year}-{current_year+1}"
+                default_sem = "1st Sem"
+                success = add_semester_record(student["student_number"], default_ay, default_sem, [])
+                if success is not None:
+                    st.success(f"Created first semester: {default_ay} {default_sem}")
+                    st.rerun()
+            else:
+                next_ay, next_sem = get_next_semester_sequence(last_sem["academic_year"], last_sem["semester"])
+                success = create_next_semester(student["student_number"], last_sem["academic_year"], last_sem["semester"])
+                if success:
                     st.rerun()
 
-    with tabs[tab_index]:  # Plan of Study
+        st.markdown("---")
+        st.subheader("📊 Cumulative Summary")
+        render_cumulative_summary(student)
+
+    with tabs[tab_index]:  # Plan of Study (unchanged)
         tab_index += 1
         st.subheader("📄 Plan of Study (POS)")
         col1, col2 = st.columns(2)
@@ -1861,7 +1846,7 @@ elif role == "Student":
         else:
             st.info("No committee members assigned yet.")
 
-    with tabs[tab_index]:  # Milestone Tracker
+    with tabs[tab_index]:  # Milestone Tracker (unchanged)
         tab_index += 1
         st.subheader("🎯 Milestone Tracker")
         milestones_df = get_student_milestones(student["student_number"], program_type)
@@ -1893,7 +1878,7 @@ elif role == "Student":
                     st.rerun()
                 st.markdown("---")
 
-    # Thesis/Dissertation tab
+    # Thesis/Dissertation tab (unchanged)
     if program_type in ["MS_Thesis", "PhD_Regular", "PhD_Straight", "PhD_Research"] and tab_index < len(tabs):
         with tabs[tab_index]:
             tab_index += 1
@@ -1961,7 +1946,7 @@ elif role == "Student":
                     st.rerun()
             st.caption(get_thesis_pattern_description(student["program"]))
 
-    # Examinations tab
+    # Examinations tab (unchanged)
     if program_type in ["MS_Thesis", "MS_NonThesis", "PhD_Regular", "PhD_Straight"] and tab_index < len(tabs):
         with tabs[tab_index]:
             tab_index += 1
@@ -2077,7 +2062,7 @@ elif role == "Student":
                         st.success("File uploaded.")
                         st.rerun()
 
-    # PhD Research additional tab
+    # PhD Research additional tab (unchanged)
     if program_type == "PhD_Research" and tab_index < len(tabs):
         with tabs[tab_index]:
             st.subheader("🎤 Seminars & Publications")
