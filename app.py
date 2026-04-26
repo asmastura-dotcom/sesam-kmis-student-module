@@ -1771,22 +1771,28 @@ elif role == "Student":
     with tabs[tab_index]:  # Coursework - Automated Prospectus Generation
         tab_index += 1
         st.subheader("📚 Your Academic Record (Prospectus)")
-
-        # ==== PROGRAM DURATION (YEARS) ====
+    
+        # ----- DEBUG (remove after confirming) -----
+        # st.write(f"DEBUG: ay_start={student['ay_start']}, semester={student['semester']}, program={student['program']}")
+    
+        # ----- Determine program duration -----
         if is_master_program(student["program"]):
-            total_years = 2          # Master's: 2 years
+            total_years = 2
         else:
-            total_years = 3          # PhD: 3 years
+            total_years = 3
     
-        # Total semesters needed = (regular semesters per year * years) + (summer terms)
-        total_semesters_needed = total_years * 2 + (total_years - 1)   # e.g. MS: 4+1=5, PhD: 6+2=8
+        total_semesters_needed = total_years * 2 + (total_years - 1)   # MS: 5, PhD: 8
     
-        # Starting point from student admission
-        start_ay = student["ay_start"]
+        # ----- Starting point from admission -----
+        start_ay = student.get("ay_start", current_year)
+        if pd.isna(start_ay) or start_ay == 0:
+            start_ay = current_year
         start_ay_str = f"{start_ay}-{start_ay+1}"
-        start_sem = student["semester"]
+        start_sem = student.get("semester", "1st Sem")
+        if pd.isna(start_sem) or start_sem == "":
+            start_sem = "1st Sem"
     
-        # Build the full 3‑year semester list (or 2‑year) for all possible years
+        # ----- Build the full semester list -----
         sem_order = ["1st Sem", "2nd Sem", "Summer"]
         all_semesters = []
         for year_offset in range(total_years):
@@ -1794,55 +1800,57 @@ elif role == "Student":
             for sem in sem_order:
                 all_semesters.append((ay, sem))
     
-        # Find where the admission semester appears in the first academic year
+        # ----- Find where the admission semester sits -----
         start_index = -1
         for i, (ay, sem) in enumerate(all_semesters):
             if ay == start_ay_str and sem == start_sem:
                 start_index = i
                 break
         if start_index == -1:
-            # Fallback: if not found (should not happen), start from first semester of that year
-            start_index = 0
+            start_index = 0   # fallback
     
-        # Slice the needed semesters from the starting point
+        # ----- Slice exactly the needed semesters -----
         prospectus_sequence = all_semesters[start_index:start_index + total_semesters_needed]
     
-        # Ensure every semester in the prospectus exists in the CSV
+        # ----- Ensure every semester exists in the database -----
         existing = get_student_semesters(student["student_number"])
         for ay, sem in prospectus_sequence:
             if not ((existing["academic_year"] == ay) & (existing["semester"] == sem)).any():
                 add_semester_record(student["student_number"], ay, sem, [], semester_status="Regular")
+                st.info(f"Created new semester: {ay} {sem}")   # you’ll see this once
     
-        # Load all semesters (including any manually added later) and sort them
+        # ----- Load all semesters and sort them -----
         semesters = get_student_semesters(student["student_number"])
         semesters["sem_order"] = semesters["semester"].map({"1st Sem": 0, "2nd Sem": 1, "Summer": 2})
         semesters["ay_start_num"] = semesters["academic_year"].apply(lambda x: int(x.split("-")[0]))
         semesters = semesters.sort_values(["ay_start_num", "sem_order"]).reset_index(drop=True)
     
-        # Display each semester block
-        for _, sem_row in semesters.iterrows():
-            render_semester_block_student(student["student_number"], sem_row)
+        # ----- Display each semester block -----
+        if semesters.empty:
+            st.warning("No semesters found. Please contact the administrator.")
+        else:
+            for _, sem_row in semesters.iterrows():
+                render_semester_block_student(student["student_number"], sem_row)
     
-        # Optional: “Add Next Semester” button for manual extension
+        # ----- Optional: add next semester button -----
         st.markdown("---")
         if st.button("➕ Add Next Semester", key="student_next_sem"):
-            last_sem = semesters.iloc[-1] if len(semesters) > 0 else None
+            last_sem = semesters.iloc[-1] if not semesters.empty else None
             if last_sem is not None:
                 create_next_semester(student["student_number"], last_sem["academic_year"], last_sem["semester"])
             else:
-                default_ay = f"{student['ay_start']}-{student['ay_start']+1}"
-                default_sem = "1st Sem"
-                add_semester_record(student["student_number"], default_ay, default_sem, [])
-                st.success(f"Created first semester: {default_ay} {default_sem}")
+                default_ay = f"{start_ay}-{start_ay+1}"
+                add_semester_record(student["student_number"], default_ay, "1st Sem", [])
+                st.success(f"Created first semester: {default_ay} 1st Sem")
                 st.rerun()
     
-        # Cumulative Summary
+        # ----- Cumulative summary -----
         st.markdown("---")
         st.subheader("📊 Cumulative Summary")
-        total_taken = student["total_units_taken"]
-        total_required = student["total_units_required"]
+        total_taken = student["total_units_taken"] if not pd.isna(student["total_units_taken"]) else 0
+        total_required = student["total_units_required"] if not pd.isna(student["total_units_required"]) else 24
         remaining = max(0, total_required - total_taken)
-        cum_gwa = student["gwa"]
+        cum_gwa = student["gwa"] if not pd.isna(student["gwa"]) else 0.0
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Total Units Taken", total_taken)
