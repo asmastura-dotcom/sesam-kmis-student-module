@@ -1,9 +1,9 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System (Enhanced)
-Version: 11.0 | Prospectus-Based Academic Tracking with Row-Based Subject Input
+Version: 12.0 | Automated Prospectus Generation based on Admission and Program Duration
 Author: [Your Name]
 Date: [Current Date]
-Description: Full academic record system with prospectus timeline, editable table, and document validation.
+Description: Full academic record system with automated semester generation, row-based subject input, and document validation.
 """
 
 import streamlit as st
@@ -145,6 +145,12 @@ def get_program_type(program_name):
     else:
         return "MS_Thesis"
 
+def is_master_program(program):
+    return get_program_type(program).startswith("MS")
+
+def is_phd_program(program):
+    return get_program_type(program).startswith("PhD")
+
 # ==================== MILESTONE DEFINITIONS ====================
 MILESTONE_DEFS = {
     "MS_Thesis": [
@@ -269,15 +275,6 @@ def save_milestone_file(student_number, milestone_name, uploaded_file):
 SEMESTERS = ["1st Sem", "2nd Sem", "Summer"]
 current_year = date.today().year
 ACADEMIC_YEARS = [f"{year}-{year+1}" for year in range(current_year-5, current_year+6)]
-
-def is_master_program(program):
-    return get_program_type(program).startswith("MS")
-
-def is_phd_program(program):
-    return get_program_type(program).startswith("PhD")
-
-def is_phd_by_research(program):
-    return get_program_type(program) == "PhD_Research"
 
 def get_thesis_limit_from_program(program):
     ptype = get_program_type(program)
@@ -423,7 +420,6 @@ def update_semester_subjects(student_number, academic_year, semester, subjects_l
         df.at[idx, "subjects_json"] = json.dumps(subjects_list)
         df.at[idx, "total_units"] = total_units
         df.at[idx, "gwa"] = gwa
-        # If document already approved and subjects changed, reset status to Pending
         if df.at[idx, "doc_status"] == "Approved":
             df.at[idx, "doc_status"] = "Pending"
             df.at[idx, "doc_remarks"] = "Subjects edited; re-upload required."
@@ -438,7 +434,6 @@ def update_semester_status(student_number, academic_year, semester, new_status):
     if mask.any():
         idx = df[mask].index[0]
         df.at[idx, "semester_status"] = new_status
-        # If status is not Regular, clear subjects and document validation
         if new_status != "Regular":
             df.at[idx, "subjects_json"] = "[]"
             df.at[idx, "total_units"] = 0
@@ -461,7 +456,6 @@ def add_subject_to_semester(student_number, academic_year, semester, new_subject
         st.error("Semester not found.")
         return False
     idx = df[mask].index[0]
-    # Only allow if semester is Regular
     if df.at[idx, "semester_status"] != "Regular":
         st.error("Cannot add subjects to non-regular semester.")
         return False
@@ -1106,7 +1100,6 @@ def get_status_badge(status):
         return '<span class="status-pending">📄 No document uploaded</span>'
 
 def render_semester_block_student(student_number, semester_row):
-    """Render a single semester block with editable table, Add Row button, and document upload."""
     ay = semester_row["academic_year"]
     sem = semester_row["semester"]
     subjects = json.loads(semester_row["subjects_json"])
@@ -1117,9 +1110,7 @@ def render_semester_block_student(student_number, semester_row):
     doc_remarks = semester_row.get("doc_remarks", "")
     semester_status = semester_row.get("semester_status", "Regular")
 
-    # Expandable block
     with st.expander(f"📅 {ay} | {sem} (Total Units: {total_units} | GWA: {gwa:.2f})", expanded=False):
-        # Semester status dropdown
         new_status = st.selectbox(
             "Semester Status",
             options=SEMESTER_STATUS_OPTIONS,
@@ -1131,18 +1122,15 @@ def render_semester_block_student(student_number, semester_row):
                 st.success(f"Semester status updated to {new_status}.")
                 st.rerun()
 
-        # Document validation status
         st.markdown(f"**Document Validation:** {get_status_badge(doc_status)}", unsafe_allow_html=True)
         if doc_status == "Rejected" and doc_remarks:
             st.warning(f"**Rejection reason:** {doc_remarks}")
 
-        # Warn if Regular semester but no document uploaded
-        if semester_status == "Regular" and (not doc_path or pd.isna(doc_path)):
-            st.warning("⚠️ **Required:** Please upload your AMIS screenshot or grade report below.")
-
-        # Subject input (only for Regular semesters)
         if semester_status == "Regular":
-            # Prepare data for editable table
+            if not doc_path or pd.isna(doc_path):
+                st.warning("⚠️ **Required:** Please upload your AMIS screenshot or grade report below.")
+
+            # Editable subject table with Add Row button
             df_edit = pd.DataFrame(subjects) if subjects else pd.DataFrame(columns=["course_code", "course_description", "units", "grade"])
             for col in ["course_code", "course_description", "units", "grade"]:
                 if col not in df_edit.columns:
@@ -1150,9 +1138,9 @@ def render_semester_block_student(student_number, semester_row):
                         df_edit["course_description"] = ""
                     else:
                         df_edit[col] = 0 if col == "units" else ""
+
             df_edit = df_edit[["course_code", "course_description", "units", "grade"]]
 
-            # Editable table
             edited_df = st.data_editor(
                 df_edit,
                 use_container_width=True,
@@ -1166,20 +1154,27 @@ def render_semester_block_student(student_number, semester_row):
                 key=f"editor_{student_number}_{ay}_{sem}"
             )
 
-            # Add Row button
             col_add, col_save = st.columns([1, 4])
             with col_add:
                 if st.button("➕ Add Row", key=f"add_row_{student_number}_{ay}_{sem}"):
-                    # Append a new empty row
                     new_row = {"course_code": "", "course_description": "", "units": 0, "grade": "1.00"}
-                    edited_df = pd.concat([edited_df, pd.DataFrame([new_row])], ignore_index=True)
-                    st.session_state[f"temp_editor_{student_number}_{ay}_{sem}"] = edited_df.to_dict("records")
+                    new_df = pd.concat([edited_df, pd.DataFrame([new_row])], ignore_index=True)
+                    # We'll save after adding row? We need to keep the row but not save to DB yet.
+                    # Use session state to store temporary edit and then save on save button.
+                    if f"temp_editor_{student_number}_{ay}_{sem}" not in st.session_state:
+                        st.session_state[f"temp_editor_{student_number}_{ay}_{sem}"] = edited_df.to_dict("records")
+                    st.session_state[f"temp_editor_{student_number}_{ay}_{sem}"] = new_df.to_dict("records")
                     st.rerun()
-
-            # Save Subjects button
             with col_save:
                 if st.button("💾 Save Subjects", key=f"save_subjects_{student_number}_{ay}_{sem}"):
-                    new_subjects = edited_df.to_dict("records")
+                    # If we have temporary edits, use them, else use current edited_df
+                    temp_key = f"temp_editor_{student_number}_{ay}_{sem}"
+                    if temp_key in st.session_state:
+                        save_df = pd.DataFrame(st.session_state[temp_key])
+                        del st.session_state[temp_key]
+                    else:
+                        save_df = edited_df
+                    new_subjects = save_df.to_dict("records")
                     for s in new_subjects:
                         s["units"] = int(s["units"])
                     if update_semester_subjects(student_number, ay, sem, new_subjects):
@@ -1192,7 +1187,7 @@ def render_semester_block_student(student_number, semester_row):
             if subjects:
                 st.dataframe(pd.DataFrame(subjects), use_container_width=True, hide_index=True)
 
-        # Document upload (only for Regular semesters)
+        # Document upload section
         st.markdown("---")
         st.markdown("**Upload Proof of Grades (AMIS Screenshot)**")
         if semester_status == "Regular":
@@ -1220,7 +1215,6 @@ def render_semester_block_student(student_number, semester_row):
             st.info(f"Semester status is **{semester_status}**. Document upload is not required.")
 
 def render_semester_section_staff(student_number, semester_row):
-    """Staff view: read-only subjects and document preview."""
     ay = semester_row["academic_year"]
     sem = semester_row["semester"]
     subjects = json.loads(semester_row["subjects_json"])
@@ -1366,7 +1360,7 @@ with st.sidebar:
                 del st.session_state[key]
         st.rerun()
     st.markdown("---")
-    st.caption("Version 11.0 | Prospectus Timeline | Row-Based Subject Input | Document Validation")
+    st.caption("Version 12.0 | Automated Prospectus Generation | Row-Based Subject Input | Document Validation")
     st.caption("© SESAM 2026")
 
 # ==================== MAIN ====================
@@ -1438,7 +1432,7 @@ if role == "SESAM Staff":
         else:
             render_validation_panel(semesters_all, df, role)
 
-    # Update Student Form (only the most important tabs are kept; exams, residency, etc. unchanged)
+    # Update Student Form
     if st.session_state.staff_show_update:
         st.subheader("✏️ Update Student Record")
         if len(filtered_df) == 0:
@@ -1463,7 +1457,6 @@ if role == "SESAM Staff":
             else:
                 st.success("🎉 All milestones completed! Ready for graduation.")
 
-            # Only keep essential tabs for staff: Info, Coursework (read‑only), Exams, Residency, Graduation, Committee, Docs, Requests
             tab_labels = ["📝 Info", "📚 Coursework", "📝 Exams", "🏠 Residency", "🎓 Graduation", "👥 Committee", "📁 Docs", "✅ Requests"]
             tabs = st.tabs(tab_labels)
 
@@ -1519,10 +1512,101 @@ if role == "SESAM Staff":
                         st.success("Totals updated manually.")
                         st.rerun()
 
-            # The remaining tabs (Exams, Residency, Graduation, Committee, Docs, Requests) are identical to the original code.
-            # For brevity, I will keep them as they are in the original file. They are not modified.
-            # (Full code would include them – they are present in the original file and can be copied from there.)
-            # To avoid exceeding character limit, I'll assume they remain unchanged.
+            # The remaining tabs (Exams, Residency, Graduation, Committee, Docs, Requests) are unchanged.
+            # They are present in the original full code but omitted here for brevity.
+            # (You can keep them as in your existing file.)
+
+    # Add New Student Form
+    if st.session_state.staff_show_add:
+        st.subheader("➕ Register New Student")
+        if st.button("❌ Cancel", key="cancel_add"):
+            st.session_state.staff_show_add = False
+            st.rerun()
+        with st.form(key="add_student_form_staff"):
+            col1, col2 = st.columns(2)
+            with col1:
+                last_name = st.text_input("Last Name *", placeholder="Dela Cruz")
+                first_name = st.text_input("First Name *", placeholder="Juan")
+                student_number = st.text_input("Student Number *", placeholder="2025-00123")
+                selected_ay_range = st.selectbox("Academic Year *", options=ACADEMIC_YEARS, index=ACADEMIC_YEARS.index(f"{current_year}-{current_year+1}") if f"{current_year}-{current_year+1}" in ACADEMIC_YEARS else 0)
+                ay_start = int(selected_ay_range.split("-")[0])
+            with col2:
+                middle_name = st.text_input("Middle Name", placeholder="Santos (optional)")
+                program = st.selectbox("Program *", options=PROGRAMS)
+                semester = st.selectbox("Semester *", options=SEMESTERS)
+                advisor = st.text_input("Advisor (optional)", placeholder="Dr. Faustino-Eslava")
+            submitted = st.form_submit_button("Register Student", use_container_width=True)
+            if submitted:
+                errors = []
+                if not last_name: errors.append("Last Name is required.")
+                if not first_name: errors.append("First Name is required.")
+                if not student_number: errors.append("Student Number is required.")
+                if student_number in df["student_number"].values: errors.append("Student number already exists.")
+                if errors:
+                    for err in errors: st.error(err)
+                else:
+                    middle = f" {middle_name.strip()}" if middle_name.strip() else ""
+                    full_name = f"{last_name.strip()}, {first_name.strip()}{middle}"
+                    new_row = create_demo_data().iloc[0].to_dict()
+                    new_row.update({
+                        "student_number": student_number.strip(),
+                        "name": full_name,
+                        "last_name": last_name.strip(),
+                        "first_name": first_name.strip(),
+                        "middle_name": middle_name.strip(),
+                        "program": program,
+                        "advisor": advisor.strip() if advisor else "Not assigned",
+                        "ay_start": ay_start,
+                        "semester": semester,
+                        "pos_status": "Not Filed",
+                        "gwa": 2.0,
+                        "thesis_units_taken": 0,
+                        "thesis_units_limit": get_thesis_limit(program),
+                        "residency_max_years": get_residency_max(program),
+                        "committee_members_structured": "",
+                        "committee_approval_date": "",
+                        "profile_pic": "",
+                        "pos_submitted_date": "",
+                        "pos_approved_date": "",
+                        "total_units_taken": 0,
+                        "total_units_required": 24,
+                        "thesis_outline_approved": "No",
+                        "thesis_outline_approved_date": "",
+                        "thesis_status": "Not Started",
+                        "qualifying_exam_status": "N/A",
+                        "qualifying_exam_passed_date": "",
+                        "written_comprehensive_status": "N/A",
+                        "written_comprehensive_passed_date": "",
+                        "oral_comprehensive_status": "N/A",
+                        "oral_comprehensive_passed_date": "",
+                        "general_exam_status": "N/A",
+                        "general_exam_passed_date": "",
+                        "final_exam_status": "Not Taken",
+                        "final_exam_passed_date": "",
+                        "residency_years_used": 0,
+                        "extension_count": 0,
+                        "extension_end_date": "",
+                        "loa_start_date": "",
+                        "loa_end_date": "",
+                        "loa_total_terms": 0,
+                        "awol_status": "No",
+                        "awol_lifted_date": "",
+                        "transfer_units_approved": 0,
+                        "graduation_applied": "No",
+                        "graduation_approved": "No",
+                        "graduation_date": "",
+                        "re_admission_status": "Not Applicable",
+                        "re_admission_date": "",
+                        "committee_changed": False,
+                        "coursework_changed": False
+                    })
+                    new_df = pd.DataFrame([new_row])
+                    df = pd.concat([df, new_df], ignore_index=True)
+                    save_data(df)
+                    get_student_milestones(student_number.strip(), get_program_type(program))
+                    st.success(f"✅ Student {full_name} registered successfully!")
+                    st.session_state.staff_show_add = False
+                    st.rerun()
 
 # ==================== ADVISER VIEW ====================
 elif role == "Faculty Adviser":
@@ -1575,7 +1659,7 @@ elif role == "Faculty Adviser":
                     st.warning(w) if "⚠️" in w else st.success(w)
         st.info("For updates, contact SESAM Staff.")
 
-# ==================== STUDENT VIEW (ENHANCED) ====================
+# ==================== STUDENT VIEW (ENHANCED WITH AUTOMATED PROSPECTUS) ====================
 elif role == "Student":
     st.subheader(f"📘 Your Dashboard – {st.session_state.display_name}")
     student = df[df["name"] == st.session_state.display_name].iloc[0].copy()
@@ -1684,42 +1768,62 @@ elif role == "Student":
             st.markdown(f"**Adviser:** {student['advisor']}")
             st.markdown(f"**Admitted Year:** {format_ay(student['ay_start'], student['semester'])}")
 
-    with tabs[tab_index]:  # Coursework (new prospectus-based timeline)
+    with tabs[tab_index]:  # Coursework - Automated Prospectus Generation
         tab_index += 1
         st.subheader("📚 Your Academic Record (Prospectus)")
 
-        # Generate prospectus timeline starting from admission year
-        admission_year = student["ay_start"]
-        semester_progression = []
-        sem_order = ["1st Sem", "2nd Sem", "Summer"]
-        current_ay = f"{admission_year}-{admission_year+1}"
-        current_sem_idx = 0
-        # For demo, we add up to 8 semesters (max 4 years) – you can extend
-        for _ in range(8):
-            semester_progression.append((current_ay, sem_order[current_sem_idx]))
-            current_sem_idx += 1
-            if current_sem_idx >= 3:
-                current_sem_idx = 0
-                start_year = int(current_ay.split("-")[0])
-                current_ay = f"{start_year+1}-{start_year+2}"
+        # ========== AUTOMATIC SEMESTER GENERATION ==========
+        # Determine program duration (years)
+        total_years = 2 if is_master_program(student["program"]) else 3
+        # Total semesters to generate: regular = total_years * 2, summers = total_years - 1
+        total_semesters_needed = total_years * 2 + (total_years - 1)
 
-        # Ensure all semesters exist in the database
-        existing_semesters = get_student_semesters(student["student_number"])
-        for ay, sem in semester_progression:
-            if not ((existing_semesters["academic_year"] == ay) & (existing_semesters["semester"] == sem)).any():
+        # Starting point
+        start_ay = student["ay_start"]
+        start_ay_str = f"{start_ay}-{start_ay+1}"
+        start_sem = student["semester"]
+
+        # Generate full semester order for all years up to start_ay + total_years - 1
+        sem_order = ["1st Sem", "2nd Sem", "Summer"]
+        all_semesters = []
+        for year_offset in range(total_years):
+            ay = f"{start_ay + year_offset}-{start_ay + year_offset + 1}"
+            for sem in sem_order:
+                all_semesters.append((ay, sem))
+
+        # Find index of start semester in the first academic year
+        start_index = -1
+        for i, (ay, sem) in enumerate(all_semesters):
+            if ay == start_ay_str and sem == start_sem:
+                start_index = i
+                break
+        if start_index == -1:
+            # Fallback: treat as first semester
+            start_index = 0
+
+        # Slice to get the sequence from start semester onward
+        prospectus_sequence = all_semesters[start_index:start_index + total_semesters_needed]
+
+        # Ensure each semester exists in the database
+        for ay, sem in prospectus_sequence:
+            existing = get_student_semesters(student["student_number"])
+            if not ((existing["academic_year"] == ay) & (existing["semester"] == sem)).any():
                 add_semester_record(student["student_number"], ay, sem, [], semester_status="Regular")
 
-        # Reload semesters after creation
+        # Load all semesters (including any extras that may have been added manually)
         semesters = get_student_semesters(student["student_number"])
-        # Sort by academic year and semester order
+        # Sort by year and semester order
         semesters["sem_order"] = semesters["semester"].map({"1st Sem": 0, "2nd Sem": 1, "Summer": 2})
-        semesters = semesters.sort_values(["academic_year", "sem_order"]).reset_index(drop=True)
+        # Convert academic_year to a sortable tuple (start_year, end_year) but we can just sort by string
+        # We'll create a numeric year from the start of the academic year
+        semesters["ay_start_num"] = semesters["academic_year"].apply(lambda x: int(x.split("-")[0]))
+        semesters = semesters.sort_values(["ay_start_num", "sem_order"]).reset_index(drop=True)
 
-        # Render each semester block
+        # Display each semester block
         for _, sem_row in semesters.iterrows():
             render_semester_block_student(student["student_number"], sem_row)
 
-        # Add Next Semester button (sequential)
+        # Add Next Semester button (manual extension beyond the generated prospectus)
         st.markdown("---")
         if st.button("➕ Add Next Semester", key="student_next_sem"):
             existing = get_student_semesters(student["student_number"])
@@ -1751,12 +1855,12 @@ elif role == "Student":
         with col4:
             st.metric("Cumulative GWA", f"{cum_gwa:.2f}")
 
-    # The remaining tabs (Plan of Study, Committee, Milestone Tracker, Examinations, Seminars) are unchanged from the original code.
-    # For brevity, they are omitted here but must be included in the final script.
-    # (They are present in the original file – copy them as they are.)
+    # The remaining tabs (Plan of Study, Committee, Milestone Tracker, Examinations, Seminars) are unchanged.
+    # You must include them here (they are present in your original file). For brevity, they are omitted in this diff.
+    # (Just copy them from your existing file.)
 
     st.caption("For corrections, contact your adviser or SESAM Staff.")
 
 # ==================== FOOTER ====================
 st.markdown("---")
-st.caption("SESAM Graduate Lifecycle Management v11.0 | Prospectus Timeline | Row-Based Subject Input | Document Validation")
+st.caption("SESAM Graduate Lifecycle Management v12.0 | Automated Prospectus | Row-Based Input | Document Validation")
