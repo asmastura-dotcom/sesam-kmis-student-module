@@ -349,13 +349,13 @@ def is_step_locked(student_row, step_name):
     completed = get_step_completion_status(student_row)
     return previous_step not in completed
 
-# ==================== SEMESTER TRACKING (ENHANCED) ====================
+# ==================== SEMESTER TRACKING (FIXED TYPES) ====================
 SEMESTER_FILE = "semester_records.csv"
 
 def load_semester_records():
     if os.path.exists(SEMESTER_FILE):
         df = pd.read_csv(SEMESTER_FILE)
-        # Force all text columns to string and replace NaN with empty string
+        # Force all text columns to string and replace NaN/None with empty string
         text_cols = [
             "student_number", "academic_year", "semester", "subjects_json",
             "amis_file_path", "doc_path", "doc_upload_time", "doc_status",
@@ -363,15 +363,14 @@ def load_semester_records():
         ]
         for col in text_cols:
             if col in df.columns:
-                # Convert to string, then replace 'nan', 'None', ''
                 df[col] = df[col].astype(str).replace(['nan', 'None', ''], '')
         # Numeric columns
-        num_cols = ["total_units", "gwa"]
-        for col in num_cols:
+        for col in ["total_units", "gwa"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         # Ensure subjects_json is valid JSON
-        df["subjects_json"] = df["subjects_json"].apply(lambda x: x if x and x != '' else '[]')
+        if "subjects_json" in df.columns:
+            df["subjects_json"] = df["subjects_json"].apply(lambda x: x if x and x != '' else '[]')
         if "semester_status" not in df.columns:
             df["semester_status"] = "Regular"
         else:
@@ -416,7 +415,7 @@ def add_semester_record(student_number, academic_year, semester, subjects_list, 
         "total_units": total_units,
         "gwa": gwa,
         "amis_file_path": "",
-        "doc_path": doc_path,
+        "doc_path": str(doc_path) if doc_path else "",
         "doc_upload_time": doc_upload_time,
         "doc_status": "Pending" if doc_path else "",
         "doc_remarks": "",
@@ -487,7 +486,7 @@ def update_semester_document(student_number, academic_year, semester, doc_path, 
     mask = (df["student_number"] == student_number) & (df["academic_year"] == academic_year) & (df["semester"] == semester)
     if mask.any():
         idx = df[mask].index[0]
-        df.at[idx, "doc_path"] = doc_path
+        df.at[idx, "doc_path"] = str(doc_path) if doc_path else ""
         df.at[idx, "doc_upload_time"] = doc_upload_time
         df.at[idx, "doc_status"] = status
         df.at[idx, "doc_remarks"] = ""
@@ -542,7 +541,10 @@ def update_student_academic_summary(student_number):
     for _, row in semesters.iterrows():
         if row["semester_status"] != "Regular":
             continue
-        subjects = json.loads(row["subjects_json"])
+        try:
+            subjects = json.loads(row["subjects_json"])
+        except:
+            continue
         for subj in subjects:
             try:
                 units = float(subj.get("units", 0))
@@ -922,7 +924,10 @@ def load_data():
             for _, sem in student_sems.iterrows():
                 if sem["semester_status"] != "Regular":
                     continue
-                subjects = json.loads(sem["subjects_json"])
+                try:
+                    subjects = json.loads(sem["subjects_json"])
+                except:
+                    continue
                 for subj in subjects:
                     try:
                         units = float(subj.get("units", 0))
@@ -1119,7 +1124,7 @@ def get_status_badge(status):
         return '<span class="status-pending">📄 No document uploaded</span>'
 
 def render_semester_block_student(student_number, semester_row):
-    # --- Convert all values to safe Python types ---
+    # --- Safely extract values as strings / numbers ---
     ay = str(semester_row["academic_year"])
     sem = str(semester_row["semester"])
     semester_status = str(semester_row.get("semester_status", "Regular")).strip()
@@ -1165,13 +1170,13 @@ def render_semester_block_student(student_number, semester_row):
             if not doc_path or doc_path == "" or doc_path == "nan":
                 st.warning("⚠️ **Required:** Please upload your AMIS screenshot or grade report below.")
             
-            # Build dataframe for subjects
+            # Build initial dataframe for subjects
             if subjects and len(subjects) > 0:
                 df_edit = pd.DataFrame(subjects)
             else:
                 df_edit = pd.DataFrame(columns=["course_code", "course_description", "units", "grade"])
             
-            # Ensure all required columns exist
+            # Ensure required columns exist
             for col in ["course_code", "course_description", "units", "grade"]:
                 if col not in df_edit.columns:
                     if col == "course_description":
@@ -1179,12 +1184,16 @@ def render_semester_block_student(student_number, semester_row):
                     else:
                         df_edit[col] = 0 if col == "units" else ""
             df_edit = df_edit[["course_code", "course_description", "units", "grade"]]
-            # Ensure units are integers
             df_edit["units"] = pd.to_numeric(df_edit["units"], errors='coerce').fillna(0).astype(int)
             
-            # Display editable table
+            # Create a session state key for this semester's dataframe
+            df_key = f"df_{student_number}_{ay}_{sem}"
+            if df_key not in st.session_state:
+                st.session_state[df_key] = df_edit.copy()
+            
+            # Display the data editor bound to session state
             edited_df = st.data_editor(
-                df_edit,
+                st.session_state[df_key],
                 use_container_width=True,
                 hide_index=True,
                 column_config={
@@ -1196,60 +1205,41 @@ def render_semester_block_student(student_number, semester_row):
                 key=f"editor_{student_number}_{ay}_{sem}"
             )
             
-# Create a unique session state key for this semester's dataframe
-df_key = f"df_{student_number}_{ay}_{sem}"
-
-# Initialize session state dataframe if not present
-if df_key not in st.session_state:
-    st.session_state[df_key] = df_edit.copy()
-
-# Display the data editor bound to session state
-edited_df = st.data_editor(
-    st.session_state[df_key],
-    use_container_width=True,
-    hide_index=True,
-    column_config={
-        "course_code": "Course Code",
-        "course_description": "Course Description",
-        "units": st.column_config.NumberColumn("Units", step=1, min_value=0),
-        "grade": st.column_config.SelectboxColumn("Grade", options=GRADE_OPTIONS, default="1.00")
-    },
-    key=f"editor_{student_number}_{ay}_{sem}"
-)
-
-# Update session state when user edits
-st.session_state[df_key] = edited_df
-
-    col_add, col_save = st.columns([1, 4])
-    with col_add:
-        if st.button("➕ Add Row", key=f"add_row_{student_number}_{ay}_{sem}"):
-            # Append a new empty row
-            new_row = pd.DataFrame([{"course_code": "", "course_description": "", "units": 0, "grade": "1.00"}])
-            st.session_state[df_key] = pd.concat([st.session_state[df_key], new_row], ignore_index=True)
-            st.rerun()
-    
-    with col_save:
-        if st.button("💾 Save Subjects", key=f"save_subjects_{student_number}_{ay}_{sem}"):
-            new_subjects = st.session_state[df_key].to_dict("records")
-            # Clean data
-            for s in new_subjects:
-                try:
-                    s["units"] = int(float(s["units"])) if s["units"] else 0
-                except:
-                    s["units"] = 0
-                s["course_code"] = str(s.get("course_code", ""))
-                s["course_description"] = str(s.get("course_description", ""))
-                s["grade"] = str(s.get("grade", "1.00"))
-            if update_semester_subjects(student_number, ay, sem, new_subjects):
-                st.success("Subjects saved!")
-                # Clear session state for this semester to force reload from DB
-                if df_key in st.session_state:
-                    del st.session_state[df_key]
-                st.rerun()
-            else:
-                st.error("Failed to save subjects.")
+            # Update session state when user edits
+            st.session_state[df_key] = edited_df
             
-        # Document upload section (unchanged, but with safe string checks)
+            col_add, col_save = st.columns([1, 4])
+            with col_add:
+                if st.button("➕ Add Row", key=f"add_row_{student_number}_{ay}_{sem}"):
+                    new_row = pd.DataFrame([{"course_code": "", "course_description": "", "units": 0, "grade": "1.00"}])
+                    st.session_state[df_key] = pd.concat([st.session_state[df_key], new_row], ignore_index=True)
+                    st.rerun()
+            with col_save:
+                if st.button("💾 Save Subjects", key=f"save_subjects_{student_number}_{ay}_{sem}"):
+                    new_subjects = st.session_state[df_key].to_dict("records")
+                    # Clean data
+                    for s in new_subjects:
+                        try:
+                            s["units"] = int(float(s["units"])) if s["units"] else 0
+                        except:
+                            s["units"] = 0
+                        s["course_code"] = str(s.get("course_code", ""))
+                        s["course_description"] = str(s.get("course_description", ""))
+                        s["grade"] = str(s.get("grade", "1.00"))
+                    if update_semester_subjects(student_number, ay, sem, new_subjects):
+                        st.success("Subjects saved!")
+                        # Clear session state for this semester
+                        if df_key in st.session_state:
+                            del st.session_state[df_key]
+                        st.rerun()
+                    else:
+                        st.error("Failed to save subjects.")
+        else:
+            st.info(f"This semester is marked as **{semester_status}**. Subject input is disabled.")
+            if subjects:
+                st.dataframe(pd.DataFrame(subjects), use_container_width=True, hide_index=True)
+        
+        # Document upload section
         st.markdown("---")
         st.markdown("**Upload Proof of Grades (AMIS Screenshot)**")
         if semester_status == "Regular":
@@ -1279,9 +1269,12 @@ st.session_state[df_key] = edited_df
 def render_semester_section_staff(student_number, semester_row):
     ay = semester_row["academic_year"]
     sem = semester_row["semester"]
-    subjects = json.loads(semester_row["subjects_json"])
-    total_units = semester_row["total_units"]
-    gwa = semester_row["gwa"]
+    try:
+        subjects = json.loads(semester_row["subjects_json"]) if semester_row["subjects_json"] else []
+    except:
+        subjects = []
+    total_units = semester_row["total_units"] if pd.notna(semester_row["total_units"]) else 0
+    gwa = semester_row["gwa"] if pd.notna(semester_row["gwa"]) else 0.0
     doc_status = semester_row.get("doc_status", "")
     doc_path = semester_row.get("doc_path", "")
     doc_upload_time = semester_row.get("doc_upload_time", "")
@@ -1300,7 +1293,7 @@ def render_semester_section_staff(student_number, semester_row):
         else:
             st.caption("No subjects.")
 
-        if doc_path and pd.notna(doc_path) and os.path.exists(str(doc_path)):
+        if doc_path and pd.notna(doc_path) and doc_path != "" and os.path.exists(str(doc_path)):
             st.markdown("**Uploaded Document:**")
             if str(doc_path).lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
                 st.image(doc_path, width=300)
@@ -1334,9 +1327,12 @@ def render_validation_panel(records_df, students_df, role):
         sem = row["semester"]
         doc_status = row.get("doc_status", "")
         doc_path = row.get("doc_path", "")
-        subjects = json.loads(row["subjects_json"])
-        total_units = row["total_units"]
-        gwa = row["gwa"]
+        try:
+            subjects = json.loads(row["subjects_json"]) if row["subjects_json"] else []
+        except:
+            subjects = []
+        total_units = row["total_units"] if pd.notna(row["total_units"]) else 0
+        gwa = row["gwa"] if pd.notna(row["gwa"]) else 0.0
         semester_status = row.get("semester_status", "Regular")
 
         with st.expander(f"📌 {student_name} ({student_number}) – {ay} {sem} – Status: {doc_status} (Semester: {semester_status})"):
@@ -1348,7 +1344,7 @@ def render_validation_panel(records_df, students_df, role):
                 ])
                 st.dataframe(df_subj, use_container_width=True, hide_index=True)
 
-            if doc_path and pd.notna(doc_path) and os.path.exists(str(doc_path)):
+            if doc_path and pd.notna(doc_path) and doc_path != "" and os.path.exists(str(doc_path)):
                 if str(doc_path).lower().endswith(('.png', '.jpg', '.jpeg', '.gif')):
                     st.image(doc_path, width=300)
                 else:
