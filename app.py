@@ -1,9 +1,9 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System (Enhanced)
-Version: 12.0 | Automated Prospectus Generation based on Admission and Program Duration
+Version: 12.0 | Automated Prospectus Generation | Row-Based Subject Input | Document Validation
 Author: [Your Name]
 Date: [Current Date]
-Description: Full academic record system with automated semester generation, row-based subject input, and document validation.
+Description: Full academic record system with automated semester generation, editable subject table, and validation.
 """
 
 import streamlit as st
@@ -110,6 +110,7 @@ USERS = {
     "staff1": {"password": "admin123", "role": "SESAM Staff", "display_name": "SESAM Administrator"},
     "adviser1": {"password": "adv123", "role": "Faculty Adviser", "display_name": "Dr. Eslava"},
     "adviser2": {"password": "adv456", "role": "Faculty Adviser", "display_name": "Dr. Sanchez"},
+    # Demo students (password = student number)
     "S001": {"password": "S001", "role": "Student", "display_name": "Santos, Maria Concepcion R."},
     "S002": {"password": "S002", "role": "Student", "display_name": "Dela Cruz, Jose Mari P."},
     "S003": {"password": "S003", "role": "Student", "display_name": "Fernandez, Kristoffer Ivan M."},
@@ -150,6 +151,9 @@ def is_master_program(program):
 
 def is_phd_program(program):
     return get_program_type(program).startswith("PhD")
+
+def is_phd_by_research(program):
+    return get_program_type(program) == "PhD_Research"
 
 # ==================== MILESTONE DEFINITIONS ====================
 MILESTONE_DEFS = {
@@ -1130,7 +1134,7 @@ def render_semester_block_student(student_number, semester_row):
             if not doc_path or pd.isna(doc_path):
                 st.warning("⚠️ **Required:** Please upload your AMIS screenshot or grade report below.")
 
-            # Editable subject table with Add Row button
+            # Editable table
             df_edit = pd.DataFrame(subjects) if subjects else pd.DataFrame(columns=["course_code", "course_description", "units", "grade"])
             for col in ["course_code", "course_description", "units", "grade"]:
                 if col not in df_edit.columns:
@@ -1138,7 +1142,6 @@ def render_semester_block_student(student_number, semester_row):
                         df_edit["course_description"] = ""
                     else:
                         df_edit[col] = 0 if col == "units" else ""
-
             df_edit = df_edit[["course_code", "course_description", "units", "grade"]]
 
             edited_df = st.data_editor(
@@ -1159,19 +1162,13 @@ def render_semester_block_student(student_number, semester_row):
                 if st.button("➕ Add Row", key=f"add_row_{student_number}_{ay}_{sem}"):
                     new_row = {"course_code": "", "course_description": "", "units": 0, "grade": "1.00"}
                     new_df = pd.concat([edited_df, pd.DataFrame([new_row])], ignore_index=True)
-                    # We'll save after adding row? We need to keep the row but not save to DB yet.
-                    # Use session state to store temporary edit and then save on save button.
-                    if f"temp_editor_{student_number}_{ay}_{sem}" not in st.session_state:
-                        st.session_state[f"temp_editor_{student_number}_{ay}_{sem}"] = edited_df.to_dict("records")
                     st.session_state[f"temp_editor_{student_number}_{ay}_{sem}"] = new_df.to_dict("records")
                     st.rerun()
             with col_save:
                 if st.button("💾 Save Subjects", key=f"save_subjects_{student_number}_{ay}_{sem}"):
-                    # If we have temporary edits, use them, else use current edited_df
-                    temp_key = f"temp_editor_{student_number}_{ay}_{sem}"
-                    if temp_key in st.session_state:
-                        save_df = pd.DataFrame(st.session_state[temp_key])
-                        del st.session_state[temp_key]
+                    if f"temp_editor_{student_number}_{ay}_{sem}" in st.session_state:
+                        save_df = pd.DataFrame(st.session_state[f"temp_editor_{student_number}_{ay}_{sem}"])
+                        del st.session_state[f"temp_editor_{student_number}_{ay}_{sem}"]
                     else:
                         save_df = edited_df
                     new_subjects = save_df.to_dict("records")
@@ -1187,7 +1184,7 @@ def render_semester_block_student(student_number, semester_row):
             if subjects:
                 st.dataframe(pd.DataFrame(subjects), use_container_width=True, hide_index=True)
 
-        # Document upload section
+        # Document upload
         st.markdown("---")
         st.markdown("**Upload Proof of Grades (AMIS Screenshot)**")
         if semester_status == "Regular":
@@ -1360,7 +1357,7 @@ with st.sidebar:
                 del st.session_state[key]
         st.rerun()
     st.markdown("---")
-    st.caption("Version 12.0 | Automated Prospectus Generation | Row-Based Subject Input | Document Validation")
+    st.caption("Version 12.0 | Automated Prospectus | Row-Based Subject Input | Document Validation")
     st.caption("© SESAM 2026")
 
 # ==================== MAIN ====================
@@ -1476,7 +1473,7 @@ if role == "SESAM Staff":
                     st.markdown(f"**Admitted Year:** {format_ay(student['ay_start'], student['semester'])}")
                     st.markdown(f"**Cumulative GWA:** {student['gwa']:.2f}")
 
-            with tabs[1]:  # Coursework (Staff view: read-only semester blocks)
+            with tabs[1]:  # Coursework (Staff read‑only)
                 st.subheader("Student's Academic Record")
                 semesters = get_student_semesters(student["student_number"])
                 if semesters.empty:
@@ -1514,7 +1511,7 @@ if role == "SESAM Staff":
 
             # The remaining tabs (Exams, Residency, Graduation, Committee, Docs, Requests) are unchanged.
             # They are present in the original full code but omitted here for brevity.
-            # (You can keep them as in your existing file.)
+            # (You can keep them as in your existing file – they work exactly as before.)
 
     # Add New Student Form
     if st.session_state.staff_show_add:
@@ -1659,7 +1656,7 @@ elif role == "Faculty Adviser":
                     st.warning(w) if "⚠️" in w else st.success(w)
         st.info("For updates, contact SESAM Staff.")
 
-# ==================== STUDENT VIEW (ENHANCED WITH AUTOMATED PROSPECTUS) ====================
+# ==================== STUDENT VIEW (AUTOMATED PROSPECTUS) ====================
 elif role == "Student":
     st.subheader(f"📘 Your Dashboard – {st.session_state.display_name}")
     student = df[df["name"] == st.session_state.display_name].iloc[0].copy()
@@ -1771,18 +1768,15 @@ elif role == "Student":
     with tabs[tab_index]:  # Coursework - Automated Prospectus Generation
         tab_index += 1
         st.subheader("📚 Your Academic Record (Prospectus)")
-    
-        # ----- DEBUG (remove after confirming) -----
-        # st.write(f"DEBUG: ay_start={student['ay_start']}, semester={student['semester']}, program={student['program']}")
-    
+
         # ----- Determine program duration -----
         if is_master_program(student["program"]):
-            total_years = 2
+            total_years = 2          # Master's: 2 years
         else:
-            total_years = 3
-    
+            total_years = 3          # PhD: 3 years
+
         total_semesters_needed = total_years * 2 + (total_years - 1)   # MS: 5, PhD: 8
-    
+
         # ----- Starting point from admission -----
         start_ay = student.get("ay_start", current_year)
         if pd.isna(start_ay) or start_ay == 0:
@@ -1791,15 +1785,15 @@ elif role == "Student":
         start_sem = student.get("semester", "1st Sem")
         if pd.isna(start_sem) or start_sem == "":
             start_sem = "1st Sem"
-    
-        # ----- Build the full semester list -----
+
+        # ----- Build the full semester list for the required years -----
         sem_order = ["1st Sem", "2nd Sem", "Summer"]
         all_semesters = []
         for year_offset in range(total_years):
             ay = f"{start_ay + year_offset}-{start_ay + year_offset + 1}"
             for sem in sem_order:
                 all_semesters.append((ay, sem))
-    
+
         # ----- Find where the admission semester sits -----
         start_index = -1
         for i, (ay, sem) in enumerate(all_semesters):
@@ -1808,31 +1802,30 @@ elif role == "Student":
                 break
         if start_index == -1:
             start_index = 0   # fallback
-    
+
         # ----- Slice exactly the needed semesters -----
         prospectus_sequence = all_semesters[start_index:start_index + total_semesters_needed]
-    
+
         # ----- Ensure every semester exists in the database -----
         existing = get_student_semesters(student["student_number"])
         for ay, sem in prospectus_sequence:
             if not ((existing["academic_year"] == ay) & (existing["semester"] == sem)).any():
                 add_semester_record(student["student_number"], ay, sem, [], semester_status="Regular")
-                st.info(f"Created new semester: {ay} {sem}")   # you’ll see this once
-    
+
         # ----- Load all semesters and sort them -----
         semesters = get_student_semesters(student["student_number"])
         semesters["sem_order"] = semesters["semester"].map({"1st Sem": 0, "2nd Sem": 1, "Summer": 2})
         semesters["ay_start_num"] = semesters["academic_year"].apply(lambda x: int(x.split("-")[0]))
         semesters = semesters.sort_values(["ay_start_num", "sem_order"]).reset_index(drop=True)
-    
+
         # ----- Display each semester block -----
         if semesters.empty:
             st.warning("No semesters found. Please contact the administrator.")
         else:
             for _, sem_row in semesters.iterrows():
                 render_semester_block_student(student["student_number"], sem_row)
-    
-        # ----- Optional: add next semester button -----
+
+        # ----- Optional: add next semester button (manual extension) -----
         st.markdown("---")
         if st.button("➕ Add Next Semester", key="student_next_sem"):
             last_sem = semesters.iloc[-1] if not semesters.empty else None
@@ -1843,7 +1836,7 @@ elif role == "Student":
                 add_semester_record(student["student_number"], default_ay, "1st Sem", [])
                 st.success(f"Created first semester: {default_ay} 1st Sem")
                 st.rerun()
-    
+
         # ----- Cumulative summary -----
         st.markdown("---")
         st.subheader("📊 Cumulative Summary")
@@ -1862,11 +1855,11 @@ elif role == "Student":
             st.metric("Cumulative GWA", f"{cum_gwa:.2f}")
 
     # The remaining tabs (Plan of Study, Committee, Milestone Tracker, Examinations, Seminars) are unchanged.
-    # You must include them here (they are present in your original file). For brevity, they are omitted in this diff.
-    # (Just copy them from your existing file.)
+    # They are present in the original full code but omitted here for brevity.
+    # (You can keep them as in your existing file – they work exactly as before.)
 
     st.caption("For corrections, contact your adviser or SESAM Staff.")
 
 # ==================== FOOTER ====================
 st.markdown("---")
-st.caption("SESAM Graduate Lifecycle Management v12.0 | Automated Prospectus | Row-Based Input | Document Validation")
+st.caption("SESAM Graduate Lifecycle Management v12.0 | Automated Prospectus | Row-Based Subject Input | Document Validation")
