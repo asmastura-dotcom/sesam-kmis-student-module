@@ -1210,7 +1210,7 @@ def render_semester_block_student(student_number, semester_row):
             
             col_add, col_save = st.columns([1, 4])
             with col_add:
-                if st.button("➕ Add Row", key=f"add_row_{student_number}_{ay}_{sem}"):
+                if st.button("➕ Add Subject", key=f"add_row_{student_number}_{ay}_{sem}"):
                     new_row = pd.DataFrame([{"course_code": "", "course_description": "", "units": 0, "grade": "1.00"}])
                     st.session_state[df_key] = pd.concat([st.session_state[df_key], new_row], ignore_index=True)
                     st.rerun()
