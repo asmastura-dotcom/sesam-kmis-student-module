@@ -355,19 +355,33 @@ SEMESTER_FILE = "semester_records.csv"
 def load_semester_records():
     if os.path.exists(SEMESTER_FILE):
         df = pd.read_csv(SEMESTER_FILE)
-        if "subjects_json" not in df.columns:
-            df["subjects_json"] = "[]"
-        df["subjects_json"] = df["subjects_json"].fillna("[]")
-        for col in ["doc_path", "doc_upload_time", "doc_status", "doc_remarks", "doc_validated_by", "doc_validated_time", "semester_status"]:
-            if col not in df.columns:
-                df[col] = ""
+        # --- FIX: convert text columns to string, replace NaN ---
+        text_cols = [
+            "subjects_json", "doc_path", "doc_upload_time", "doc_status",
+            "doc_remarks", "doc_validated_by", "doc_validated_time", "semester_status"
+        ]
+        for col in text_cols:
+            if col in df.columns:
+                # Convert to string, then replace 'nan' with empty string
+                df[col] = df[col].astype(str).replace('nan', '').replace('None', '')
+        # Ensure numeric columns are correct
+        for col in ["total_units", "gwa"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        # Add missing columns if any
         if "semester_status" not in df.columns:
             df["semester_status"] = "Regular"
-        df["semester_status"] = df["semester_status"].fillna("Regular")
+        else:
+            df["semester_status"] = df["semester_status"].fillna("Regular")
+        # Ensure subjects_json is at least '[]'
+        df["subjects_json"] = df["subjects_json"].fillna("[]")
         return df
     else:
-        return pd.DataFrame(columns=["student_number", "academic_year", "semester", "subjects_json", "total_units", "gwa", "amis_file_path",
-                                     "doc_path", "doc_upload_time", "doc_status", "doc_remarks", "doc_validated_by", "doc_validated_time", "semester_status"])
+        return pd.DataFrame(columns=[
+            "student_number", "academic_year", "semester", "subjects_json", "total_units",
+            "gwa", "amis_file_path", "doc_path", "doc_upload_time", "doc_status",
+            "doc_remarks", "doc_validated_by", "doc_validated_time", "semester_status"
+        ])
 
 def save_semester_records(df):
     df.to_csv(SEMESTER_FILE, index=False)
