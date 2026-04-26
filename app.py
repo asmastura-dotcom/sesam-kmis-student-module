@@ -1106,13 +1106,21 @@ def get_status_badge(status):
 def render_semester_block_student(student_number, semester_row):
     ay = semester_row["academic_year"]
     sem = semester_row["semester"]
-    subjects = json.loads(semester_row["subjects_json"])
-    total_units = semester_row["total_units"]
-    gwa = semester_row["gwa"]
+    semester_status = semester_row.get("semester_status", "Regular")
+    
+    # ----- Safe JSON parsing -----
+    try:
+        subjects = json.loads(semester_row["subjects_json"]) if semester_row["subjects_json"] else []
+        if not isinstance(subjects, list):
+            subjects = []
+    except Exception:
+        subjects = []
+    
+    total_units = semester_row["total_units"] if pd.notna(semester_row["total_units"]) else 0
+    gwa = semester_row["gwa"] if pd.notna(semester_row["gwa"]) else 0.0
     doc_status = semester_row.get("doc_status", "")
     doc_path = semester_row.get("doc_path", "")
     doc_remarks = semester_row.get("doc_remarks", "")
-    semester_status = semester_row.get("semester_status", "Regular")
 
     with st.expander(f"📅 {ay} | {sem} (Total Units: {total_units} | GWA: {gwa:.2f})", expanded=False):
         new_status = st.selectbox(
@@ -1131,18 +1139,24 @@ def render_semester_block_student(student_number, semester_row):
             st.warning(f"**Rejection reason:** {doc_remarks}")
 
         if semester_status == "Regular":
-            if not doc_path or pd.isna(doc_path):
+            if not doc_path or pd.isna(doc_path) or doc_path == "":
                 st.warning("⚠️ **Required:** Please upload your AMIS screenshot or grade report below.")
 
-            # Editable table
-            df_edit = pd.DataFrame(subjects) if subjects else pd.DataFrame(columns=["course_code", "course_description", "units", "grade"])
+            # ---- Build editable dataframe ----
+            if subjects and len(subjects) > 0:
+                df_edit = pd.DataFrame(subjects)
+            else:
+                df_edit = pd.DataFrame(columns=["course_code", "course_description", "units", "grade"])
+            
+            # Ensure all columns exist
             for col in ["course_code", "course_description", "units", "grade"]:
                 if col not in df_edit.columns:
                     if col == "course_description":
-                        df_edit["course_description"] = ""
+                        df_edit[col] = ""
                     else:
                         df_edit[col] = 0 if col == "units" else ""
             df_edit = df_edit[["course_code", "course_description", "units", "grade"]]
+            df_edit["units"] = pd.to_numeric(df_edit["units"], errors='coerce').fillna(0).astype(int)
 
             edited_df = st.data_editor(
                 df_edit,
@@ -1160,9 +1174,9 @@ def render_semester_block_student(student_number, semester_row):
             col_add, col_save = st.columns([1, 4])
             with col_add:
                 if st.button("➕ Add Row", key=f"add_row_{student_number}_{ay}_{sem}"):
-                    new_row = {"course_code": "", "course_description": "", "units": 0, "grade": "1.00"}
-                    new_df = pd.concat([edited_df, pd.DataFrame([new_row])], ignore_index=True)
-                    st.session_state[f"temp_editor_{student_number}_{ay}_{sem}"] = new_df.to_dict("records")
+                    new_row = pd.DataFrame([{"course_code": "", "course_description": "", "units": 0, "grade": "1.00"}])
+                    combined = pd.concat([edited_df, new_row], ignore_index=True)
+                    st.session_state[f"temp_editor_{student_number}_{ay}_{sem}"] = combined.to_dict("records")
                     st.rerun()
             with col_save:
                 if st.button("💾 Save Subjects", key=f"save_subjects_{student_number}_{ay}_{sem}"):
@@ -1173,7 +1187,13 @@ def render_semester_block_student(student_number, semester_row):
                         save_df = edited_df
                     new_subjects = save_df.to_dict("records")
                     for s in new_subjects:
-                        s["units"] = int(s["units"])
+                        try:
+                            s["units"] = int(float(s["units"])) if s["units"] else 0
+                        except:
+                            s["units"] = 0
+                        s["course_code"] = s.get("course_code", "")
+                        s["course_description"] = s.get("course_description", "")
+                        s["grade"] = s.get("grade", "1.00")
                     if update_semester_subjects(student_number, ay, sem, new_subjects):
                         st.success("Subjects saved!")
                         st.rerun()
@@ -1184,11 +1204,11 @@ def render_semester_block_student(student_number, semester_row):
             if subjects:
                 st.dataframe(pd.DataFrame(subjects), use_container_width=True, hide_index=True)
 
-        # Document upload
+        # ----- Document upload (unchanged) -----
         st.markdown("---")
         st.markdown("**Upload Proof of Grades (AMIS Screenshot)**")
         if semester_status == "Regular":
-            if doc_path and pd.notna(doc_path) and os.path.exists(str(doc_path)):
+            if doc_path and pd.notna(doc_path) and doc_path != "" and os.path.exists(str(doc_path)):
                 st.info(f"Currently uploaded: {os.path.basename(doc_path)} (uploaded on {semester_row.get('doc_upload_time', 'unknown')})")
                 if doc_status == "Rejected":
                     st.warning("Your document was rejected. Please upload a corrected version.")
