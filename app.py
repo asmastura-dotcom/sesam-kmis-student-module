@@ -1220,39 +1220,35 @@ edited_df = st.data_editor(
 # Update session state when user edits
 st.session_state[df_key] = edited_df
 
-col_add, col_save = st.columns([1, 4])
-with col_add:
-    if st.button("➕ Add Row", key=f"add_row_{student_number}_{ay}_{sem}"):
-        # Append a new empty row
-        new_row = pd.DataFrame([{"course_code": "", "course_description": "", "units": 0, "grade": "1.00"}])
-        st.session_state[df_key] = pd.concat([st.session_state[df_key], new_row], ignore_index=True)
-        st.rerun()
-
-with col_save:
-    if st.button("💾 Save Subjects", key=f"save_subjects_{student_number}_{ay}_{sem}"):
-        new_subjects = st.session_state[df_key].to_dict("records")
-        # Clean data
-        for s in new_subjects:
-            try:
-                s["units"] = int(float(s["units"])) if s["units"] else 0
-            except:
-                s["units"] = 0
-            s["course_code"] = str(s.get("course_code", ""))
-            s["course_description"] = str(s.get("course_description", ""))
-            s["grade"] = str(s.get("grade", "1.00"))
-        if update_semester_subjects(student_number, ay, sem, new_subjects):
-            st.success("Subjects saved!")
-            # Clear session state for this semester to force reload from DB
-            if df_key in st.session_state:
-                del st.session_state[df_key]
+    col_add, col_save = st.columns([1, 4])
+    with col_add:
+        if st.button("➕ Add Row", key=f"add_row_{student_number}_{ay}_{sem}"):
+            # Append a new empty row
+            new_row = pd.DataFrame([{"course_code": "", "course_description": "", "units": 0, "grade": "1.00"}])
+            st.session_state[df_key] = pd.concat([st.session_state[df_key], new_row], ignore_index=True)
             st.rerun()
-        else:
-            st.error("Failed to save subjects.")
-        else:
-            st.info(f"This semester is marked as **{semester_status}**. Subject input is disabled.")
-            if subjects:
-                st.dataframe(pd.DataFrame(subjects), use_container_width=True, hide_index=True)
-        
+    
+    with col_save:
+        if st.button("💾 Save Subjects", key=f"save_subjects_{student_number}_{ay}_{sem}"):
+            new_subjects = st.session_state[df_key].to_dict("records")
+            # Clean data
+            for s in new_subjects:
+                try:
+                    s["units"] = int(float(s["units"])) if s["units"] else 0
+                except:
+                    s["units"] = 0
+                s["course_code"] = str(s.get("course_code", ""))
+                s["course_description"] = str(s.get("course_description", ""))
+                s["grade"] = str(s.get("grade", "1.00"))
+            if update_semester_subjects(student_number, ay, sem, new_subjects):
+                st.success("Subjects saved!")
+                # Clear session state for this semester to force reload from DB
+                if df_key in st.session_state:
+                    del st.session_state[df_key]
+                st.rerun()
+            else:
+                st.error("Failed to save subjects.")
+            
         # Document upload section (unchanged, but with safe string checks)
         st.markdown("---")
         st.markdown("**Upload Proof of Grades (AMIS Screenshot)**")
