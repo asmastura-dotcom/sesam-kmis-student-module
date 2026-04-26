@@ -155,6 +155,16 @@ def is_phd_program(program):
 def is_phd_by_research(program):
     return get_program_type(program) == "PhD_Research"
 
+# ==================== UNIT REQUIREMENTS ====================
+def get_required_units(program, prior_ms_graduate=False):
+    if program == "MS Environmental Science":
+        return 32
+    elif program == "PhD Environmental Science":
+        return 37 if prior_ms_graduate else 50
+    else:
+        # For other programs, return None meaning "manual input"
+        return None
+
 # ==================== MILESTONE DEFINITIONS ====================
 MILESTONE_DEFS = {
     "MS_Thesis": [
@@ -852,7 +862,8 @@ def create_demo_data():
         "re_admission_status": ["Not Applicable"] * 13,
         "re_admission_date": [""] * 13,
         "committee_changed": [False, False, False, False, False, False, False, False, False, True, False, False, False],
-        "coursework_changed": [False, False, False, False, False, False, False, False, False, False, True, False, False]
+        "coursework_changed": [False, False, False, False, False, False, False, False, False, False, True, False, False],
+        "prior_ms_graduate": [False] * 13
     }
     return pd.DataFrame(data)
 
@@ -889,6 +900,8 @@ def load_data():
         df["ay_start"] = 2024
     if "semester" not in df.columns:
         df["semester"] = "1st Sem"
+    if "prior_ms_graduate" not in df.columns:
+        df["prior_ms_graduate"] = False
 
     numeric_int_cols = ["thesis_units_taken", "thesis_units_limit", "total_units_taken", "total_units_required",
                         "residency_years_used", "residency_max_years", "extension_count", "loa_total_terms",
@@ -913,6 +926,14 @@ def load_data():
             df.at[idx, "qualifying_exam_status"] = "N/A"
             df.at[idx, "general_exam_status"] = "N/A"
             df.at[idx, "final_exam_status"] = "Not Taken"
+
+    # Set required units based on program and prior_ms_graduate
+    for idx, row in df.iterrows():
+        prog = row["program"]
+        prior = row.get("prior_ms_graduate", False)
+        req = get_required_units(prog, prior)
+        if req is not None:
+            df.at[idx, "total_units_required"] = req
 
     # Override GWA with computed from semesters
     semesters_df = load_semester_records()
@@ -1210,7 +1231,7 @@ def render_semester_block_student(student_number, semester_row):
             
             col_add, col_save = st.columns([1, 4])
             with col_add:
-                if st.button("➕ Add Subject", key=f"add_row_{student_number}_{ay}_{sem}"):
+                if st.button("➕ Add Row", key=f"add_row_{student_number}_{ay}_{sem}"):
                     new_row = pd.DataFrame([{"course_code": "", "course_description": "", "units": 0, "grade": "1.00"}])
                     st.session_state[df_key] = pd.concat([st.session_state[df_key], new_row], ignore_index=True)
                     st.rerun()
@@ -1503,6 +1524,19 @@ if role == "SESAM Staff":
                 st.rerun()
             st.markdown(f"### Editing: {student['name']} ({student['student_number']}) | Program: {student['program']}")
 
+            # Checkbox for PhD MS background
+            if student["program"] == "PhD Environmental Science":
+                prior_ms = st.checkbox("Student is an MS Environmental Science graduate", value=bool(student.get("prior_ms_graduate", False)))
+                if prior_ms != student.get("prior_ms_graduate"):
+                    student["prior_ms_graduate"] = prior_ms
+                    new_req = get_required_units(student["program"], prior_ms)
+                    if new_req is not None:
+                        df.loc[df["student_number"] == student["student_number"], "total_units_required"] = new_req
+                        df.loc[df["student_number"] == student["student_number"], "prior_ms_graduate"] = prior_ms
+                        save_data(df)
+                        st.success(f"Required units updated to {new_req}")
+                        st.rerun()
+
             completed_steps = get_step_completion_status(student)
             next_step = get_next_required_step(student)
             st.markdown("#### 🚀 Milestone Workflow")
@@ -1533,6 +1567,7 @@ if role == "SESAM Staff":
                     st.markdown(f"**Advisor:** {student['advisor']}")
                     st.markdown(f"**Admitted Year:** {format_ay(student['ay_start'], student['semester'])}")
                     st.markdown(f"**Cumulative GWA:** {student['gwa']:.2f}")
+                    st.markdown(f"**Required Units:** {student['total_units_required']}")
 
             with tabs[1]:  # Coursework (Staff read‑only)
                 st.subheader("Student's Academic Record")
@@ -1571,8 +1606,7 @@ if role == "SESAM Staff":
                         st.rerun()
 
             # The remaining tabs (Exams, Residency, Graduation, Committee, Docs, Requests) are unchanged.
-            # They are present in the original full code but omitted here for brevity.
-            # (You can keep them as in your existing file – they work exactly as before.)
+            # You can keep them as in your original file.
 
     # Add New Student Form
     if st.session_state.staff_show_add:
@@ -1593,6 +1627,11 @@ if role == "SESAM Staff":
                 program = st.selectbox("Program *", options=PROGRAMS)
                 semester = st.selectbox("Semester *", options=SEMESTERS)
                 advisor = st.text_input("Advisor (optional)", placeholder="Dr. Faustino-Eslava")
+            
+            prior_ms = False
+            if program == "PhD Environmental Science":
+                prior_ms = st.checkbox("Student is an MS Environmental Science graduate")
+
             submitted = st.form_submit_button("Register Student", use_container_width=True)
             if submitted:
                 errors = []
@@ -1606,6 +1645,7 @@ if role == "SESAM Staff":
                     middle = f" {middle_name.strip()}" if middle_name.strip() else ""
                     full_name = f"{last_name.strip()}, {first_name.strip()}{middle}"
                     new_row = create_demo_data().iloc[0].to_dict()
+                    required_units = get_required_units(program, prior_ms)
                     new_row.update({
                         "student_number": student_number.strip(),
                         "name": full_name,
@@ -1620,6 +1660,7 @@ if role == "SESAM Staff":
                         "gwa": 2.0,
                         "thesis_units_taken": 0,
                         "thesis_units_limit": get_thesis_limit(program),
+                        "total_units_required": required_units if required_units is not None else 24,
                         "residency_max_years": get_residency_max(program),
                         "committee_members_structured": "",
                         "committee_approval_date": "",
@@ -1627,7 +1668,6 @@ if role == "SESAM Staff":
                         "pos_submitted_date": "",
                         "pos_approved_date": "",
                         "total_units_taken": 0,
-                        "total_units_required": 24,
                         "thesis_outline_approved": "No",
                         "thesis_outline_approved_date": "",
                         "thesis_status": "Not Started",
@@ -1656,7 +1696,8 @@ if role == "SESAM Staff":
                         "re_admission_status": "Not Applicable",
                         "re_admission_date": "",
                         "committee_changed": False,
-                        "coursework_changed": False
+                        "coursework_changed": False,
+                        "prior_ms_graduate": prior_ms
                     })
                     new_df = pd.DataFrame([new_row])
                     df = pd.concat([df, new_df], ignore_index=True)
@@ -1825,6 +1866,7 @@ elif role == "Student":
             st.markdown(f"**Program:** {student['program']}")
             st.markdown(f"**Adviser:** {student['advisor']}")
             st.markdown(f"**Admitted Year:** {format_ay(student['ay_start'], student['semester'])}")
+            st.markdown(f"**Required Units:** {student['total_units_required']}")
 
     with tabs[tab_index]:  # Coursework - Automated Prospectus Generation
         tab_index += 1
@@ -1916,8 +1958,7 @@ elif role == "Student":
             st.metric("Cumulative GWA", f"{cum_gwa:.2f}")
 
     # The remaining tabs (Plan of Study, Committee, Milestone Tracker, Examinations, Seminars) are unchanged.
-    # They are present in the original full code but omitted here for brevity.
-    # (You can keep them as in your existing file – they work exactly as before.)
+    # You can keep them as in your original file.
 
     st.caption("For corrections, contact your adviser or SESAM Staff.")
 
