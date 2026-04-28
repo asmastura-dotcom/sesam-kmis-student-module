@@ -1115,7 +1115,7 @@ elif role == "Student":
 
         # Edit form – saves directly without approval
         st.markdown('<div class="profile-card">', unsafe_allow_html=True)
-        st.markdown('<div class="profile-header"><h3>✏️ Edit Your Profile</h3></div>', unsafe_allow_html=True)
+        st.markdown('<div class="profile-header"><h3>✏️ Additional Information</h3></div>', unsafe_allow_html=True)
         with st.form("student_edit_profile"):
             # Required fields
             st.markdown("#### Required Information")
