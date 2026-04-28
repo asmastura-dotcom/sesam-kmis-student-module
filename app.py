@@ -1,6 +1,6 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 18.0 | Enhanced Student Profile (Required & Optional Fields)
+Version: 19.0 | Beautiful Student Profile Dashboard
 """
 
 import streamlit as st
@@ -12,15 +12,79 @@ from datetime import date, datetime
 # ==================== PAGE CONFIG ====================
 st.set_page_config(page_title="SESAM KMIS", page_icon="🎓", layout="wide", initial_sidebar_state="expanded")
 
-# ==================== CSS ====================
+# ==================== CUSTOM CSS FOR BEAUTIFUL CARDS ====================
 st.markdown("""
 <style>
-    .block-container { padding-top: 1rem !important; }
-    .stButton button { padding: 0.2rem 0.8rem !important; font-size: 0.8rem !important; }
-    .status-pending { background-color: #fff3cd; color: #856404; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
-    .status-approved { background-color: #d4edda; color: #155724; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
-    .status-rejected { background-color: #f8d7da; color: #721c24; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.7rem; display: inline-block; }
-    .required-field::after { content: " *"; color: red; }
+    /* Profile card styling */
+    .profile-card {
+        background: white;
+        border-radius: 20px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        border: 1px solid #e9ecef;
+    }
+    .profile-header {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 1rem;
+        border-bottom: 2px solid #f0f2f6;
+        padding-bottom: 0.75rem;
+    }
+    .profile-header h3 {
+        margin: 0;
+        color: #1f3b4c;
+    }
+    .required-star {
+        color: #dc3545;
+        font-size: 0.9rem;
+        margin-left: 0.25rem;
+    }
+    .info-label {
+        font-weight: 600;
+        color: #495057;
+        font-size: 0.85rem;
+        margin-bottom: 0;
+    }
+    .info-value {
+        font-size: 1rem;
+        color: #212529;
+        word-break: break-word;
+        margin-bottom: 0.5rem;
+    }
+    .pending-badge {
+        background-color: #fff3cd;
+        color: #856404;
+        padding: 0.25rem 0.75rem;
+        border-radius: 50px;
+        font-size: 0.8rem;
+        display: inline-block;
+    }
+    .approved-badge {
+        background-color: #d4edda;
+        color: #155724;
+        padding: 0.25rem 0.75rem;
+        border-radius: 50px;
+        font-size: 0.8rem;
+        display: inline-block;
+    }
+    .rejected-badge {
+        background-color: #f8d7da;
+        color: #721c24;
+        padding: 0.25rem 0.75rem;
+        border-radius: 50px;
+        font-size: 0.8rem;
+        display: inline-block;
+    }
+    .stButton button {
+        border-radius: 30px !important;
+        padding: 0.4rem 1.2rem !important;
+        font-weight: 500 !important;
+    }
+    .stTextInput > div > div > input, .stSelectbox > div > div, .stDateInput > div > div {
+        border-radius: 10px !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -214,14 +278,12 @@ def load_data():
         df = create_demo_data()
         save_data(df)
         return df
-
     try:
         df = pd.read_csv(DATA_FILE, dtype=str)
     except Exception:
         df = create_demo_data()
         save_data(df)
         return df
-
     numeric_cols = ["ay_start", "gwa", "total_units_taken", "total_units_required",
                     "thesis_units_taken", "thesis_units_limit", "residency_years_used",
                     "residency_max_years", "extension_count", "loa_total_terms",
@@ -233,14 +295,10 @@ def load_data():
                 df[col] = df[col].astype(int)
             else:
                 df[col] = df[col].astype(float)
-
-    # Ensure all expected columns exist
     default_df = create_demo_data()
     for col in default_df.columns:
         if col not in df.columns:
             df[col] = default_df[col]
-
-    # Text columns: replace NaN with empty string
     text_cols = ["student_number","name","last_name","first_name","middle_name","program","advisor","semester",
                  "profile_pic","committee_members_structured","committee_approval_date","thesis_outline_approved",
                  "thesis_status","pos_status","qualifying_exam_status","written_comprehensive_status",
@@ -256,13 +314,11 @@ def load_data():
     for col in text_cols:
         if col in df.columns:
             df[col] = df[col].fillna("").astype(str)
-
     for col in ["prior_ms_graduate", "committee_changed", "coursework_changed"]:
         if col in df.columns:
             df[col] = df[col].astype(bool)
         else:
             df[col] = False
-
     for idx, row in df.iterrows():
         prog = row["program"]
         df.at[idx, "residency_max_years"] = get_residency_max_from_program(prog)
@@ -270,7 +326,6 @@ def load_data():
         req = get_required_units(prog, row.get("prior_ms_graduate", False))
         if req is not None:
             df.at[idx, "total_units_required"] = req
-
     semesters_df = load_semester_records()
     for sn in df["student_number"].unique():
         sems = semesters_df[semesters_df["student_number"] == sn]
@@ -289,7 +344,6 @@ def load_data():
         if total_units > 0:
             df.loc[df["student_number"] == sn, "gwa"] = total_grade / total_units
             df.loc[df["student_number"] == sn, "total_units_taken"] = total_units
-
     save_data(df)
     return df
 
@@ -301,7 +355,6 @@ def load_semester_records():
     if not os.path.exists(SEMESTER_FILE) or os.path.getsize(SEMESTER_FILE) == 0:
         return pd.DataFrame(columns=["student_number","academic_year","semester","subjects_json","total_units","gwa",
                                      "doc_path","doc_upload_time","doc_status","doc_remarks","doc_validated_by","doc_validated_time","semester_status"])
-
     df = pd.read_csv(SEMESTER_FILE, dtype=str)
     required_cols = ["student_number","academic_year","semester","subjects_json","total_units","gwa",
                      "doc_path","doc_upload_time","doc_status","doc_remarks","doc_validated_by","doc_validated_time","semester_status"]
@@ -641,18 +694,15 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
     sem = str(semester_row["semester"])
     semester_status = str(semester_row.get("semester_status","Regular")).strip()
     if semester_status not in SEMESTER_STATUS_OPTIONS: semester_status = "Regular"
-
     try:
         subjects = json.loads(semester_row["subjects_json"]) if semester_row["subjects_json"] else []
     except:
         subjects = []
-
     total_units = float(semester_row["total_units"]) if pd.notna(semester_row["total_units"]) else 0.0
     gwa = float(semester_row["gwa"]) if pd.notna(semester_row["gwa"]) else 0.0
     doc_status = str(semester_row.get("doc_status","")).strip()
     doc_path = str(semester_row.get("doc_path","")).strip()
     doc_remarks = str(semester_row.get("doc_remarks","")).strip()
-
     with st.expander(f"📅 {ay} | {sem} (Units: {total_units:.0f} | GWA: {gwa:.2f})", expanded=False):
         can_edit_status = (is_staff and override_edit) or (not is_staff)
         if can_edit_status:
@@ -665,22 +715,18 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                     st.rerun()
         else:
             st.markdown(f"**Semester Status:** {semester_status}")
-
         st.markdown(f"**Document Validation:** {get_status_badge(doc_status)}", unsafe_allow_html=True)
         if doc_status == "Rejected" and doc_remarks:
             st.warning(f"Rejection reason: {doc_remarks}")
-
         if semester_status == "Regular" and (not is_staff or (is_staff and override_edit)):
             if not doc_path or doc_path == "":
                 st.warning("⚠️ Required: Upload AMIS screenshot or grade report below.")
-
             df_edit = pd.DataFrame(subjects) if subjects else pd.DataFrame(columns=["course_code","course_description","units","grade"])
             for col in ["course_code","course_description","units","grade"]:
                 if col not in df_edit.columns:
                     df_edit[col] = 0 if col=="units" else ""
             df_edit = df_edit[["course_code","course_description","units","grade"]]
             df_edit["units"] = pd.to_numeric(df_edit["units"], errors='coerce').fillna(0).astype(int)
-
             df_key = f"df_{student_number}_{ay}_{sem}"
             if df_key not in st.session_state:
                 st.session_state[df_key] = df_edit.copy()
@@ -693,7 +739,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                 },
                 key=f"editor_{student_number}_{ay}_{sem}")
             st.session_state[df_key] = edited_df
-
             col_add, col_save = st.columns([1,4])
             with col_add:
                 if st.button("➕ Add Row", key=f"add_{student_number}_{ay}_{sem}"):
@@ -722,7 +767,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                 st.dataframe(pd.DataFrame(subjects), use_container_width=True, hide_index=True)
         else:
             st.info("Editing is disabled in this view. Only the student can edit subjects.")
-
         st.markdown("---")
         st.markdown("**Upload Proof of Grades (AMIS Screenshot)**")
         if semester_status == "Regular":
@@ -763,7 +807,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
 def render_profile_approval_section(student, is_staff=False):
     if student.get("profile_pending_status") == "Pending" and is_staff:
         st.markdown("#### Pending Profile Update")
-        # Show pending fields (only those with non‑empty pending values)
         pending_fields = []
         if student.get("profile_pending_address"): pending_fields.append(("Address", student["profile_pending_address"]))
         if student.get("profile_pending_phone"): pending_fields.append(("Phone", student["profile_pending_phone"]))
@@ -777,15 +820,12 @@ def render_profile_approval_section(student, is_staff=False):
         if student.get("profile_pending_emergency_relationship"): pending_fields.append(("Emergency Relationship", student["profile_pending_emergency_relationship"]))
         if student.get("profile_pending_emergency_country_code"): pending_fields.append(("Emergency Country Code", student["profile_pending_emergency_country_code"]))
         if student.get("profile_pending_emergency_phone"): pending_fields.append(("Emergency Phone", student["profile_pending_emergency_phone"]))
-
         for label, value in pending_fields:
             st.write(f"**{label}:** {value}")
-
         remarks = st.text_area("Remarks", key="prof_remarks")
         col1, col2 = st.columns(2)
         if col1.button("✅ Approve Profile Update"):
             df = load_data()
-            # Copy pending to approved fields
             for field in ["address","phone","institutional_email","gender","civil_status","citizenship","birthdate","religion",
                           "emergency_name","emergency_relationship","emergency_country_code","emergency_phone"]:
                 pending_field = f"profile_pending_{field}"
@@ -811,7 +851,6 @@ def staff_view_student_profile(student_number):
     df = load_data()
     student = df[df["student_number"] == student_number].iloc[0].copy()
     program_type = get_program_type(student["program"])
-
     can_edit = False
     if student["advisor"] == "Not assigned":
         can_edit = True
@@ -822,13 +861,11 @@ def staff_view_student_profile(student_number):
         if override:
             can_edit = True
             st.info("Override active – you can now edit this student's records.")
-
     st.markdown(f"## {student['name']} ({student_number})")
     if st.button("← Back to Student List"):
         st.session_state.staff_selected_student = None
         st.session_state.staff_show_update = False
         st.rerun()
-
     tabs = st.tabs(["📝 Student Info", "📚 Coursework", "📌 Milestones", "📁 Uploads", "⚙️ Admin Controls"])
     with tabs[0]:
         col1, col2 = st.columns([1,2])
@@ -857,7 +894,6 @@ def staff_view_student_profile(student_number):
             st.markdown(f"**Admitted:** {format_ay(student['ay_start'], student['semester'])}")
             st.markdown(f"**Required Units:** {student['total_units_required']}")
             st.markdown(f"**Special Status:** {student.get('special_status','Regular')}")
-            # Display current approved profile fields
             if student.get("profile_pending_status") == "Pending":
                 st.info("Profile update pending approval")
                 st.write(f"Current approved address: {student['address']}")
@@ -874,8 +910,7 @@ def staff_view_student_profile(student_number):
                 st.markdown(f"**Emergency Contact:** {student['emergency_name'] or '—'} ({student['emergency_relationship'] or '—'})")
                 st.markdown(f"**Emergency Phone:** {student['emergency_country_code'] or ''} {student['emergency_phone'] or ''}")
         render_profile_approval_section(student, is_staff=True)
-
-    with tabs[1]:  # Coursework (same as before)
+    with tabs[1]:
         st.subheader("Academic Record")
         total_years = 2 if is_master_program(student["program"]) else 3
         total_semesters_needed = total_years * 2 + (total_years - 1)
@@ -916,8 +951,7 @@ def staff_view_student_profile(student_number):
         colb.metric("Required Units", student["total_units_required"])
         colc.metric("Remaining", max(0, student["total_units_required"] - student["total_units_taken"]))
         cold.metric("Cumulative GWA", f"{student['gwa']:.2f}")
-
-    with tabs[2]:  # Milestones
+    with tabs[2]:
         st.subheader("Milestone Tracker")
         milestones_df = get_student_milestones(student_number, program_type)
         for _, m in milestones_df.iterrows():
@@ -931,12 +965,10 @@ def staff_view_student_profile(student_number):
                         update_milestone(student_number, m['milestone'], "Completed", datetime.now().strftime("%Y-%m-%d"), "", "Marked by staff")
                         st.success("Milestone completed.")
                         st.rerun()
-
-    with tabs[3]:  # Uploads
+    with tabs[3]:
         st.subheader("Student Uploads")
         st.info("Upload documents via student portal; staff can validate them here.")
-
-    with tabs[4]:  # Admin Controls
+    with tabs[4]:
         st.subheader("Administrative Controls")
         st.markdown("**Change Adviser**")
         adviser_options = ["Not assigned", "Dr. Eslava", "Dr. Sanchez"]
@@ -946,7 +978,6 @@ def staff_view_student_profile(student_number):
             save_data(df)
             st.success(f"Adviser updated to {new_advisor}")
             st.rerun()
-
         st.markdown("**Change Program**")
         new_program = st.selectbox("New Program", PROGRAMS, index=PROGRAMS.index(student["program"]) if student["program"] in PROGRAMS else 0)
         if st.button("Update Program"):
@@ -958,7 +989,6 @@ def staff_view_student_profile(student_number):
             save_data(df)
             st.success("Program updated.")
             st.rerun()
-
         st.markdown("**Special Student Status**")
         status_options = ["Regular", "Transferred", "Shifted", "On Leave", "Inactive", "Deceased"]
         current_special = student.get("special_status", "Regular")
@@ -1074,7 +1104,7 @@ with st.sidebar:
         st.session_state.consent_given = False
         st.rerun()
     st.markdown("---")
-    st.caption("Version 18.0 | Enhanced Profile (Required Fields)")
+    st.caption("Version 19.0 | Beautiful Profile Dashboard")
 
 # ==================== MAIN ====================
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
@@ -1091,7 +1121,6 @@ if role == "SESAM Staff":
     filtered["admitted_year"] = filtered.apply(lambda r: format_ay(r["ay_start"], r["semester"]), axis=1)
     display_cols = ["student_number","name","program","admitted_year","advisor","gwa","profile_pending_status"]
     st.dataframe(filtered[display_cols], use_container_width=True, height=350)
-
     col1, col2 = st.columns(2)
     with col1:
         if st.button("➕ Register New Student", use_container_width=True):
@@ -1101,7 +1130,6 @@ if role == "SESAM Staff":
         if st.button("✏️ Update Student Information", use_container_width=True):
             st.session_state.show_registration = False
             st.session_state.staff_show_update = True
-
     if st.session_state.get("show_registration", False):
         register_new_student_form()
     elif st.session_state.get("staff_show_update", False):
@@ -1144,17 +1172,22 @@ elif role == "Faculty Adviser":
         if st.session_state.get("staff_show_update", False) and st.session_state.staff_selected_student:
             staff_view_student_profile(st.session_state.staff_selected_student)
 
-# ==================== STUDENT VIEW ====================
+# ==================== STUDENT VIEW (ENHANCED BEAUTIFUL PROFILE) ====================
 elif role == "Student":
     student = df[df["name"] == st.session_state.display_name].iloc[0].copy()
     program_type = get_program_type(student["program"])
 
+    # Dashboard header with status badge
     st.subheader(f"📘 Your Dashboard – {student['name']}")
+    status_text = ""
     if student.get("profile_pending_status") == "Pending":
-        st.warning("Your profile update is pending approval.")
+        st.markdown('<span class="pending-badge">🟡 Profile update pending approval</span>', unsafe_allow_html=True)
     elif student.get("profile_pending_status") == "Rejected":
-        st.error(f"Profile update rejected: {student.get('profile_pending_remarks','')}")
+        st.markdown(f'<span class="rejected-badge">❌ Profile update rejected: {student.get("profile_pending_remarks","")}</span>', unsafe_allow_html=True)
+    else:
+        st.markdown('<span class="approved-badge">✅ Profile approved</span>', unsafe_allow_html=True)
 
+    # Milestone next action
     milestones = get_student_milestones(student["student_number"], program_type)
     next_milestone = None
     for _, row in milestones.iterrows():
@@ -1164,16 +1197,19 @@ elif role == "Student":
     if next_milestone:
         st.info(f"🎯 Next milestone: {next_milestone}")
     else:
-        st.success("All milestones completed!")
+        st.success("🎉 All milestones completed!")
 
     tabs = st.tabs(["👤 My Profile", "📚 Coursework", "📌 Milestones", "📁 Uploads"])
-    with tabs[0]:  # Student Profile (with required fields)
-        col1, col2 = st.columns([1,2])
-        with col1:
+    with tabs[0]:
+        # Profile picture and basic info in two columns
+        col_pic, col_basic = st.columns([1, 2])
+        with col_pic:
             pic_path = get_profile_picture_path(student["student_number"])
-            if pic_path: st.image(pic_path, width=150)
-            else: st.info("No profile picture")
-            uploaded_pic = st.file_uploader("Upload picture", type=["jpg","jpeg","png"], key="student_pic")
+            if pic_path:
+                st.image(pic_path, width=180, caption="Profile Picture")
+            else:
+                st.info("No profile picture")
+            uploaded_pic = st.file_uploader("Upload new picture", type=["jpg","jpeg","png"], key="student_pic")
             if uploaded_pic:
                 fn = save_profile_picture(student["student_number"], uploaded_pic)
                 if fn:
@@ -1181,72 +1217,73 @@ elif role == "Student":
                     save_data(df)
                     st.success("Picture updated.")
                     st.rerun()
-        with col2:
+        with col_basic:
+            st.markdown('<div class="profile-card">', unsafe_allow_html=True)
+            st.markdown('<div class="profile-header"><h3>📋 Personal Information</h3></div>', unsafe_allow_html=True)
             st.markdown(f"**Student Number:** {student['student_number']}")
-            st.markdown(f"**Name:** {student['name']}")
+            st.markdown(f"**Full Name:** {student['name']}")
             st.markdown(f"**Program:** {student['program']}")
             st.markdown(f"**Adviser:** {student['advisor']}")
             st.markdown(f"**Admitted:** {format_ay(student['ay_start'], student['semester'])}")
             st.markdown(f"**Required Units:** {student['total_units_required']}")
-            # Show pending values if any
-            if student.get("profile_pending_status") == "Pending":
-                st.info("Your contact details are pending approval.")
-                st.write(f"**Proposed Address:** {student['profile_pending_address']}")
-                st.write(f"**Proposed Phone:** {student['profile_pending_phone']}")
-                st.write(f"**Proposed Email:** {student['profile_pending_email']}")
-            else:
-                st.markdown(f"**Address:** {student['address'] or '—'}")
-                st.markdown(f"**Phone:** {student['phone'] or '—'}")
-                st.markdown(f"**Institutional Email:** {student['institutional_email'] or '—'}")
-                st.markdown(f"**Gender:** {student['gender'] or '—'}")
-                st.markdown(f"**Civil Status:** {student['civil_status'] or '—'}")
-                st.markdown(f"**Citizenship:** {student['citizenship'] or '—'}")
-                st.markdown(f"**Birthdate:** {student['birthdate'] or '—'}")
-                st.markdown(f"**Religion:** {student['religion'] or '—'}")
-                st.markdown(f"**Emergency Contact:** {student['emergency_name'] or '—'} ({student['emergency_relationship'] or '—'})")
-                st.markdown(f"**Emergency Phone:** {student['emergency_country_code'] or ''} {student['emergency_phone'] or ''}")
-        st.markdown("---")
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        # Edit form in a card
+        st.markdown('<div class="profile-card">', unsafe_allow_html=True)
+        st.markdown('<div class="profile-header"><h3>✏️ Edit Your Profile</h3></div>', unsafe_allow_html=True)
         with st.form("student_edit_profile"):
+            # Required fields
             st.markdown("#### Required Information")
             current_address = student.get("profile_pending_address") if student.get("profile_pending_status") == "Pending" else student.get("address","")
             current_phone = student.get("profile_pending_phone") if student.get("profile_pending_status") == "Pending" else student.get("phone","")
             current_email = student.get("profile_pending_email") if student.get("profile_pending_status") == "Pending" else student.get("institutional_email","")
-            new_address = st.text_input("Address *", value=current_address)
-            new_phone = st.text_input("Phone Number *", value=current_phone)
+            col1, col2 = st.columns(2)
+            with col1:
+                new_address = st.text_input("Address *", value=current_address)
+            with col2:
+                new_phone = st.text_input("Phone Number *", value=current_phone)
             new_email = st.text_input("Institutional Email *", value=current_email)
 
             st.markdown("#### Optional Information")
+            # Gender, Civil Status, Citizenship, Birthdate, Religion
+            col3, col4 = st.columns(2)
             current_gender = student.get("profile_pending_gender") if student.get("profile_pending_status") == "Pending" else student.get("gender","")
             current_civil = student.get("profile_pending_civil_status") if student.get("profile_pending_status") == "Pending" else student.get("civil_status","")
             current_citizenship = student.get("profile_pending_citizenship") if student.get("profile_pending_status") == "Pending" else student.get("citizenship","")
             current_birthdate = student.get("profile_pending_birthdate") if student.get("profile_pending_status") == "Pending" else student.get("birthdate","")
             current_religion = student.get("profile_pending_religion") if student.get("profile_pending_status") == "Pending" else student.get("religion","")
+            with col3:
+                new_gender = st.selectbox("Gender", ["", "Male", "Female", "Other", "Prefer not to say"], index=["", "Male", "Female", "Other", "Prefer not to say"].index(current_gender) if current_gender in ["", "Male", "Female", "Other", "Prefer not to say"] else 0)
+                new_civil = st.selectbox("Civil Status", ["", "Single", "Married", "Divorced", "Widowed"], index=["", "Single", "Married", "Divorced", "Widowed"].index(current_civil) if current_civil in ["", "Single", "Married", "Divorced", "Widowed"] else 0)
+                new_citizenship = st.text_input("Citizenship", value=current_citizenship)
+            with col4:
+                new_religion = st.text_input("Religion", value=current_religion)
+                try:
+                    birthdate_val = datetime.strptime(current_birthdate, "%Y-%m-%d").date() if current_birthdate else date(2000,1,1)
+                except:
+                    birthdate_val = date(2000,1,1)
+                new_birthdate = st.date_input("Birthdate", value=birthdate_val)
+
+            # Emergency contact
+            st.markdown("#### Emergency Contact")
+            col5, col6 = st.columns(2)
             current_emergency_name = student.get("profile_pending_emergency_name") if student.get("profile_pending_status") == "Pending" else student.get("emergency_name","")
             current_emergency_rel = student.get("profile_pending_emergency_relationship") if student.get("profile_pending_status") == "Pending" else student.get("emergency_relationship","")
             current_emergency_cc = student.get("profile_pending_emergency_country_code") if student.get("profile_pending_status") == "Pending" else student.get("emergency_country_code","")
             current_emergency_phone = student.get("profile_pending_emergency_phone") if student.get("profile_pending_status") == "Pending" else student.get("emergency_phone","")
-
-            col1, col2 = st.columns(2)
-            with col1:
-                new_gender = st.selectbox("Gender", ["", "Male", "Female", "Other", "Prefer not to say"], index=["", "Male", "Female", "Other", "Prefer not to say"].index(current_gender) if current_gender in ["", "Male", "Female", "Other", "Prefer not to say"] else 0)
-                new_civil = st.selectbox("Civil Status", ["", "Single", "Married", "Divorced", "Widowed"], index=["", "Single", "Married", "Divorced", "Widowed"].index(current_civil) if current_civil in ["", "Single", "Married", "Divorced", "Widowed"] else 0)
-                new_citizenship = st.text_input("Citizenship", value=current_citizenship)
-                new_birthdate = st.date_input("Birthdate", value=datetime.strptime(current_birthdate, "%Y-%m-%d").date() if current_birthdate else date(2000,1,1))
-            with col2:
-                new_religion = st.text_input("Religion", value=current_religion)
-                new_emergency_name = st.text_input("Emergency Contact Name", value=current_emergency_name)
+            with col5:
+                new_emergency_name = st.text_input("Name", value=current_emergency_name)
                 new_emergency_rel = st.text_input("Relationship", value=current_emergency_rel)
+            with col6:
                 new_emergency_cc = st.text_input("Country Code (e.g., +63)", value=current_emergency_cc)
-                new_emergency_phone = st.text_input("Emergency Phone Number", value=current_emergency_phone)
+                new_emergency_phone = st.text_input("Phone Number", value=current_emergency_phone)
 
-            if st.form_submit_button("Submit for Approval"):
-                # Validate required fields
+            submitted = st.form_submit_button("Submit for Approval", use_container_width=True)
+            if submitted:
                 if not new_address or not new_phone or not new_email:
                     st.error("Address, Phone Number, and Institutional Email are required.")
                 else:
-                    # Convert birthdate to string
-                    birthdate_str = new_birthdate.strftime("%Y-%m-%d") if new_birthdate else ""
-                    # Save pending fields
+                    birthdate_str = new_birthdate.strftime("%Y-%m-%d")
                     df.loc[df["student_number"]==student["student_number"], "profile_pending_address"] = new_address
                     df.loc[df["student_number"]==student["student_number"], "profile_pending_phone"] = new_phone
                     df.loc[df["student_number"]==student["student_number"], "profile_pending_email"] = new_email
@@ -1263,8 +1300,9 @@ elif role == "Student":
                     save_data(df)
                     st.success("Changes submitted. Waiting for approval.")
                     st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    with tabs[1]:  # Coursework (unchanged)
+    with tabs[1]:  # Coursework (unchanged functionally)
         st.subheader("Your Academic Record (Prospectus)")
         total_years = 2 if is_master_program(student["program"]) else 3
         total_semesters_needed = total_years * 2 + (total_years - 1)
@@ -1315,7 +1353,7 @@ elif role == "Student":
             st.success("Totals recalculated. Refresh the page.")
             st.rerun()
 
-    with tabs[2]:  # Milestones
+    with tabs[2]:  # Milestones (unchanged)
         st.subheader("Milestone Tracker")
         milestones_df = get_student_milestones(student["student_number"], program_type)
         for _, m in milestones_df.iterrows():
@@ -1342,4 +1380,4 @@ elif role == "Student":
 
 # ==================== FOOTER ====================
 st.markdown("---")
-st.caption("SESAM KMIS v18.0 | Enhanced Profile (Required Fields)")
+st.caption("SESAM KMIS v19.0 | Beautiful Student Profile Dashboard")
