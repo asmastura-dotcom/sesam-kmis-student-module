@@ -1,6 +1,6 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 16.0 | Fixed dtypes, robust file handling, student-driven updates, tab validation
+Version: 17.0 | Fixed Coursework Table & Units Reflection
 """
 
 import streamlit as st
@@ -8,7 +8,6 @@ import pandas as pd
 import os
 import json
 from datetime import date, datetime
-import numpy as np
 
 # ==================== PAGE CONFIG ====================
 st.set_page_config(page_title="SESAM KMIS", page_icon="🎓", layout="wide", initial_sidebar_state="expanded")
@@ -25,20 +24,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==================== SESSION STATE ====================
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "username" not in st.session_state:
-    st.session_state.username = None
-if "role" not in st.session_state:
-    st.session_state.role = None
-if "display_name" not in st.session_state:
-    st.session_state.display_name = None
-if "consent_given" not in st.session_state:
-    st.session_state.consent_given = False
-if "staff_selected_student" not in st.session_state:
-    st.session_state.staff_selected_student = None
-if "staff_show_update" not in st.session_state:
-    st.session_state.staff_show_update = False
+if "logged_in" not in st.session_state: st.session_state.logged_in = False
+if "username" not in st.session_state: st.session_state.username = None
+if "role" not in st.session_state: st.session_state.role = None
+if "display_name" not in st.session_state: st.session_state.display_name = None
+if "consent_given" not in st.session_state: st.session_state.consent_given = False
+if "staff_selected_student" not in st.session_state: st.session_state.staff_selected_student = None
+if "staff_show_update" not in st.session_state: st.session_state.staff_show_update = False
 
 # ==================== DATA PRIVACY CONSENT ====================
 CONSENT_LOG_FILE = "consent_log.csv"
@@ -143,7 +135,7 @@ def get_thesis_limit_from_program(program):
 def get_residency_max_from_program(program): return 5 if is_master_program(program) else 7
 def format_ay(ay_start, semester): return f"A.Y. {ay_start}-{ay_start+1} ({semester})"
 
-# ==================== DATA LOADING (with dtype fixing) ====================
+# ==================== DATA LOADING (fixed dtypes) ====================
 DATA_FILE = "students.csv"
 SEMESTER_FILE = "semester_records.csv"
 MILESTONE_FILE = "milestone_tracking.csv"
@@ -199,20 +191,18 @@ def create_demo_data():
 
 @st.cache_resource
 def load_data():
-    # If file missing or empty, create demo data
     if not os.path.exists(DATA_FILE) or os.path.getsize(DATA_FILE) == 0:
         df = create_demo_data()
         save_data(df)
         return df
 
     try:
-        df = pd.read_csv(DATA_FILE, dtype=str)  # read all as string first
+        df = pd.read_csv(DATA_FILE, dtype=str)
     except Exception:
         df = create_demo_data()
         save_data(df)
         return df
 
-    # Convert numeric columns properly
     numeric_cols = ["ay_start", "gwa", "total_units_taken", "total_units_required",
                     "thesis_units_taken", "thesis_units_limit", "residency_years_used",
                     "residency_max_years", "extension_count", "loa_total_terms",
@@ -225,13 +215,11 @@ def load_data():
             else:
                 df[col] = df[col].astype(float)
 
-    # Ensure all expected columns exist
     default_df = create_demo_data()
     for col in default_df.columns:
         if col not in df.columns:
             df[col] = default_df[col]
 
-    # Text columns: replace NaN with empty string
     text_cols = ["student_number","name","last_name","first_name","middle_name","program","advisor","semester",
                  "profile_pic","committee_members_structured","committee_approval_date","thesis_outline_approved",
                  "thesis_status","pos_status","qualifying_exam_status","written_comprehensive_status",
@@ -242,14 +230,12 @@ def load_data():
         if col in df.columns:
             df[col] = df[col].fillna("").astype(str)
 
-    # Boolean columns
     for col in ["prior_ms_graduate", "committee_changed", "coursework_changed"]:
         if col in df.columns:
             df[col] = df[col].astype(bool)
         else:
             df[col] = False
 
-    # Fix residency and thesis limits based on program
     for idx, row in df.iterrows():
         prog = row["program"]
         df.at[idx, "residency_max_years"] = get_residency_max_from_program(prog)
@@ -258,7 +244,6 @@ def load_data():
         if req is not None:
             df.at[idx, "total_units_required"] = req
 
-    # Override GWA from semester records (if any)
     semesters_df = load_semester_records()
     for sn in df["student_number"].unique():
         sems = semesters_df[semesters_df["student_number"] == sn]
@@ -284,28 +269,24 @@ def load_data():
 def save_data(df):
     df.to_csv(DATA_FILE, index=False)
 
-# ==================== SEMESTER RECORDS (fixed dtypes) ====================
+# ==================== SEMESTER RECORDS ====================
 def load_semester_records():
     if not os.path.exists(SEMESTER_FILE) or os.path.getsize(SEMESTER_FILE) == 0:
         return pd.DataFrame(columns=["student_number","academic_year","semester","subjects_json","total_units","gwa",
                                      "doc_path","doc_upload_time","doc_status","doc_remarks","doc_validated_by","doc_validated_time","semester_status"])
 
     df = pd.read_csv(SEMESTER_FILE, dtype=str)
-    # Ensure all expected columns exist
     required_cols = ["student_number","academic_year","semester","subjects_json","total_units","gwa",
                      "doc_path","doc_upload_time","doc_status","doc_remarks","doc_validated_by","doc_validated_time","semester_status"]
     for col in required_cols:
         if col not in df.columns:
             df[col] = ""
-    # Convert numeric columns
     for col in ["total_units","gwa"]:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-    # Convert all text columns to string and replace NaN with ""
     text_cols = ["student_number","academic_year","semester","subjects_json","doc_path","doc_upload_time",
                  "doc_status","doc_remarks","doc_validated_by","doc_validated_time","semester_status"]
     for col in text_cols:
         df[col] = df[col].fillna("").astype(str)
-    # Ensure subjects_json is valid JSON
     df["subjects_json"] = df["subjects_json"].apply(lambda x: x if x and x != "" else "[]")
     if "semester_status" not in df.columns:
         df["semester_status"] = "Regular"
@@ -442,7 +423,8 @@ def create_next_semester(student_number, current_ay, current_sem):
 
 def update_student_academic_summary(student_number):
     sems = get_student_semesters(student_number)
-    total_grade = total_units = 0
+    total_grade = 0
+    total_units = 0
     for _, row in sems.iterrows():
         if row["semester_status"] != "Regular": continue
         try:
@@ -452,13 +434,25 @@ def update_student_academic_summary(student_number):
                 grade = float(s.get("grade",0))
                 total_units += units
                 total_grade += units * grade
-        except: pass
+        except Exception as e:
+            st.error(f"Error parsing subjects for {row['academic_year']} {row['semester']}: {e}")
+            continue
     if total_units > 0:
         df = load_data()
         idx = df[df["student_number"]==student_number].index
         if len(idx) > 0:
             df.loc[idx, "gwa"] = total_grade / total_units
             df.loc[idx, "total_units_taken"] = total_units
+            save_data(df)
+            # Also update the cached student variable in session? This ensures UI refresh
+            st.session_state[f"units_refresh_{student_number}"] = datetime.now()
+    else:
+        # No units yet, set to 0
+        df = load_data()
+        idx = df[df["student_number"]==student_number].index
+        if len(idx) > 0:
+            df.loc[idx, "total_units_taken"] = 0
+            df.loc[idx, "gwa"] = 0.0
             save_data(df)
 
 # ==================== PROFILE PICTURE ====================
@@ -549,7 +543,7 @@ def save_milestone_file(student_number, milestone_name, uploaded_file):
     with open(filepath, "wb") as f: f.write(uploaded_file.getbuffer())
     return filepath
 
-# ==================== MILESTONE REQUESTS ====================
+# ==================== MILESTONE REQUESTS (placeholder) ====================
 def load_milestone_requests():
     if not os.path.exists(MILESTONE_REQUESTS_FILE) or os.path.getsize(MILESTONE_REQUESTS_FILE) == 0:
         return pd.DataFrame(columns=["request_id","student_number","student_name","milestone_label","target_field","target_value","submitted_date","file_path","original_filename","status","reviewer_comment","reviewed_by","review_date"])
@@ -559,18 +553,6 @@ def load_milestone_requests():
     return df
 
 def save_milestone_requests(df): df.to_csv(MILESTONE_REQUESTS_FILE, index=False)
-
-def save_milestone_request_file(student_number, milestone_label, uploaded_file):
-    if uploaded_file is None: return None
-    folder = os.path.join(UPLOAD_FOLDER, student_number, "milestone_proofs")
-    os.makedirs(folder, exist_ok=True)
-    ext = uploaded_file.name.split('.')[-1].lower()
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_label = milestone_label.replace(" ", "_").replace("/", "_")
-    filename = f"{safe_label}_{timestamp}.{ext}"
-    filepath = os.path.join(folder, filename)
-    with open(filepath, "wb") as f: f.write(uploaded_file.getbuffer())
-    return filepath
 
 # ==================== WORKFLOW HELPERS ====================
 def get_step_completion_status(student_row):
@@ -630,15 +612,18 @@ def display_workflow_grid(completed_steps, next_step):
             else:
                 st.markdown(f'<div style="background:#f5f5f5; border-radius:12px; padding:0.5rem; text-align:center; opacity:0.6;"><div>🔒</div><div>{step}</div><div style="font-size:0.7rem;">Locked</div></div>', unsafe_allow_html=True)
 
-# ==================== RENDER SEMESTER BLOCK (STUDENT / STAFF) ====================
+# ==================== RENDER SEMESTER BLOCK (GENERAL) ====================
 def render_semester_block_general(student_number, semester_row, is_staff=False, override_edit=False):
     ay = str(semester_row["academic_year"])
     sem = str(semester_row["semester"])
     semester_status = str(semester_row.get("semester_status","Regular")).strip()
     if semester_status not in SEMESTER_STATUS_OPTIONS: semester_status = "Regular"
+
     try:
         subjects = json.loads(semester_row["subjects_json"]) if semester_row["subjects_json"] else []
-    except: subjects = []
+    except:
+        subjects = []
+
     total_units = float(semester_row["total_units"]) if pd.notna(semester_row["total_units"]) else 0.0
     gwa = float(semester_row["gwa"]) if pd.notna(semester_row["gwa"]) else 0.0
     doc_status = str(semester_row.get("doc_status","")).strip()
@@ -659,11 +644,15 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
             st.markdown(f"**Semester Status:** {semester_status}")
 
         st.markdown(f"**Document Validation:** {get_status_badge(doc_status)}", unsafe_allow_html=True)
-        if doc_status == "Rejected" and doc_remarks: st.warning(f"Rejection reason: {doc_remarks}")
+        if doc_status == "Rejected" and doc_remarks:
+            st.warning(f"Rejection reason: {doc_remarks}")
 
-        # Editable subjects table
+        # Editable subjects table (only for Regular semesters)
         if semester_status == "Regular" and (not is_staff or (is_staff and override_edit)):
-            if not doc_path or doc_path == "": st.warning("⚠️ Required: Upload AMIS screenshot or grade report below.")
+            if not doc_path or doc_path == "":
+                st.warning("⚠️ Required: Upload AMIS screenshot or grade report below.")
+
+            # Build dataframe
             df_edit = pd.DataFrame(subjects) if subjects else pd.DataFrame(columns=["course_code","course_description","units","grade"])
             for col in ["course_code","course_description","units","grade"]:
                 if col not in df_edit.columns:
@@ -699,17 +688,22 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                         s["course_description"] = str(s.get("course_description",""))
                         s["grade"] = str(s.get("grade","1.00"))
                     if update_semester_subjects(student_number, ay, sem, new_subjects):
-                        st.success("Subjects saved! Waiting for validation.")
-                        if df_key in st.session_state: del st.session_state[df_key]
+                        st.success("Subjects saved! Refreshing totals...")
+                        # Force immediate update of cumulative summary
+                        update_student_academic_summary(student_number)
+                        if df_key in st.session_state:
+                            del st.session_state[df_key]
                         st.rerun()
-                    else: st.error("Save failed.")
+                    else:
+                        st.error("Save failed.")
         elif semester_status != "Regular":
             st.info(f"Semester marked as **{semester_status}**. Subject input disabled.")
-            if subjects: st.dataframe(pd.DataFrame(subjects), use_container_width=True, hide_index=True)
+            if subjects:
+                st.dataframe(pd.DataFrame(subjects), use_container_width=True, hide_index=True)
         else:
             st.info("Editing is disabled in this view. Only the student can edit subjects.")
 
-        # Document upload/validation
+        # Document upload (only for students, not staff)
         st.markdown("---")
         st.markdown("**Upload Proof of Grades (AMIS Screenshot)**")
         if semester_status == "Regular":
@@ -836,9 +830,8 @@ def staff_view_student_profile(student_number):
                 st.markdown(f"**Emergency Contact:** {student['emergency_contact'] or '—'}")
         render_profile_approval_section(student, is_staff=True)
 
-    with tabs[1]:  # Coursework (same as student view but with staff edit permission)
+    with tabs[1]:  # Coursework
         st.subheader("Academic Record")
-        # Generate semesters automatically
         total_years = 2 if is_master_program(student["program"]) else 3
         total_semesters_needed = total_years * 2 + (total_years - 1)
         start_ay = student.get("ay_start", current_year)
@@ -896,9 +889,7 @@ def staff_view_student_profile(student_number):
 
     with tabs[3]:  # Uploads
         st.subheader("Student Uploads")
-        # For brevity, reuse existing uploads functionality from original code.
         st.info("Upload documents via student portal; staff can validate them here.")
-        # ... (you can integrate your existing upload validation here)
 
     with tabs[4]:  # Admin Controls
         st.subheader("Administrative Controls")
@@ -1032,7 +1023,7 @@ with st.sidebar:
         st.session_state.consent_given = False
         st.rerun()
     st.markdown("---")
-    st.caption("Version 16.0 | Fixed dtypes | Role‑based validation")
+    st.caption("Version 17.0 | Fixed Coursework Table & Units Reflection")
 
 # ==================== MAIN ====================
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
@@ -1125,7 +1116,7 @@ elif role == "Student":
         st.success("All milestones completed!")
 
     tabs = st.tabs(["👤 My Profile", "📚 Coursework", "📌 Milestones", "📁 Uploads"])
-    with tabs[0]:
+    with tabs[0]:  # Student Profile
         col1, col2 = st.columns([1,2])
         with col1:
             pic_path = get_profile_picture_path(student["student_number"])
@@ -1173,7 +1164,8 @@ elif role == "Student":
                 st.rerun()
 
     with tabs[1]:  # Coursework
-        st.subheader("Your Academic Record")
+        st.subheader("Your Academic Record (Prospectus)")
+        # Generate semesters automatically
         total_years = 2 if is_master_program(student["program"]) else 3
         total_semesters_needed = total_years * 2 + (total_years - 1)
         start_ay = student.get("ay_start", current_year)
@@ -1208,11 +1200,24 @@ elif role == "Student":
                 create_next_semester(student["student_number"], last_sem["academic_year"], last_sem["semester"])
                 st.rerun()
         st.markdown("---")
-        cola, colb, colc, cold = st.columns(4)
-        cola.metric("Units Taken", student["total_units_taken"])
-        colb.metric("Required Units", student["total_units_required"])
-        colc.metric("Remaining", max(0, student["total_units_required"] - student["total_units_taken"]))
-        cold.metric("Cumulative GWA", f"{student['gwa']:.2f}")
+        st.subheader("📊 Cumulative Summary")
+        total_taken = student["total_units_taken"] if not pd.isna(student["total_units_taken"]) else 0
+        total_required = student["total_units_required"] if not pd.isna(student["total_units_required"]) else 24
+        remaining = max(0, total_required - total_taken)
+        cum_gwa = student["gwa"] if not pd.isna(student["gwa"]) else 0.0
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Units Taken", total_taken)
+        with col2:
+            st.metric("Required Units", total_required)
+        with col3:
+            st.metric("Remaining Units", remaining)
+        with col4:
+            st.metric("Cumulative GWA", f"{cum_gwa:.2f}")
+        if st.button("🔄 Recalculate Totals (Refresh)"):
+            update_student_academic_summary(student["student_number"])
+            st.success("Totals recalculated. Refresh the page.")
+            st.rerun()
 
     with tabs[2]:  # Milestones
         st.subheader("Milestone Tracker")
@@ -1234,11 +1239,12 @@ elif role == "Student":
                         else:
                             st.error("Please upload a file.")
 
-    with tabs[3]:  # Uploads (placeholder)
+    with tabs[3]:  # Uploads
         st.info("Upload supporting documents here (admission letter, AMIS screenshot, etc.).")
+        # Placeholder – you can extend with actual upload logic.
 
     st.caption("For corrections, contact your adviser or SESAM Staff.")
 
 # ==================== FOOTER ====================
 st.markdown("---")
-st.caption("SESAM KMIS v16.0 | Fixed dtypes | Role‑Based Validation")
+st.caption("SESAM KMIS v17.0 | Fixed Coursework Table & Units Reflection")
