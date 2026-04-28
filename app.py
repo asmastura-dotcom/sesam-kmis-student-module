@@ -1216,18 +1216,73 @@ if role == "SESAM Staff":
 
 # ==================== ADVISER VIEW ====================
 elif role == "Faculty Adviser":
-    st.subheader(f"👨‍🏫 Your Advisees – {st.session_state.display_name}")
+    st.subheader(f"👨‍🏫 Faculty Adviser Dashboard – {st.session_state.display_name}")
+    
+    # Get advisees
     advisees = df[df["advisor"] == st.session_state.display_name].copy()
+    
     if advisees.empty:
         st.warning("No students assigned to you.")
     else:
+        # --- Pending Validations Summary ---
+        all_semesters = load_semester_records()
+        advisee_numbers = advisees["student_number"].tolist()
+        pending_sems = all_semesters[(all_semesters["student_number"].isin(advisee_numbers)) & (all_semesters["doc_status"] == "Pending")]
+        pending_count = len(pending_sems)
+        
+        # Also count pending profile updates (if any)
+        pending_profiles = advisees[advisees["profile_pending_status"] == "Pending"]
+        profile_count = len(pending_profiles)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("📄 Pending Document Validations", pending_count)
+        with col2:
+            st.metric("👤 Pending Profile Approvals", profile_count)
+        
+        if pending_count > 0 or profile_count > 0:
+            st.info("Use the **View & Validate** button on a student's card to review pending items inside their profile.")
+        
+        st.markdown("---")
+        
+        # --- Search and Filter ---
+        search_term = st.text_input("🔍 Search advisees by name or student number", key="adviser_search")
+        if search_term:
+            advisees = advisees[advisees["name"].str.contains(search_term, case=False, na=False) | 
+                               advisees["student_number"].str.contains(search_term, case=False, na=False)]
+        
+        st.markdown(f"#### Your Advisees ({len(advisees)} student(s))")
+        
+        # --- Display advisees as cards ---
         for _, student in advisees.iterrows():
-            with st.expander(f"{student['name']} ({student['student_number']}) – {student['program']}"):
-                st.write(f"GWA: {student['gwa']:.2f}, Units: {student['total_units_taken']}/{student['total_units_required']}")
-                if st.button(f"View & Validate", key=f"view_{student['student_number']}"):
+            with st.container():
+                # Create a card using custom HTML or columns
+                st.markdown(f"""
+                <div style="background:white; border-radius:16px; padding:1rem; margin-bottom:1rem; border:1px solid #e9ecef; box-shadow:0 2px 4px rgba(0,0,0,0.05);">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <div style="font-weight:600; font-size:1.1rem;">{student['name']}</div>
+                            <div style="font-size:0.85rem; color:#6c757d;">{student['student_number']} | {student['program']}</div>
+                        </div>
+                        <div style="text-align:right;">
+                            <div>GWA: <strong>{student['gwa']:.2f}</strong></div>
+                            <div style="font-size:0.8rem;">Units: {student['total_units_taken']}/{student['total_units_required']}</div>
+                        </div>
+                    </div>
+                    <div style="margin-top:0.75rem;">
+                        <span style="background:#e9ecef; padding:0.2rem 0.6rem; border-radius:20px; font-size:0.75rem;">{student['program']}</span>
+                        {"<span style='background:#fff3cd; padding:0.2rem 0.6rem; border-radius:20px; font-size:0.75rem; margin-left:0.5rem;'>🔔 Pending Profile</span>" if student.get('profile_pending_status') == "Pending" else ""}
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Button to view full profile
+                if st.button(f"👁️ View & Validate {student['name']}", key=f"view_advisee_{student['student_number']}"):
                     st.session_state.staff_selected_student = student["student_number"]
                     st.session_state.staff_show_update = True
                     st.rerun()
+        
+        # If a student is selected, display the full profile (same as staff view)
         if st.session_state.get("staff_show_update", False) and st.session_state.staff_selected_student:
             staff_view_student_profile(st.session_state.staff_selected_student)
 
