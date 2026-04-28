@@ -864,6 +864,8 @@ def staff_view_student_profile(student_number):
     df = load_data()
     student = df[df["student_number"] == student_number].iloc[0].copy()
     program_type = get_program_type(student["program"])
+    
+    # Determine editing permissions
     can_edit = False
     if student["advisor"] == "Not assigned":
         can_edit = True
@@ -874,21 +876,30 @@ def staff_view_student_profile(student_number):
         if override:
             can_edit = True
             st.info("Override active – you can now edit this student's records.")
+    
+    # Header with back button
     st.markdown(f"## {student['name']} ({student_number})")
     if st.button("← Back to Student List"):
         st.session_state.staff_selected_student = None
         st.session_state.staff_show_update = True
         st.rerun()
+    
+    # Tabs
     tabs = st.tabs(["📝 Student Info", "📚 Coursework", "📌 Milestones", "📁 Uploads", "⚙️ Admin Controls"])
+    
     with tabs[0]:
-        col1, col2 = st.columns([1,2])
-        with col1:
+        # Two-column layout for profile picture and info cards
+        col_left, col_right = st.columns([1, 2])
+        
+        with col_left:
+            st.markdown('<div class="profile-card">', unsafe_allow_html=True)
+            st.markdown('<div class="profile-header"><h3>📸 Profile Picture</h3></div>', unsafe_allow_html=True)
             pic_path = get_profile_picture_path(student_number)
             if pic_path:
-                st.image(pic_path, width=150)
+                st.image(pic_path, width=180, caption="Current Picture")
             else:
-                st.info("No profile picture")
-            uploaded_pic = st.file_uploader("Update picture", type=["jpg","jpeg","png"], key="staff_pic")
+                st.info("No profile picture uploaded")
+            uploaded_pic = st.file_uploader("Upload new picture", type=["jpg","jpeg","png"], key="staff_pic")
             if uploaded_pic:
                 fn = save_profile_picture(student_number, uploaded_pic)
                 if fn:
@@ -902,24 +913,62 @@ def staff_view_student_profile(student_number):
                     save_data(df)
                     st.success("Picture deleted.")
                     st.rerun()
-        with col2:
-            st.markdown(f"**Student Number:** {student_number}")
-            st.markdown(f"**Name:** {student['name']}")
-            st.markdown(f"**Program:** {student['program']}")
-            st.markdown(f"**Adviser:** {student['advisor']}")
-            st.markdown(f"**Admitted:** {format_ay(student['ay_start'], student['semester'])}")
-            st.markdown(f"**Required Units:** {student['total_units_required']}")
-            st.markdown(f"**Special Status:** {student.get('special_status', 'Regular')}")
-            st.markdown(f"**Address:** {student['address'] or '—'}")
-            st.markdown(f"**Phone:** {student['phone'] or '—'}")
-            st.markdown(f"**Institutional Email:** {student['institutional_email'] or '—'}")
-            st.markdown(f"**Gender:** {student['gender'] or '—'}")
-            st.markdown(f"**Civil Status:** {student['civil_status'] or '—'}")
-            st.markdown(f"**Citizenship:** {student['citizenship'] or '—'}")
-            st.markdown(f"**Birthdate:** {student['birthdate'] or '—'}")
-            st.markdown(f"**Religion:** {student['religion'] or '—'}")
-            st.markdown(f"**Emergency Contact:** {student['emergency_name'] or '—'} ({student['emergency_relationship'] or '—'})")
-            st.markdown(f"**Emergency Phone:** {student['emergency_country_code'] or ''} {student['emergency_phone'] or ''}")
+            st.markdown('</div>', unsafe_allow_html=True)
+        
+        with col_right:
+            # --- Basic Information Card ---
+            st.markdown('<div class="profile-card">', unsafe_allow_html=True)
+            st.markdown('<div class="profile-header"><h3>📋 Basic Information</h3></div>', unsafe_allow_html=True)
+            st.markdown(f"""
+            <table style="width:100%;">
+                <tr><td style="width:40%; font-weight:600;">Student Number:</td><td>{student['student_number']}</td></tr>
+                <tr><td style="font-weight:600;">Full Name:</td><td>{student['name']}</td></tr>
+                <tr><td style="font-weight:600;">Program:</td><td>{student['program']}</td></tr>
+                <tr><td style="font-weight:600;">Adviser:</td><td>{student['advisor']}</td></tr>
+                <tr><td style="font-weight:600;">Admitted:</td><td>{format_ay(student['ay_start'], student['semester'])}</td></tr>
+                <tr><td style="font-weight:600;">Required Units:</td><td>{student['total_units_required']}</td></tr>
+                <tr><td style="font-weight:600;">Special Status:</td><td>{student.get('special_status', 'Regular')}</td></tr>
+            </table>
+            """, unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # --- Contact Details Card ---
+            st.markdown('<div class="profile-card">', unsafe_allow_html=True)
+            st.markdown('<div class="profile-header"><h3>📞 Contact Details</h3></div>', unsafe_allow_html=True)
+            st.markdown(f"""
+            <table style="width:100%;">
+                <tr><td style="width:40%; font-weight:600;">Address:</td><td>{student['address'] or '—'}</td></tr>
+                <tr><td style="font-weight:600;">Phone Number:</td><td>{student['phone'] or '—'}</td></tr>
+                <tr><td style="font-weight:600;">Institutional Email:</td><td>{student['institutional_email'] or '—'}</td></tr>
+            </table>
+            """, unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # --- Personal Details Card ---
+            st.markdown('<div class="profile-card">', unsafe_allow_html=True)
+            st.markdown('<div class="profile-header"><h3>🧑 Personal Details</h3></div>', unsafe_allow_html=True)
+            st.markdown(f"""
+            <table style="width:100%;">
+                <tr><td style="width:40%; font-weight:600;">Gender:</td><td>{student['gender'] or '—'}</td></tr>
+                <tr><td style="font-weight:600;">Civil Status:</td><td>{student['civil_status'] or '—'}</td></tr>
+                <tr><td style="font-weight:600;">Citizenship:</td><td>{student['citizenship'] or '—'}</td></tr>
+                <tr><td style="font-weight:600;">Birthdate:</td><td>{student['birthdate'] or '—'}</td></tr>
+                <tr><td style="font-weight:600;">Religion:</td><td>{student['religion'] or '—'}</td></tr>
+            </table>
+            """, unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # --- Emergency Contact Card ---
+            st.markdown('<div class="profile-card">', unsafe_allow_html=True)
+            st.markdown('<div class="profile-header"><h3>🚨 Emergency Contact</h3></div>', unsafe_allow_html=True)
+            st.markdown(f"""
+            <table style="width:100%;">
+                <tr><td style="width:40%; font-weight:600;">Name:</td><td>{student['emergency_name'] or '—'}</td></tr>
+                <tr><td style="font-weight:600;">Relationship:</td><td>{student['emergency_relationship'] or '—'}</td></tr>
+                <tr><td style="font-weight:600;">Phone:</td><td>{student['emergency_country_code'] or ''} {student['emergency_phone'] or ''}</td></tr>
+            </table>
+            """, unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
     with tabs[1]:
         st.subheader("Academic Record")
         total_years = 2 if is_master_program(student["program"]) else 3
