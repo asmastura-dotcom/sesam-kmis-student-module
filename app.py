@@ -1338,7 +1338,7 @@ elif role == "Student":
             st.markdown(f"**Required Units:** {student['total_units_required']}")
             st.markdown('</div>', unsafe_allow_html=True)
         st.markdown('<div class="profile-card">', unsafe_allow_html=True)
-        st.markdown('<div class="profile-header"><h3>✏️ Edit Your Profile</h3></div>', unsafe_allow_html=True)
+        st.markdown('<div class="profile-header"><h3>✏️ Additional Information</h3></div>', unsafe_allow_html=True)
         with st.form("student_edit_profile"):
             st.markdown("#### Required Information")
             col1, col2 = st.columns(2)
