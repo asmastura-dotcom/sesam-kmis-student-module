@@ -1,6 +1,6 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 27.0 | Student Milestones → Sequential Tab Workflow (FIXED)
+Version: 27.1 | Sequential Milestone Tabs (Coursework removed)
 """
 
 import streamlit as st
@@ -724,11 +724,10 @@ def get_profile_picture_path(student_number):
     return None
 
 # ==================== MILESTONE TRACKING ====================
+# Define milestones without "Registration (Coursework)" and "Coursework Completion"
 MS_THESIS_MILESTONES = [
-    "Registration (Coursework)",
     "Guidance Committee Formation",
     "Plan of Study (POS)",
-    "Coursework Completion",
     "General Examination",
     "Thesis Work",
     "External Review",
@@ -740,10 +739,10 @@ MS_THESIS_MILESTONES = [
 
 MILESTONE_DEFS = {
     "MS_Thesis": MS_THESIS_MILESTONES,
-    "MS_NonThesis": ["Registration","Guidance Committee Formation","Plan of Study (POS)","Coursework Completion","General Examination","External Review","Graduation Clearance"],
-    "PhD_Regular": ["Registration","Advisory Committee Formation","Qualifying Exam","Plan of Study","Coursework","Comprehensive Exam","Dissertation","External Review","Publication","Final Defense","Submission","Graduation"],
-    "PhD_Straight": ["Registration","Advisory Committee Formation","Plan of Study","Coursework","Comprehensive Exam","Dissertation","External Review","Publication (2 papers)","Final Defense","Submission","Graduation"],
-    "PhD_Research": ["Registration","Supervisory Committee Formation","Plan of Research","Seminar Series (4 seminars)","Research Progress Review","Thesis Draft","Publication (min 2 papers)","Final Oral Examination","Thesis Submission","Graduation"]
+    "MS_NonThesis": ["Guidance Committee Formation","Plan of Study (POS)","General Examination","External Review","Graduation Clearance"],
+    "PhD_Regular": ["Advisory Committee Formation","Qualifying Exam","Plan of Study","Comprehensive Exam","Dissertation","External Review","Publication","Final Defense","Submission","Graduation"],
+    "PhD_Straight": ["Advisory Committee Formation","Plan of Study","Comprehensive Exam","Dissertation","External Review","Publication (2 papers)","Final Defense","Submission","Graduation"],
+    "PhD_Research": ["Supervisory Committee Formation","Plan of Research","Seminar Series (4 seminars)","Research Progress Review","Thesis Draft","Publication (min 2 papers)","Final Oral Examination","Thesis Submission","Graduation"]
 }
 
 def load_milestone_tracking():
@@ -1347,12 +1346,10 @@ def staff_view_student_profile(student_number):
         st.subheader("📌 Milestone Tracker (Staff Validation)")
         advisor_assigned = student["advisor"] != "Not assigned"
         if not advisor_assigned:
-            st.warning("⚠️ **No adviser assigned.** Staff can only approve **Registration (Coursework)** milestones. To approve other milestones, please assign an adviser first using the Admin Controls tab.")
+            st.warning("⚠️ **No adviser assigned.** Staff can only approve milestones? To approve milestones, please assign an adviser first using the Admin Controls tab.")
         milestones_df = get_student_milestones(student_number, program_type)
         for _, milestone_row in milestones_df.iterrows():
             milestone = milestone_row["milestone"]
-            is_registration = (milestone == "Registration (Coursework)")
-            can_approve = is_registration or advisor_assigned
             with st.container(border=True):
                 status = milestone_row["status"]
                 st.markdown(f"**{milestone}**")
@@ -1367,7 +1364,7 @@ def staff_view_student_profile(student_number):
                         else:
                             with open(milestone_row["file_path"], "rb") as f:
                                 st.download_button("Download", f, file_name=os.path.basename(milestone_row["file_path"]))
-                if status == "Pending" and can_approve:
+                if status == "Pending" and advisor_assigned:
                     remarks = st.text_area("Remarks", key=f"staff_milestone_remarks_{student_number}_{milestone}")
                     col_app, col_rej = st.columns(2)
                     with col_app:
@@ -1382,7 +1379,7 @@ def staff_view_student_profile(student_number):
                             update_milestone(student_number, milestone, "Rejected", None, None, remarks, st.session_state.display_name)
                             st.warning(f"{milestone} rejected.")
                             st.rerun()
-                elif status == "Pending" and not can_approve and not is_registration:
+                elif status == "Pending" and not advisor_assigned:
                     st.info("🔒 This milestone can only be approved by the student's adviser.")
         st.markdown("---")
         st.subheader("Thesis Extension Management")
@@ -1689,10 +1686,11 @@ def student_dashboard():
     if semester_count >= 1 and is_master_program(student["program"]) and student.get("pos_status","Pending") != "Approved":
         st.markdown('<div class="danger-banner">⚠️ Your Plan of Study (POS) is not yet approved. You will not be able to register for the next semester until it is approved.</div>', unsafe_allow_html=True)
     
-    # Main tabs
+    # Main tabs: Profile, Coursework, Sequential Milestones, Uploads, Data Rights
     main_tabs = st.tabs(["👤 My Profile", "📚 Coursework", "📌 Sequential Milestones", "📁 Uploads", "🔐 Data Rights"])
     
     with main_tabs[0]:
+        # Profile tab (same as before)
         col1, col2 = st.columns([1,2])
         with col1:
             pic_path = get_profile_picture_path(student["student_number"])
@@ -1789,6 +1787,7 @@ def student_dashboard():
         st.markdown('</div>', unsafe_allow_html=True)
     
     with main_tabs[1]:
+        # Coursework tab (unchanged)
         st.subheader("Your Academic Record (Coursework)")
         total_years = 2 if is_master_program(student["program"]) else 3
         total_semesters_needed = total_years * 2 + (total_years - 1)
@@ -1922,7 +1921,6 @@ def student_dashboard():
                     </div>
                     """, unsafe_allow_html=True)
                 elif milestone_name == next_milestone and status == "Approved":
-                    # Find the next after this one
                     idx = milestone_list.index(milestone_name)
                     if idx + 1 < len(milestone_list):
                         next_name = milestone_list[idx + 1]
@@ -2013,10 +2011,10 @@ with st.sidebar:
         st.session_state.consent_given = False
         st.rerun()
     st.markdown("---")
-    st.caption("Version 27.0 | Sequential Milestones")
+    st.caption("Version 27.1 | Sequential Milestones (Coursework separate)")
 
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
-st.caption("Fully compliant with UPLB Graduate School policies. Sequential milestone tabs guide students step-by-step.")
+st.caption("Fully compliant with UPLB Graduate School policies. Coursework handled in its own tab; other milestones are sequential tabs.")
 
 role = st.session_state.role
 
@@ -2099,4 +2097,4 @@ elif role == "Student":
     student_dashboard()
 
 st.markdown("---")
-st.caption("SESAM KMIS v27.0 | Sequential Milestone Workflow")
+st.caption("SESAM KMIS v27.1 | Sequential Milestones (Coursework separate)")
