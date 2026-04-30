@@ -1050,7 +1050,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
             pass
     has_pos = len(pos_courses) > 0 and pos_approved
     
-    # Show mismatch warning if needed
     if has_pos and semester_status == "Regular":
         consistent, mismatches = check_coursework_consistency(student_number, ay, sem)
         if not consistent:
@@ -1059,9 +1058,9 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
             st.markdown('<div class="pos-match">✅ Enrolled subjects match the approved POS for this semester.</div>', unsafe_allow_html=True)
     elif semester_status == "Regular" and not pos_approved and semester_row.get("pos_courses", "") and semester_row.get("pos_courses", "") != "":
         st.info("📋 Plan of Study (POS) for this semester is pending approval. Courses will be validated after approval.")
-    # Removed the "No approved POS yet" per-semester message; it's shown globally now.
     
     with st.expander(f"📅 {ay} | {sem} (Units: {total_units:.0f} | GWA: {gwa:.2f})", expanded=False):
+        # Semester status selector (both student and staff can change it)
         can_edit_status = (is_staff and override_edit) or (not is_staff)
         if can_edit_status:
             new_status = st.selectbox("Semester Status", SEMESTER_STATUS_OPTIONS,
@@ -1073,11 +1072,12 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                     st.rerun()
         else:
             st.markdown(f"**Semester Status:** {semester_status}")
+        
         st.markdown(f"**Document Validation:** {get_status_badge(doc_status)}", unsafe_allow_html=True)
         if doc_status == "Rejected" and doc_remarks:
             st.warning(f"Rejection reason: {doc_remarks}")
         
-        # ---- Editable subjects table for students AND staff ----
+        # ---- Editable subjects table (for both students and staff) ----
         if semester_status == "Regular" and (not is_staff or (is_staff and override_edit)):
             if not doc_path or doc_path == "":
                 st.warning("⚠️ Required: Upload AMIS screenshot or grade report below.")
@@ -1130,13 +1130,12 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                         st.rerun()
                     else:
                         st.error("Save failed.")
-        
         elif semester_status != "Regular":
             st.info(f"Semester marked as **{semester_status}**. Subject input disabled.")
             if subjects:
                 st.dataframe(pd.DataFrame(subjects), use_container_width=True, hide_index=True)
         else:
-            st.info("Editing is disabled in this view. Only the student can edit subjects.")
+            st.info("Editing is disabled because you do not have permission.")
         
         # ---- Document upload and validation (unchanged) ----
         st.markdown("---")
