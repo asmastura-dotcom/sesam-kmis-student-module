@@ -1039,7 +1039,7 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
     doc_path = str(semester_row.get("doc_path","")).strip()
     doc_remarks = str(semester_row.get("doc_remarks","")).strip()
     
-    # POS consistency check
+    # POS consistency check (mismatch warning only if POS approved)
     pos_approved = semester_row.get("pos_approved_status", "") == "Approved"
     pos_courses_str = semester_row.get("pos_courses", "")
     pos_courses = []
@@ -1059,9 +1059,8 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
     elif semester_status == "Regular" and not pos_approved and semester_row.get("pos_courses", "") and semester_row.get("pos_courses", "") != "":
         st.info("📋 Plan of Study (POS) for this semester is pending approval. Courses will be validated after approval.")
     
-    # --- FIX: Keep expander open with expanded=True ---
-    with st.expander(f"📅 {ay} | {sem} (Units: {total_units:.0f} | GWA: {gwa:.2f})", expanded=True):
-        # Semester status selector (both student and staff)
+    with st.expander(f"📅 {ay} | {sem} (Units: {total_units:.0f} | GWA: {gwa:.2f})", expanded=False):
+        # Semester status selector (both student and staff can change it)
         can_edit_status = (is_staff and override_edit) or (not is_staff)
         if can_edit_status:
             new_status = st.selectbox("Semester Status", SEMESTER_STATUS_OPTIONS,
@@ -1078,12 +1077,8 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
         if doc_status == "Rejected" and doc_remarks:
             st.warning(f"Rejection reason: {doc_remarks}")
         
-        # --- Editable subjects: only if document not approved and semester regular ---
-        can_edit_subjects = (semester_status == "Regular" and 
-                             (not is_staff or (is_staff and override_edit)) and 
-                             doc_status != "Approved")
-        
-        if semester_status == "Regular" and can_edit_subjects:
+        # ---- Editable subjects table (for both students and staff) ----
+        if semester_status == "Regular" and (not is_staff or (is_staff and override_edit)):
             if not doc_path or doc_path == "":
                 st.warning("⚠️ Required: Upload AMIS screenshot or grade report below.")
             
@@ -1140,13 +1135,7 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
             if subjects:
                 st.dataframe(pd.DataFrame(subjects), use_container_width=True, hide_index=True)
         else:
-            if doc_status == "Approved":
-                st.info("✅ Your document for this semester has been approved. Editing is locked.")
-            else:
-                st.info("Editing is disabled because you do not have permission.")
-            # Show read-only table of existing subjects
-            if subjects:
-                st.dataframe(pd.DataFrame(subjects), use_container_width=True, hide_index=True)
+            st.info("Editing is disabled because you do not have permission.")
         
         # ---- Document upload and validation (unchanged) ----
         st.markdown("---")
