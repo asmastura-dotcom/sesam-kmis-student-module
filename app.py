@@ -2009,9 +2009,18 @@ def student_dashboard():
         with col3: st.metric("Remaining Units", remaining)
         with col4: st.metric("Cumulative GWA", f"{cum_gwa:.2f}")
         if st.button("🔄 Recalculate Totals (Refresh)"):
-            update_student_academic_summary(student["student_number"])
-            st.success("Totals recalculated. Refresh the page.")
-            st.rerun()
+            # 1. Force clear all session state keys for this student's semesters
+            keys_to_clear = [k for k in st.session_state.keys() if k.startswith(f"editable_{student['student_number']}_")]
+            for k in keys_to_clear:
+                del st.session_state[k]
+    
+    # 2. Recompute from disk
+    update_student_academic_summary(student["student_number"])
+    
+    # 3. Show success and force full rerun (will reload CSV)
+    st.success("Totals recalculated and refreshed.")
+    st.rerun()
+        
     
     # Milestone Tabs
     for i, milestone_name in enumerate(milestone_list):
