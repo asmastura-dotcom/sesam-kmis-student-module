@@ -1,6 +1,6 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 27.6 | Structured Guidance Committee Formation
+Version: 27.7 | Sequential Milestone Locking
 """
 
 import streamlit as st
@@ -62,6 +62,14 @@ st.markdown("""
     }
     .pos-match { color: green; font-weight: bold; }
     .pos-mismatch { color: red; font-weight: bold; }
+    .locked-milestone {
+        background-color: #f8f9fa;
+        border-left: 5px solid #6c757d;
+        padding: 1rem;
+        border-radius: 12px;
+        margin: 1rem 0;
+        color: #6c757d;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1563,7 +1571,7 @@ def staff_view_student_profile(student_number):
                     st.caption(f"Date: {milestone_row['date']}")
                 
                 # Show committee members for Guidance Committee Formation
-                if milestone == "Guidance Committee Formation" or milestone == "Advisory Committee Formation" or milestone == "Supervisory Committee Formation":
+                if milestone in ["Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
                     committee_members = get_committee_members(student_number)
                     if committee_members:
                         st.markdown("**Committee Members:**")
@@ -1825,7 +1833,7 @@ def adviser_view_student_profile(student_number):
                     st.caption(f"Date: {milestone_row['date']}")
                 
                 # Show committee members for Guidance Committee Formation
-                if milestone == "Guidance Committee Formation" or milestone == "Advisory Committee Formation" or milestone == "Supervisory Committee Formation":
+                if milestone in ["Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
                     committee_members = get_committee_members(student_number)
                     if committee_members:
                         st.markdown("**Committee Members:**")
@@ -1889,7 +1897,7 @@ def adviser_view_student_profile(student_number):
                         st.warning("Rejected.")
                         st.rerun()
 
-# ==================== STUDENT DASHBOARD WITH SEQUENTIAL MILESTONE TABS ====================
+# ==================== STUDENT DASHBOARD WITH SEQUENTIAL MILESTONE LOCKING ====================
 def student_dashboard():
     df = load_data()
     student = df[df["name"] == st.session_state.display_name].iloc[0].copy()
@@ -1925,13 +1933,15 @@ def student_dashboard():
     milestones_df = get_student_milestones(student["student_number"], program_type)
     milestone_list = MILESTONE_DEFS.get(program_type, MILESTONE_DEFS["MS_Thesis"])
     
-    # Find the first incomplete milestone (for guidance)
-    next_milestone = None
-    for m in milestone_list:
+    # Find the first incomplete milestone (for guidance and locking)
+    first_incomplete_index = None
+    for idx, m in enumerate(milestone_list):
         row = milestones_df[milestones_df["milestone"] == m]
         if not row.empty and row.iloc[0]["status"] != "Approved":
-            next_milestone = m
+            first_incomplete_index = idx
             break
+    if first_incomplete_index is None:
+        first_incomplete_index = len(milestone_list)  # all approved
     
     # Build tab list: Profile, Coursework, then each milestone
     tab_names = ["👤 My Profile", "📚 Coursework"] + milestone_list
@@ -2034,7 +2044,7 @@ def student_dashboard():
                     st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # ---- Coursework Tab (unchanged except reminders already added) ----
+    # ---- Coursework Tab (unchanged) ----
     with main_tabs[1]:
         st.subheader("Your Academic Record (Coursework)")
         
@@ -2104,7 +2114,7 @@ def student_dashboard():
         with col_btn2:
             st.caption("⚠️ Only **saved subjects** are included. Use 'Save Subjects' before refreshing.")
     
-    # ---- Milestone Tabs (index 2 onward) ----
+    # ---- Milestone Tabs (index 2 onward) with LOCKING ----
     for i, milestone_name in enumerate(milestone_list):
         with main_tabs[2 + i]:
             milestone_row = milestones_df[milestones_df["milestone"] == milestone_name].iloc[0]
@@ -2140,9 +2150,14 @@ def student_dashboard():
             if status == "Rejected" and remarks:
                 st.error(f"**Rejection reason:** {remarks}")
             
-            # Special handling for committee formation milestones
+            # Determine if this milestone is currently actionable
+            current_index = milestone_list.index(milestone_name)
+            is_locked = (status != "Approved" and current_index > first_incomplete_index)
+            is_current_actionable = (status != "Approved" and current_index == first_incomplete_index)
+            
+            # Committee members editing (only if not approved and not locked)
             if milestone_name in ["Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
-                if status != "Approved":
+                if status != "Approved" and not is_locked:
                     st.subheader("Committee Members")
                     
                     # Get current committee members
@@ -2195,7 +2210,7 @@ def student_dashboard():
                     
                     st.markdown("---")
                 
-                # Show read-only committee members if approved (or even if not approved but already saved)
+                # Show read-only committee members if approved or locked
                 committee_members = get_committee_members(student["student_number"])
                 if committee_members:
                     st.markdown("**Current Committee Members (as saved):**")
@@ -2204,32 +2219,38 @@ def student_dashboard():
                 else:
                     st.info("No committee members have been added yet.")
                 
-                # Allow submission only if committee members exist (optional)
-                if status != "Approved" and not committee_members:
-                    st.warning("Please add at least one committee member before submitting for approval.")
+                # For locked milestones, show message
+                if is_locked and status != "Approved":
+                    st.markdown('<div class="locked-milestone">🔒 This milestone is locked because a previous milestone has not been approved yet. Please complete and get approval for the previous milestone first.</div>', unsafe_allow_html=True)
             
-            # Submission form (only if not approved)
+            # Submission form (only if not approved and not locked)
             if status != "Approved":
-                # For committee milestones, we already have the committee UI above; we still need file upload.
-                with st.form(key=f"student_milestone_{student['student_number']}_{milestone_name}"):
-                    new_date = st.date_input("Date of approval", value=datetime.strptime(date_val, "%Y-%m-%d").date() if date_val else date.today())
-                    uploaded_file = st.file_uploader("Upload document (PDF/JPG/PNG) - e.g., committee nomination form", type=["pdf","jpg","jpeg","png"], key=f"upload_{milestone_name}")
-                    if st.form_submit_button("Submit for Approval", use_container_width=True):
-                        if not uploaded_file:
-                            st.error("Please upload a document.")
-                        else:
-                            # For committee milestones, check that at least one committee member exists
-                            if milestone_name in ["Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
-                                committee_members = get_committee_members(student["student_number"])
-                                if not committee_members:
-                                    st.error("Please add at least one committee member before submitting.")
-                                    st.stop()
-                            filepath = save_milestone_file(student["student_number"], milestone_name, uploaded_file)
-                            if update_milestone(student["student_number"], milestone_name, "Pending", new_date.strftime("%Y-%m-%d"), filepath, "", None):
-                                st.success(f"{milestone_name} submitted for approval.")
-                                st.rerun()
+                if is_locked:
+                    st.markdown('<div class="locked-milestone">🔒 You cannot submit this milestone yet because a previous milestone is still pending or not approved. Please complete the earlier milestone first.</div>', unsafe_allow_html=True)
+                elif is_current_actionable:
+                    # Show submission form
+                    with st.form(key=f"student_milestone_{student['student_number']}_{milestone_name}"):
+                        new_date = st.date_input("Date of completion/event", value=datetime.strptime(date_val, "%Y-%m-%d").date() if date_val else date.today())
+                        uploaded_file = st.file_uploader("Upload document (PDF/JPG/PNG)", type=["pdf","jpg","jpeg","png"], key=f"upload_{milestone_name}")
+                        if st.form_submit_button("Submit for Approval", use_container_width=True):
+                            if not uploaded_file:
+                                st.error("Please upload a document.")
                             else:
-                                st.error("Submission failed due to policy rules.")
+                                # For committee milestones, check that at least one committee member exists
+                                if milestone_name in ["Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
+                                    committee_members = get_committee_members(student["student_number"])
+                                    if not committee_members:
+                                        st.error("Please add at least one committee member before submitting.")
+                                        st.stop()
+                                filepath = save_milestone_file(student["student_number"], milestone_name, uploaded_file)
+                                if update_milestone(student["student_number"], milestone_name, "Pending", new_date.strftime("%Y-%m-%d"), filepath, "", None):
+                                    st.success(f"{milestone_name} submitted for approval.")
+                                    st.rerun()
+                                else:
+                                    st.error("Submission failed due to policy rules.")
+                else:
+                    # This case should not happen (status not approved but not locked and not first incomplete) – but just in case:
+                    st.info("This milestone is not yet ready for submission. Please wait for previous milestones to be approved.")
             else:
                 st.success("✅ This milestone has been approved.")
                 if milestone_name == milestone_list[-1]:
@@ -2240,8 +2261,8 @@ def student_dashboard():
                     </div>
                     """, unsafe_allow_html=True)
             
-            # Next Step guidance
-            if milestone_name == next_milestone and status != "Approved":
+            # Next Step guidance only for the first incomplete milestone
+            if milestone_name == milestone_list[first_incomplete_index] if first_incomplete_index < len(milestone_list) else False:
                 st.markdown("""
                 <div class="next-step-card">
                     <strong>🎯 Next Step:</strong><br>
@@ -2249,11 +2270,6 @@ def student_dashboard():
                     Once approved, the next milestone tab will become active.
                 </div>
                 """, unsafe_allow_html=True)
-            elif status != "Approved" and milestone_name != next_milestone:
-                next_idx = milestone_list.index(next_milestone) if next_milestone else len(milestone_list)
-                current_idx = milestone_list.index(milestone_name)
-                if current_idx < next_idx:
-                    st.info("Please complete the previous milestones before this one.")
     
     st.caption("For corrections, contact your adviser or SESAM Staff.")
     
@@ -2294,7 +2310,7 @@ with st.sidebar:
         st.session_state.consent_given = False
         st.rerun()
     st.markdown("---")
-    st.caption("Version 27.6 | Structured Guidance Committee Formation")
+    st.caption("Version 27.7 | Sequential Milestone Locking")
 
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
 st.caption("Fully compliant with UPLB Graduate School policies. Coursework handled in its own tab; other milestones are sequential tabs.")
@@ -2380,4 +2396,4 @@ elif role == "Student":
     student_dashboard()
 
 st.markdown("---")
-st.caption("SESAM KMIS v27.6 | Structured Guidance Committee Formation")
+st.caption("SESAM KMIS v27.7 | Sequential Milestone Locking")
