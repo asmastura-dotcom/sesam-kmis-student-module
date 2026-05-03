@@ -277,7 +277,6 @@ def create_demo_students():
     df["prior_ms_graduate"] = df["prior_ms_graduate"].astype(bool)
     return df
 
-@st.cache_resource
 def load_data():
     if not os.path.exists(DATA_FILE) or os.path.getsize(DATA_FILE) == 0:
         df = create_demo_students()
