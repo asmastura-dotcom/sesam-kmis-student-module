@@ -2212,7 +2212,7 @@ def student_dashboard():
             if status != "Approved":
                 # For committee milestones, we already have the committee UI above; we still need file upload.
                 with st.form(key=f"student_milestone_{student['student_number']}_{milestone_name}"):
-                    new_date = st.date_input("Date of completion/event", value=datetime.strptime(date_val, "%Y-%m-%d").date() if date_val else date.today())
+                    new_date = st.date_input("Date of approval", value=datetime.strptime(date_val, "%Y-%m-%d").date() if date_val else date.today())
                     uploaded_file = st.file_uploader("Upload document (PDF/JPG/PNG) - e.g., committee nomination form", type=["pdf","jpg","jpeg","png"], key=f"upload_{milestone_name}")
                     if st.form_submit_button("Submit for Approval", use_container_width=True):
                         if not uploaded_file:
