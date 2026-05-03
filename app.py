@@ -1,6 +1,6 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 27.4 | Fixed Student Dashboard Refresh (Recalculate Totals)
+Version: 27.5 | POS Alignment Reminders for Student & Adviser
 """
 
 import streamlit as st
@@ -1700,9 +1700,9 @@ def adviser_view_student_profile(student_number):
     # Reminder regarding POS
     pos_global = student.get("pos_status", "") == "Approved"
     if pos_global:
-        st.info("📌 **Reminder:** Please verify that the student’s enrolled subjects are consistent with the approved POS.")
+        st.info("📌 **Reminder:** Please verify that the student’s enrolled subjects are exactly the same as those in the approved Plan of Study (POS). If mismatches exist, advise the student to adjust their enrollment or update the POS accordingly.")
     else:
-        st.info("📌 **Reminder:** Ensure that the student’s current enrolled subjects will be reflected in the Plan of Study, as only listed courses will be credited.")
+        st.warning("⚠️ **The student’s Plan of Study (POS) is not yet approved.** Ensure that the enrolled subjects are properly encoded in the POS before you approve it. Only courses listed in the POS will be credited.")
     
     tabs = st.tabs(["📝 Student Info", "📚 Coursework", "📌 Milestones", "📁 Uploads"])
     with tabs[0]:
@@ -1987,8 +1987,13 @@ def student_dashboard():
     # ---- Coursework Tab ----
     with main_tabs[1]:
         st.subheader("Your Academic Record (Coursework)")
-        if student.get("pos_status", "") != "Approved":
-            st.info("ℹ️ **No approved POS yet.** Make sure that the subjects you enroll will be included in your Plan of Study, as only these will be credited.")
+        
+        # --- NEW REMINDER BLOCK ---
+        if student.get("pos_status", "") == "Approved":
+            st.info("📌 **Reminder:** Ensure that the subjects you enroll in are exactly those listed in your approved Plan of Study (POS). Only approved courses will be credited toward your degree.")
+        else:
+            st.warning("⚠️ **Your Plan of Study (POS) is not yet approved.** Please make sure that the subjects you enroll in are included in your POS when it is submitted, because only listed courses will be credited. Contact your adviser if you need guidance.")
+        # -------------------------
         
         total_years = 2 if is_master_program(student["program"]) else 3
         total_semesters_needed = total_years * 2 + (total_years - 1)
@@ -2169,7 +2174,7 @@ with st.sidebar:
         st.session_state.consent_given = False
         st.rerun()
     st.markdown("---")
-    st.caption("Version 27.4 | Fixed Refresh in Student Coursework")
+    st.caption("Version 27.5 | POS Alignment Reminders")
 
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
 st.caption("Fully compliant with UPLB Graduate School policies. Coursework handled in its own tab; other milestones are sequential tabs.")
@@ -2255,4 +2260,4 @@ elif role == "Student":
     student_dashboard()
 
 st.markdown("---")
-st.caption("SESAM KMIS v27.4 | Fixed Refresh in Student Coursework")
+st.caption("SESAM KMIS v27.5 | POS Alignment Reminders")
