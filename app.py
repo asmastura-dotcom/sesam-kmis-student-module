@@ -277,8 +277,8 @@ def create_demo_students():
     df["prior_ms_graduate"] = df["prior_ms_graduate"].astype(bool)
     return df
     
-@st.cache_data(ttl=0)
 def load_data():
+    """Load student data from CSV without any caching (always reads fresh)."""
     if not os.path.exists(DATA_FILE) or os.path.getsize(DATA_FILE) == 0:
         df = create_demo_students()
         save_data(df)
@@ -289,6 +289,8 @@ def load_data():
         df = create_demo_students()
         save_data(df)
         return df
+    
+    # Convert numeric columns
     numeric_cols = ["ay_start","gwa","total_units_taken","total_units_required",
                     "thesis_units_taken","thesis_units_limit","thesis_extension_units",
                     "residency_years_used","residency_extension_years","residency_max_years",
@@ -298,17 +300,23 @@ def load_data():
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
             if col != "gwa":
                 df[col] = df[col].astype(int)
+    
+    # Add missing columns from default demo
     default_df = create_demo_students()
     for col in default_df.columns:
         if col not in df.columns:
             df[col] = default_df[col]
+    
     text_cols = [c for c in df.columns if c not in numeric_cols and c != "prior_ms_graduate"]
     for col in text_cols:
         df[col] = df[col].fillna("").astype(str)
+    
     if "prior_ms_graduate" in df.columns:
         df["prior_ms_graduate"] = df["prior_ms_graduate"].astype(bool)
     else:
         df["prior_ms_graduate"] = False
+    
+    # Recompute program-based limits and required units
     for idx, row in df.iterrows():
         prog = row["program"]
         df.at[idx, "residency_max_years"] = get_residency_max_from_program(prog)
@@ -316,6 +324,8 @@ def load_data():
         req = get_required_units(prog, row.get("prior_ms_graduate", False))
         if req is not None:
             df.at[idx, "total_units_required"] = req
+    
+    # Update GWA and units taken from semester records
     semesters_df = load_semester_records()
     for sn in df["student_number"].unique():
         sems = semesters_df[semesters_df["student_number"] == sn]
@@ -337,8 +347,10 @@ def load_data():
     save_data(df)
     return df
 
-def save_data(df):
-    df.to_csv(DATA_FILE, index=False)
+def update_student_academic_summary(student_number):
+    # ... existing code ...
+    save_data(df)
+    print(f"DEBUG: Saved data for {student_number} - units taken: {df.loc[idx, 'total_units_taken']}")
 
 # ==================== SEMESTER RECORDS ====================
 def load_semester_records():
