@@ -1,6 +1,6 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 27.3 | POS Consistency Validation + Read‑only Coursework for Students
+Version: 27.4 | Fixed Student Dashboard Refresh (Recalculate Totals)
 """
 
 import streamlit as st
@@ -721,41 +721,69 @@ def update_semester_status(student_number, ay, sem, new_status):
     return False
 
 def update_student_academic_summary(student_number):
+    """Recalculate total units taken, thesis units, and GWA from saved semester records."""
     sems = get_student_semesters(student_number)
-    total_grade = 0
+    total_grade = 0.0
     total_units = 0
     thesis_units = 0
+    error_occurred = False
+
     for _, row in sems.iterrows():
-        if row["semester_status"] != "Regular": continue
+        if row["semester_status"] != "Regular":
+            continue
         try:
             subjects = json.loads(row["subjects_json"]) if row["subjects_json"] else []
-            for s in subjects:
-                grade_val = s.get("grade", "")
-                if grade_val in ["INC", "DRP", "P", "IP", "4.00"]:
-                    continue
-                units = float(s.get("units",0))
+        except Exception as e:
+            st.error(f"Error parsing subjects for {row['academic_year']} {row['semester']}: {e}")
+            error_occurred = True
+            continue
+
+        for subj in subjects:
+            grade_val = subj.get("grade", "")
+            # Skip grades that should not count toward units/GWA
+            if grade_val in ["INC", "DRP", "P", "IP"]:
+                continue
+            # Note: 4.00 now counts toward units (but not GWA)
+            try:
+                units = float(subj.get("units", 0))
                 total_units += units
+            except Exception as e:
+                st.error(f"Invalid units in {subj.get('course_code', '?')}: {e}")
+                error_occurred = True
+                continue
+
+            # GWA calculation: exclude non‑numeric grades and 4.00
+            try:
+                grade_num = float(grade_val)
+                if grade_num != 4.00:
+                    total_grade += units * grade_num
+            except ValueError:
+                pass  # Non‑numeric grade, skip for GWA
+
+            # Thesis units: only count if passed (grade 1.0-3.0)
+            if "thesis" in subj.get("course_code", "").lower() or "dissertation" in subj.get("course_code", "").lower():
                 try:
                     grade_num = float(grade_val)
-                    total_grade += units * grade_num
+                    if 1.0 <= grade_num <= 3.0:
+                        thesis_units += units
                 except:
                     pass
-                if "thesis" in s.get("course_code", "").lower() or "dissertation" in s.get("course_code", "").lower():
-                    if grade_val not in ["INC","DRP","4.00"]:
-                        try:
-                            if 1.0 <= float(grade_val) <= 3.0:
-                                thesis_units += units
-                        except:
-                            pass
-        except: pass
+
+    # Load student data and update
     df = load_data()
     idx = df[df["student_number"] == student_number].index
     if len(idx) > 0:
-        if total_units > 0:
-            df.loc[idx, "gwa"] = total_grade / total_units
-            df.loc[idx, "total_units_taken"] = total_units
+        new_gwa = total_grade / total_units if total_units > 0 else 0.0
+        df.loc[idx, "total_units_taken"] = total_units
+        df.loc[idx, "gwa"] = new_gwa
         df.loc[idx, "thesis_units_taken"] = thesis_units
         save_data(df)
+        if error_occurred:
+            st.warning("Totals recalculated with some errors. Please check semester subject data.")
+        return True
+    else:
+        st.error(f"Student {student_number} not found.")
+        return False
 
 def get_next_semester_sequence(academic_year, semester):
     sem_order = ["1st Sem", "2nd Sem", "Summer"]
@@ -1813,6 +1841,7 @@ def adviser_view_student_profile(student_number):
 
 # ==================== STUDENT DASHBOARD WITH SEQUENTIAL MILESTONE TABS ====================
 def student_dashboard():
+    df = load_data()
     student = df[df["name"] == st.session_state.display_name].iloc[0].copy()
     program_type = get_program_type(student["program"])
     st.subheader(f"📘 Your Dashboard – {student['name']}")
@@ -2008,10 +2037,20 @@ def student_dashboard():
         with col2: st.metric("Required Units", total_required)
         with col3: st.metric("Remaining Units", remaining)
         with col4: st.metric("Cumulative GWA", f"{cum_gwa:.2f}")
-        if st.button("🔄 Recalculate Totals (Refresh)"):
-            update_student_academic_summary(student["student_number"])
-            st.success("Totals recalculated. Refresh the page.")
-            st.rerun()
+        
+        # --- FIXED REFRESH BUTTON ---
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("🔄 Recalculate Totals (Refresh)"):
+                with st.spinner("Recalculating from saved records..."):
+                    success = update_student_academic_summary(student["student_number"])
+                    if success:
+                        st.success("Totals recalculated successfully. Refreshing page...")
+                        st.rerun()
+                    else:
+                        st.error("Recalculation failed. See errors above.")
+        with col_btn2:
+            st.caption("⚠️ Only **saved subjects** are included. Use 'Save Subjects' before refreshing.")
     
     # ---- Milestone Tabs (index 2 onward) ----
     for i, milestone_name in enumerate(milestone_list):
@@ -2130,7 +2169,7 @@ with st.sidebar:
         st.session_state.consent_given = False
         st.rerun()
     st.markdown("---")
-    st.caption("Version 27.3 | POS Consistency Validation | Read-only Coursework for Students")
+    st.caption("Version 27.4 | Fixed Refresh in Student Coursework")
 
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
 st.caption("Fully compliant with UPLB Graduate School policies. Coursework handled in its own tab; other milestones are sequential tabs.")
@@ -2216,4 +2255,4 @@ elif role == "Student":
     student_dashboard()
 
 st.markdown("---")
-st.caption("SESAM KMIS v27.3 | POS Consistency Validation | Read-only Coursework for Students")
+st.caption("SESAM KMIS v27.4 | Fixed Refresh in Student Coursework")
