@@ -1,6 +1,6 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 27.5 | POS Alignment Reminders for Student & Adviser
+Version: 27.6 | Structured Guidance Committee Formation
 """
 
 import streamlit as st
@@ -198,6 +198,33 @@ FINAL_EXAM_VOTES_FILE = "final_exam_votes.csv"
 
 for folder in [UPLOAD_FOLDER, PROFILE_PIC_FOLDER]:
     if not os.path.exists(folder): os.makedirs(folder)
+
+# ==================== COMMITTEE MEMBERS HELPERS ====================
+def get_committee_members(student_number):
+    """Return list of committee members as dicts with keys 'name' and 'role'."""
+    df = load_data()
+    student = df[df["student_number"] == student_number]
+    if student.empty:
+        return []
+    committee_json = student.iloc[0].get("committee_members_structured", "")
+    if committee_json and committee_json.strip():
+        try:
+            members = json.loads(committee_json)
+            if isinstance(members, list):
+                return members
+        except:
+            pass
+    return []
+
+def set_committee_members(student_number, members):
+    """Save committee members list to students.csv as JSON."""
+    df = load_data()
+    idx = df[df["student_number"] == student_number].index
+    if len(idx) > 0:
+        df.at[idx[0], "committee_members_structured"] = json.dumps(members)
+        save_data(df)
+        return True
+    return False
 
 # ==================== CORE DATA FUNCTIONS ====================
 def create_demo_students():
@@ -1343,7 +1370,8 @@ def register_new_student_form():
                     "external_reviewer": "",
                     "thesis_extension_units": 0,
                     "residency_extension_years": 0,
-                    "final_exam_attempts": 0
+                    "final_exam_attempts": 0,
+                    "committee_members_structured": ""
                 })
                 new_df = pd.DataFrame([new_row])
                 df = pd.concat([df, new_df], ignore_index=True)
@@ -1533,6 +1561,17 @@ def staff_view_student_profile(student_number):
                 if status == "Approved":
                     st.caption(f"Approved by: {milestone_row.get('reviewed_by', '')}")
                     st.caption(f"Date: {milestone_row['date']}")
+                
+                # Show committee members for Guidance Committee Formation
+                if milestone == "Guidance Committee Formation" or milestone == "Advisory Committee Formation" or milestone == "Supervisory Committee Formation":
+                    committee_members = get_committee_members(student_number)
+                    if committee_members:
+                        st.markdown("**Committee Members:**")
+                        for member in committee_members:
+                            st.write(f"- {member.get('name', '')} ({member.get('role', 'Member')})")
+                    else:
+                        st.info("No committee members have been added yet.")
+                
                 if milestone_row["file_path"] and milestone_row["file_path"] != "" and os.path.exists(milestone_row["file_path"]):
                     with st.expander("📎 View document"):
                         if milestone_row["file_path"].lower().endswith(('.png','.jpg','.jpeg','.gif')):
@@ -1784,6 +1823,17 @@ def adviser_view_student_profile(student_number):
                 if status == "Approved":
                     st.caption(f"Approved by: {milestone_row.get('reviewed_by', '')}")
                     st.caption(f"Date: {milestone_row['date']}")
+                
+                # Show committee members for Guidance Committee Formation
+                if milestone == "Guidance Committee Formation" or milestone == "Advisory Committee Formation" or milestone == "Supervisory Committee Formation":
+                    committee_members = get_committee_members(student_number)
+                    if committee_members:
+                        st.markdown("**Committee Members:**")
+                        for member in committee_members:
+                            st.write(f"- {member.get('name', '')} ({member.get('role', 'Member')})")
+                    else:
+                        st.info("No committee members have been added yet.")
+                
                 if milestone_row["file_path"] and milestone_row["file_path"] != "" and os.path.exists(milestone_row["file_path"]):
                     with st.expander("📎 View document"):
                         if milestone_row["file_path"].lower().endswith(('.png','.jpg','.jpeg','.gif')):
@@ -1887,7 +1937,7 @@ def student_dashboard():
     tab_names = ["👤 My Profile", "📚 Coursework"] + milestone_list
     main_tabs = st.tabs(tab_names)
     
-    # ---- Profile Tab ----
+    # ---- Profile Tab (unchanged) ----
     with main_tabs[0]:
         col1, col2 = st.columns([1,2])
         with col1:
@@ -1984,16 +2034,14 @@ def student_dashboard():
                     st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # ---- Coursework Tab ----
+    # ---- Coursework Tab (unchanged except reminders already added) ----
     with main_tabs[1]:
         st.subheader("Your Academic Record (Coursework)")
         
-        # --- NEW REMINDER BLOCK ---
         if student.get("pos_status", "") == "Approved":
             st.info("📌 **Reminder:** Ensure that the subjects you enroll in are exactly those listed in your approved Plan of Study (POS). Only approved courses will be credited toward your degree.")
         else:
             st.warning("⚠️ **Your Plan of Study (POS) is not yet approved.** Please make sure that the subjects you enroll in are included in your POS when it is submitted, because only listed courses will be credited. Contact your adviser if you need guidance.")
-        # -------------------------
         
         total_years = 2 if is_master_program(student["program"]) else 3
         total_semesters_needed = total_years * 2 + (total_years - 1)
@@ -2043,7 +2091,6 @@ def student_dashboard():
         with col3: st.metric("Remaining Units", remaining)
         with col4: st.metric("Cumulative GWA", f"{cum_gwa:.2f}")
         
-        # --- FIXED REFRESH BUTTON ---
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
             if st.button("🔄 Recalculate Totals (Refresh)"):
@@ -2093,15 +2140,90 @@ def student_dashboard():
             if status == "Rejected" and remarks:
                 st.error(f"**Rejection reason:** {remarks}")
             
+            # Special handling for committee formation milestones
+            if milestone_name in ["Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
+                if status != "Approved":
+                    st.subheader("Committee Members")
+                    
+                    # Get current committee members
+                    committee_members = get_committee_members(student["student_number"])
+                    
+                    # Use session state to manage temporary edits
+                    edit_key = f"committee_edit_{student['student_number']}"
+                    if edit_key not in st.session_state:
+                        st.session_state[edit_key] = committee_members.copy() if committee_members else []
+                    
+                    # Display editable table
+                    if len(st.session_state[edit_key]) == 0:
+                        st.info("No committee members added yet. Add members below.")
+                    
+                    # For each member, show editable fields
+                    remove_indices = []
+                    for idx, member in enumerate(st.session_state[edit_key]):
+                        col1, col2, col3 = st.columns([2,2,1])
+                        with col1:
+                            new_name = st.text_input("Name", value=member.get("name", ""), key=f"name_{idx}_{student['student_number']}")
+                        with col2:
+                            new_role = st.selectbox("Role", ["Chair", "Co-chair", "Member"], index=["Chair","Co-chair","Member"].index(member.get("role", "Member")), key=f"role_{idx}_{student['student_number']}")
+                        with col3:
+                            if st.button("🗑️ Remove", key=f"remove_{idx}_{student['student_number']}"):
+                                remove_indices.append(idx)
+                        st.session_state[edit_key][idx] = {"name": new_name, "role": new_role}
+                    
+                    # Remove selected members
+                    for idx in sorted(remove_indices, reverse=True):
+                        st.session_state[edit_key].pop(idx)
+                        st.rerun()
+                    
+                    # Add new member button
+                    if st.button("➕ Add Committee Member"):
+                        st.session_state[edit_key].append({"name": "", "role": "Member"})
+                        st.rerun()
+                    
+                    # Save committee members to permanent storage
+                    if st.button("💾 Save Committee Members"):
+                        valid = True
+                        for m in st.session_state[edit_key]:
+                            if not m.get("name", "").strip():
+                                st.error("All members must have a name.")
+                                valid = False
+                                break
+                        if valid:
+                            set_committee_members(student["student_number"], st.session_state[edit_key])
+                            st.success("Committee members saved.")
+                            st.rerun()
+                    
+                    st.markdown("---")
+                
+                # Show read-only committee members if approved (or even if not approved but already saved)
+                committee_members = get_committee_members(student["student_number"])
+                if committee_members:
+                    st.markdown("**Current Committee Members (as saved):**")
+                    for member in committee_members:
+                        st.write(f"- {member.get('name', '')} ({member.get('role', 'Member')})")
+                else:
+                    st.info("No committee members have been added yet.")
+                
+                # Allow submission only if committee members exist (optional)
+                if status != "Approved" and not committee_members:
+                    st.warning("Please add at least one committee member before submitting for approval.")
+            
             # Submission form (only if not approved)
             if status != "Approved":
+                # For committee milestones, we already have the committee UI above; we still need file upload.
                 with st.form(key=f"student_milestone_{student['student_number']}_{milestone_name}"):
                     new_date = st.date_input("Date of completion/event", value=datetime.strptime(date_val, "%Y-%m-%d").date() if date_val else date.today())
-                    uploaded_file = st.file_uploader("Upload document (PDF/JPG/PNG)", type=["pdf","jpg","jpeg","png"], key=f"upload_{milestone_name}")
+                    uploaded_file = st.file_uploader("Upload document (PDF/JPG/PNG) - e.g., committee nomination form", type=["pdf","jpg","jpeg","png"], key=f"upload_{milestone_name}")
                     if st.form_submit_button("Submit for Approval", use_container_width=True):
                         if not uploaded_file:
                             st.error("Please upload a document.")
                         else:
+                            # For committee milestones, check that at least one committee member exists
+                            if milestone_name in ["Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
+                                committee_members = get_committee_members(student["student_number"])
+                                if not committee_members:
+                                    st.error("Please add at least one committee member before submitting.")
+                                    st.stop()
                             filepath = save_milestone_file(student["student_number"], milestone_name, uploaded_file)
                             if update_milestone(student["student_number"], milestone_name, "Pending", new_date.strftime("%Y-%m-%d"), filepath, "", None):
                                 st.success(f"{milestone_name} submitted for approval.")
@@ -2110,7 +2232,6 @@ def student_dashboard():
                                 st.error("Submission failed due to policy rules.")
             else:
                 st.success("✅ This milestone has been approved.")
-                # If this is the last milestone, show completion message
                 if milestone_name == milestone_list[-1]:
                     st.markdown("""
                     <div class="next-step-card">
@@ -2119,7 +2240,7 @@ def student_dashboard():
                     </div>
                     """, unsafe_allow_html=True)
             
-            # Next Step guidance: only for the current incomplete milestone
+            # Next Step guidance
             if milestone_name == next_milestone and status != "Approved":
                 st.markdown("""
                 <div class="next-step-card">
@@ -2129,7 +2250,6 @@ def student_dashboard():
                 </div>
                 """, unsafe_allow_html=True)
             elif status != "Approved" and milestone_name != next_milestone:
-                # Find the index of the next incomplete milestone
                 next_idx = milestone_list.index(next_milestone) if next_milestone else len(milestone_list)
                 current_idx = milestone_list.index(milestone_name)
                 if current_idx < next_idx:
@@ -2174,7 +2294,7 @@ with st.sidebar:
         st.session_state.consent_given = False
         st.rerun()
     st.markdown("---")
-    st.caption("Version 27.5 | POS Alignment Reminders")
+    st.caption("Version 27.6 | Structured Guidance Committee Formation")
 
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
 st.caption("Fully compliant with UPLB Graduate School policies. Coursework handled in its own tab; other milestones are sequential tabs.")
@@ -2260,4 +2380,4 @@ elif role == "Student":
     student_dashboard()
 
 st.markdown("---")
-st.caption("SESAM KMIS v27.5 | POS Alignment Reminders")
+st.caption("SESAM KMIS v27.6 | Structured Guidance Committee Formation")
