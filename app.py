@@ -1956,15 +1956,48 @@ def student_dashboard():
         st.markdown('</div>', unsafe_allow_html=True)
     
     # Coursework Tab
-    with main_tabs[1]:
-        st.subheader("Your Academic Record (Coursework)")
-        if student.get("pos_status", "") != "Approved":
-            st.info("ℹ️ **No approved POS yet.** Make sure that the subjects you enroll will be included in your Plan of Study, as only these will be credited.")
-    
-        # ... (semester creation and display loop remains the same) ...
-        for _, row in semesters.iterrows():
-            render_semester_block_general(student["student_number"], row, is_staff=False, override_edit=False)
-    
+   with main_tabs[1]:
+    st.subheader("Your Academic Record (Coursework)")
+    if student.get("pos_status", "") != "Approved":
+        st.info("ℹ️ **No approved POS yet.** Make sure that the subjects you enroll will be included in your Plan of Study, as only these will be credited.")
+
+    # --- Ensure all required semesters exist ---
+    total_years = 2 if is_master_program(student["program"]) else 3
+    total_semesters_needed = total_years * 2 + (total_years - 1)
+    start_ay = student.get("ay_start", current_year)
+    if pd.isna(start_ay) or start_ay == 0:
+        start_ay = current_year
+    start_ay_str = f"{start_ay}-{start_ay+1}"
+    start_sem = student.get("semester", "1st Sem")
+    sem_order = ["1st Sem", "2nd Sem", "Summer"]
+    all_semesters = []
+    for yr in range(total_years):
+        ay = f"{start_ay+yr}-{start_ay+yr+1}"
+        for sem in sem_order:
+            all_semesters.append((ay, sem))
+    start_idx = 0
+    for i, (ay, sem) in enumerate(all_semesters):
+        if ay == start_ay_str and sem == start_sem:
+            start_idx = i
+            break
+    prospectus = all_semesters[start_idx:start_idx + total_semesters_needed]
+    existing = get_student_semesters(student["student_number"])
+    for ay, sem in prospectus:
+        if not ((existing["academic_year"] == ay) & (existing["semester"] == sem)).any():
+            try:
+                add_semester_record(student["student_number"], ay, sem, [], semester_status="Regular")
+            except ValueError as e:
+                st.error(str(e))
+
+    # --- Load semesters from disk (fresh each render) ---
+    semesters = get_student_semesters(student["student_number"])
+    semesters["order"] = semesters["semester"].map({"1st Sem": 0, "2nd Sem": 1, "Summer": 2})
+    semesters["ay_num"] = semesters["academic_year"].apply(lambda x: int(x.split("-")[0]))
+    semesters = semesters.sort_values(["ay_num", "order"]).reset_index(drop=True)
+
+    # --- Display each semester block (editable) ---
+    for _, row in semesters.iterrows():
+        render_semester_block_general(student["student_number"], row, is_staff=False, override_edit=False)    
         if st.button("➕ Add Next Semester"):
             last_sem = semesters.iloc[-1] if not semesters.empty else None
             if last_sem:
