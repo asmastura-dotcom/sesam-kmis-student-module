@@ -1900,7 +1900,7 @@ def adviser_view_student_profile(student_number):
 # ==================== STUDENT DASHBOARD WITH SEQUENTIAL MILESTONE LOCKING ====================
 def student_dashboard():
     df = load_data()
-    student = df[df["name"] == st.session_state.display_name].iloc[0].copy()
+    student = df[df["student_number"] == st.session_state.username].iloc[0].copy()
     program_type = get_program_type(student["program"])
     st.subheader(f"📘 Your Dashboard – {student['name']}")
     
