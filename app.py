@@ -1508,9 +1508,9 @@ def register_new_student_form():
                 st.error(f"Missing or invalid: {', '.join(errors)}")
             else:
                 full_name = f"{last_name}, {first_name} {middle_name}".strip()
-                new_row = create_demo_students().iloc[0].to_dict()
                 req_units = get_required_units(program, prior_ms)
-                new_row.update({
+                # Create a brand new row with no inherited demo values
+                new_row = {
                     "student_number": student_number,
                     "name": full_name,
                     "last_name": last_name,
@@ -1520,33 +1520,63 @@ def register_new_student_form():
                     "advisor": advisor,
                     "ay_start": ay_start,
                     "semester": semester,
-                    "student_status": student_status,
-                    "prior_ms_graduate": prior_ms,
+                    "gwa": 0.0,
+                    "total_units_taken": 0,
                     "total_units_required": req_units if req_units else 24,
+                    "thesis_units_taken": 0,
                     "thesis_units_limit": get_thesis_limit_from_program(program),
+                    "thesis_extension_units": 0,
+                    "residency_years_used": 0,
+                    "residency_extension_years": 0,
                     "residency_max_years": get_residency_max_from_program(program),
-                    "address": "", "phone": "", "institutional_email": "",
-                    "gender": "", "civil_status": "", "citizenship": "", "birthdate": "", "religion": "",
-                    "emergency_name": "", "emergency_relationship": "", "emergency_country_code": "", "emergency_phone": "",
+                    "pos_status": "Not Started",
+                    "qualifying_exam_status": "N/A",
+                    "written_comprehensive_status": "N/A",
+                    "oral_comprehensive_status": "N/A",
+                    "general_exam_status": "Not Taken",
+                    "final_exam_status": "Not Taken",
+                    "external_reviewer": "",
+                    "final_exam_attempts": 0,
+                    "profile_pic": "",
+                    "committee_members_structured": "",
+                    "committee_approval_date": "",
+                    "thesis_outline_approved": "No",
+                    "thesis_status": "Not Started",
+                    "prior_ms_graduate": prior_ms,
+                    "student_status": student_status,
+                    "address": "",
+                    "phone": "",
+                    "institutional_email": "",
+                    "gender": "",
+                    "civil_status": "",
+                    "citizenship": "",
+                    "birthdate": "",
+                    "religion": "",
+                    "emergency_name": "",
+                    "emergency_relationship": "",
+                    "emergency_country_code": "",
+                    "emergency_phone": "",
                     "special_status": "Regular",
                     "profile_pending_status": "",
                     "profile_pending_remarks": "",
-                    "profile_pending_address": "", "profile_pending_phone": "", "profile_pending_email": "",
-                    "profile_pending_gender": "", "profile_pending_civil_status": "", "profile_pending_citizenship": "",
-                    "profile_pending_birthdate": "", "profile_pending_religion": "",
-                    "profile_pending_emergency_name": "", "profile_pending_emergency_relationship": "",
-                    "profile_pending_emergency_country_code": "", "profile_pending_emergency_phone": "",
-                    "external_reviewer": "",
-                    "thesis_extension_units": 0,
-                    "residency_extension_years": 0,
-                    "final_exam_attempts": 0,
-                    "committee_members_structured": ""
-                })
-                new_df = pd.DataFrame([new_row])
-                df = pd.concat([df, new_df], ignore_index=True)
+                    "profile_pending_address": "",
+                    "profile_pending_phone": "",
+                    "profile_pending_email": "",
+                    "profile_pending_gender": "",
+                    "profile_pending_civil_status": "",
+                    "profile_pending_citizenship": "",
+                    "profile_pending_birthdate": "",
+                    "profile_pending_religion": "",
+                    "profile_pending_emergency_name": "",
+                    "profile_pending_emergency_relationship": "",
+                    "profile_pending_emergency_country_code": "",
+                    "profile_pending_emergency_phone": "",
+                }
+                # Append the new student
+                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                 save_data(df)
+                # Create empty milestone tracking for this student
                 get_student_milestones(student_number, get_program_type(program))
-                # Set flag to show success message after rerun
                 st.session_state.reg_success = True
                 st.rerun()
 
