@@ -1,6 +1,6 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 28.1 | Separate Initial / Revised POS Upload
+Version: 28.2 | Clean Registration (no inherited GWA) & Empty DB on start
 """
 
 import streamlit as st
@@ -85,6 +85,8 @@ if "staff_show_update" not in st.session_state:
     st.session_state.staff_show_update = False
 if "show_registration" not in st.session_state:
     st.session_state.show_registration = False
+if "reg_success" not in st.session_state:
+    st.session_state.reg_success = False
 
 # ==================== DATA PRIVACY CONSENT ====================
 CONSENT_LOG_FILE = "consent_log.csv"
@@ -132,19 +134,7 @@ USERS = {
     "staff1": {"password": "admin123", "role": "SESAM Staff", "display_name": "SESAM Administrator"},
     "adviser1": {"password": "adv123", "role": "Faculty Adviser", "display_name": "Dr. Eslava"},
     "adviser2": {"password": "adv456", "role": "Faculty Adviser", "display_name": "Dr. Sanchez"},
-    "S001": {"password": "S001", "role": "Student", "display_name": "Santos, Maria Concepcion R."},
-    "S002": {"password": "S002", "role": "Student", "display_name": "Dela Cruz, Jose Mari P."},
-    "S003": {"password": "S003", "role": "Student", "display_name": "Fernandez, Kristoffer Ivan M."},
-    "S004": {"password": "S004", "role": "Student", "display_name": "Lopez, Maria Isabella T."},
-    "S005": {"password": "S005", "role": "Student", "display_name": "Villanueva, Gabriel Angelo S."},
-    "S006": {"password": "S006", "role": "Student", "display_name": "Reyes, Patricia Anne G."},
-    "S007": {"password": "S007", "role": "Student", "display_name": "Gomez, Emmanuel D."},
-    "S008": {"password": "S008", "role": "Student", "display_name": "Mendoza, Catherine Joy L."},
-    "S009": {"password": "S009", "role": "Student", "display_name": "Santiago, Rommel C."},
-    "S010": {"password": "S010", "role": "Student", "display_name": "Ramirez, Maria Lourdes E."},
-    "S011": {"password": "S011", "role": "Student", "display_name": "Torres, Victor Emmanuel A."},
-    "S012": {"password": "S012", "role": "Student", "display_name": "Bautista, Anna Patricia F."},
-    "S013": {"password": "S013", "role": "Student", "display_name": "Aquino, Francis Joseph T."}
+    # Student credentials will be added dynamically when students are registered
 }
 
 # ==================== PROGRAM & UNIT REQUIREMENTS ====================
@@ -414,6 +404,7 @@ def set_committee_members(student_number, members):
 
 # ==================== CORE DATA FUNCTIONS ====================
 def create_demo_students():
+    # Kept for possible future use – not called automatically
     data = {
         "student_number": [f"S00{i}" for i in range(1,14)],
         "name": ["Santos, Maria Concepcion R.", "Dela Cruz, Jose Mari P.", "Fernandez, Kristoffer Ivan M.", "Lopez, Maria Isabella T.", "Villanueva, Gabriel Angelo S.", "Reyes, Patricia Anne G.", "Gomez, Emmanuel D.", "Mendoza, Catherine Joy L.", "Santiago, Rommel C.", "Ramirez, Maria Lourdes E.", "Torres, Victor Emmanuel A.", "Bautista, Anna Patricia F.", "Aquino, Francis Joseph T."],
@@ -493,19 +484,16 @@ def create_demo_students():
 def load_data():
     # If DATA_FILE does not exist or is empty, create an empty DataFrame with the same columns as create_demo_students()
     if not os.path.exists(DATA_FILE) or os.path.getsize(DATA_FILE) == 0:
-        # Get column structure from create_demo_students() but without any rows
         empty_df = pd.DataFrame(columns=create_demo_students().columns)
         save_data(empty_df)
         return empty_df
     try:
         df = pd.read_csv(DATA_FILE, dtype=str)
     except Exception:
-        # If reading fails, create empty again
         empty_df = pd.DataFrame(columns=create_demo_students().columns)
         save_data(empty_df)
         return empty_df
 
-    # Convert numeric columns (same as before)
     numeric_cols = ["ay_start","gwa","total_units_taken","total_units_required",
                     "thesis_units_taken","thesis_units_limit","thesis_extension_units",
                     "residency_years_used","residency_extension_years","residency_max_years",
@@ -516,7 +504,6 @@ def load_data():
             if col != "gwa":
                 df[col] = df[col].astype(int)
 
-    # Ensure all columns from the demo structure exist (add missing ones with default values)
     default_columns = create_demo_students().columns
     for col in default_columns:
         if col not in df.columns:
@@ -524,7 +511,6 @@ def load_data():
             if col == "prior_ms_graduate":
                 df[col] = False
 
-    # Convert text columns to string
     text_cols = [c for c in df.columns if c not in numeric_cols and c != "prior_ms_graduate"]
     for col in text_cols:
         df[col] = df[col].fillna("").astype(str)
@@ -534,7 +520,6 @@ def load_data():
     else:
         df["prior_ms_graduate"] = False
 
-    # Fix program‑dependent fields (residency, thesis limit, required units) – only for existing rows
     for idx, row in df.iterrows():
         prog = row["program"]
         if prog and prog != "":
@@ -544,7 +529,6 @@ def load_data():
             if req is not None:
                 df.at[idx, "total_units_required"] = req
 
-    # Recalculate GWA and units taken from semester records (only if there are any)
     semesters_df = load_semester_records()
     for sn in df["student_number"].unique():
         sems = semesters_df[semesters_df["student_number"] == sn]
@@ -796,7 +780,7 @@ def check_external_reviewer_required(student_number):
     return True, ""
 
 def load_final_exam_votes():
-    if not os.path.exists(FINAL_EXAM_VOTES_FILE):
+    if not os.path.exists(FINAL_EXAM_VOTES_FILE) or os.path.getsize(FINAL_EXAM_VOTES_FILE) == 0:
         return pd.DataFrame(columns=["student_number", "milestone", "voter_name", "vote", "voter_role", "vote_date"])
     return pd.read_csv(FINAL_EXAM_VOTES_FILE)
 
@@ -988,7 +972,10 @@ def update_student_academic_summary(student_number):
     df = load_data()
     idx = df[df["student_number"] == student_number].index
     if len(idx) > 0:
-        new_gwa = total_grade / total_units if total_units > 0 else 0.0
+        if total_units > 0:
+            new_gwa = total_grade / total_units
+        else:
+            new_gwa = None  # No units → no GWA
         df.loc[idx, "total_units_taken"] = total_units
         df.loc[idx, "gwa"] = new_gwa
         df.loc[idx, "thesis_units_taken"] = thesis_units
@@ -1391,7 +1378,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
         else:
             st.info(f"Semester status **{semester_status}** – no upload required.")
         
-        # POS Management (staff/adviser only)
         if is_staff and (override_edit or st.session_state.role in ["SESAM Staff", "Faculty Adviser"]):
             st.markdown("---")
             st.markdown("#### 📋 Plan of Study (POS) for this Semester")
@@ -1466,9 +1452,8 @@ def render_profile_approval_section(student, is_staff=False):
     elif student.get("profile_pending_status") == "Rejected":
         st.error(f"Profile update rejected: {student.get('profile_pending_remarks','')}")
 
-# ==================== REGISTRATION FORM ====================
+# ==================== REGISTRATION FORM (NO INHERITED GWA) ====================
 def register_new_student_form():
-    # Show success message if a previous registration just succeeded
     if st.session_state.get("reg_success", False):
         st.success("✅ Student successfully registered!")
         st.session_state.reg_success = False
@@ -1509,7 +1494,7 @@ def register_new_student_form():
             else:
                 full_name = f"{last_name}, {first_name} {middle_name}".strip()
                 req_units = get_required_units(program, prior_ms)
-                # Create a brand new row with no inherited demo values
+                # Create a brand new row with NO inherited values
                 new_row = {
                     "student_number": student_number,
                     "name": full_name,
@@ -1520,7 +1505,7 @@ def register_new_student_form():
                     "advisor": advisor,
                     "ay_start": ay_start,
                     "semester": semester,
-                    "gwa": 0.0,
+                    "gwa": None,
                     "total_units_taken": 0,
                     "total_units_required": req_units if req_units else 24,
                     "thesis_units_taken": 0,
@@ -1575,6 +1560,8 @@ def register_new_student_form():
                 # Append the new student
                 df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                 save_data(df)
+                # Add student login to USERS dictionary for immediate access
+                USERS[student_number] = {"password": student_number, "role": "Student", "display_name": full_name}
                 # Create empty milestone tracking for this student
                 get_student_milestones(student_number, get_program_type(program))
                 st.session_state.reg_success = True
@@ -1676,7 +1663,7 @@ def render_compact_profile(student, is_staff=False, is_own_profile=False):
     with col_e2:
         st.markdown(f"**Phone:** {student['emergency_country_code'] or ''} {student['emergency_phone'] or ''}")
 
-# ==================== POS MILESTONE RENDERER (with separate initial/revised upload) ====================
+# ==================== POS MILESTONE RENDERER ====================
 def render_pos_milestone(student_number, viewer_role, is_own_view=False):
     submissions = get_pos_submissions(student_number)
     latest_approved = get_latest_approved_pos(student_number)
@@ -1741,7 +1728,6 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
                                     st.error("Rejection failed.")
     
     st.markdown("---")
-    # Separate upload sections for initial and revised POS
     if (is_own_view or viewer_role == "SESAM Staff") and not has_any_submission:
         st.markdown("### 📤 Initial POS Submission")
         st.info("Submit your first Plan of Study for approval.")
@@ -1896,7 +1882,9 @@ def view_student_profile(student_number, viewer_role):
         cola.metric("Units Taken", student["total_units_taken"])
         colb.metric("Required Units", student["total_units_required"])
         colc.metric("Remaining", max(0, student["total_units_required"] - student["total_units_taken"]))
-        cold.metric("Cumulative GWA", f"{student['gwa']:.2f}")
+        # Handle None or NaN GWA
+        gwa_val = student["gwa"] if pd.notna(student["gwa"]) else None
+        cold.metric("Cumulative GWA", f"{gwa_val:.2f}" if gwa_val is not None else "—")
     
     # ---- Milestone Tabs ----
     milestones_df = get_student_milestones(student_number, program_type)
@@ -2235,12 +2223,12 @@ def student_dashboard():
         total_taken = student["total_units_taken"] if not pd.isna(student["total_units_taken"]) else 0
         total_required = student["total_units_required"] if not pd.isna(student["total_units_required"]) else 24
         remaining = max(0, total_required - total_taken)
-        cum_gwa = student["gwa"] if not pd.isna(student["gwa"]) else 0.0
+        gwa_val = student["gwa"] if pd.notna(student["gwa"]) else None
         col1, col2, col3, col4 = st.columns(4)
         with col1: st.metric("Total Units Taken", total_taken)
         with col2: st.metric("Required Units", total_required)
         with col3: st.metric("Remaining Units", remaining)
-        with col4: st.metric("Cumulative GWA", f"{cum_gwa:.2f}")
+        with col4: st.metric("Cumulative GWA", f"{gwa_val:.2f}" if gwa_val is not None else "—")
         
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
@@ -2384,7 +2372,7 @@ if not st.session_state.logged_in:
                 st.session_state.consent_given = False
                 st.rerun()
             else: st.error("Invalid credentials")
-        st.caption("Demo: staff1/admin123 | adviser1/adv123 | student numbers S001-S013 with password = student number")
+        st.caption("Demo (staff only): staff1/admin123 | adviser1/adv123 | Register students first, then use their student number as password.")
     st.stop()
 
 if st.session_state.logged_in and not st.session_state.consent_given:
@@ -2401,7 +2389,7 @@ with st.sidebar:
         st.session_state.consent_given = False
         st.rerun()
     st.markdown("---")
-    st.caption("Version 28.1 | Separate Initial / Revised POS Upload")
+    st.caption("Version 28.2 | Clean Registration (no inherited GWA) & Empty DB on start")
 
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
 st.caption("Fully compliant with UPLB Graduate School policies. Coursework handled in its own tab; milestones can be submitted anytime.")
@@ -2441,7 +2429,8 @@ if role == "SESAM Staff":
                     with col_prog:
                         st.write(row['program'])
                     with col_gwa:
-                        st.write(f"GWA: {row['gwa']:.2f}")
+                        gwa_disp = f"{row['gwa']:.2f}" if pd.notna(row['gwa']) else "—"
+                        st.write(f"GWA: {gwa_disp}")
         else:
             view_student_profile(st.session_state.staff_selected_student, viewer_role="SESAM Staff")
     else:
@@ -2479,7 +2468,8 @@ elif role == "Faculty Adviser":
             with col_prog:
                 st.write(student['program'])
             with col_gwa:
-                st.write(f"GWA: {student['gwa']:.2f}")
+                gwa_disp = f"{student['gwa']:.2f}" if pd.notna(student['gwa']) else "—"
+                st.write(f"GWA: {gwa_disp}")
         if st.session_state.get("adviser_selected_student"):
             view_student_profile(st.session_state.adviser_selected_student, viewer_role="Faculty Adviser")
 
@@ -2487,4 +2477,4 @@ elif role == "Student":
     student_dashboard()
 
 st.markdown("---")
-st.caption("SESAM KMIS v28.1 | Separate Initial / Revised POS Upload")
+st.caption("SESAM KMIS v28.2 | Clean Registration (no inherited GWA) & Empty DB on start")
