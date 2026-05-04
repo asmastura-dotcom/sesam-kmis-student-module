@@ -2052,7 +2052,11 @@ def view_student_profile(student_number, viewer_role):
 # ==================== STUDENT DASHBOARD (self view) ====================
 def student_dashboard():
     df = load_data()
-    student = df[df["student_number"] == st.session_state.username].iloc[0].copy()
+    student_records = df[df["student_number"] == st.session_state.username]
+    if student_records.empty:
+        st.error(f"❌ Student record not found for username: {st.session_state.username}. Please contact the administrator or register first.")
+        st.stop()
+    student = student_records.iloc[0].copy()
     program_type = get_program_type(student["program"])
     st.subheader(f"📘 Your Dashboard – {student['name']}")
     
