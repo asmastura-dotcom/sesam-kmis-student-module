@@ -1468,6 +1468,11 @@ def render_profile_approval_section(student, is_staff=False):
 
 # ==================== REGISTRATION FORM ====================
 def register_new_student_form():
+    # Show success message if a previous registration just succeeded
+    if st.session_state.get("reg_success", False):
+        st.success("✅ Student successfully registered!")
+        st.session_state.reg_success = False
+
     with st.form("register_student_form"):
         st.subheader("Register New Student")
         col1, col2 = st.columns(2)
@@ -1486,7 +1491,9 @@ def register_new_student_form():
         prior_ms = False
         if program == "PhD Environmental Science":
             prior_ms = st.checkbox("Student is an MS Environmental Science graduate")
-        submitted = st.form_submit_button("Register Student")
+        
+        submitted = st.form_submit_button("Register Student", use_container_width=True)
+        
         if submitted:
             errors = []
             if not student_number: errors.append("Student Number")
@@ -1498,7 +1505,7 @@ def register_new_student_form():
             df = load_data()
             if student_number in df["student_number"].values: errors.append("Student number already exists")
             if errors:
-                st.error(f"Missing: {', '.join(errors)}")
+                st.error(f"Missing or invalid: {', '.join(errors)}")
             else:
                 full_name = f"{last_name}, {first_name} {middle_name}".strip()
                 new_row = create_demo_students().iloc[0].to_dict()
@@ -1539,7 +1546,8 @@ def register_new_student_form():
                 df = pd.concat([df, new_df], ignore_index=True)
                 save_data(df)
                 get_student_milestones(student_number, get_program_type(program))
-                st.success(f"Student {full_name} registered successfully.")
+                # Set flag to show success message after rerun
+                st.session_state.reg_success = True
                 st.rerun()
 
 # ==================== GET INC/4.0 ALERTS ====================
