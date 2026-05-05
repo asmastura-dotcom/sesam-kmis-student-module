@@ -1,6 +1,6 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 28.2 | Clean Registration (no inherited GWA) & Empty DB on start
+Version: 28.3 | Persistent Student Passwords in CSV
 """
 
 import streamlit as st
@@ -134,7 +134,7 @@ USERS = {
     "staff1": {"password": "admin123", "role": "SESAM Staff", "display_name": "SESAM Administrator"},
     "adviser1": {"password": "adv123", "role": "Faculty Adviser", "display_name": "Dr. Eslava"},
     "adviser2": {"password": "adv456", "role": "Faculty Adviser", "display_name": "Dr. Sanchez"},
-    # Student credentials will be added dynamically when students are registered
+    # Student credentials will be validated from students.csv
 }
 
 # ==================== PROGRAM & UNIT REQUIREMENTS ====================
@@ -407,6 +407,7 @@ def create_demo_students():
     # Kept for possible future use – not called automatically
     data = {
         "student_number": [f"S00{i}" for i in range(1,14)],
+        "password": [""]*13,
         "name": ["Santos, Maria Concepcion R.", "Dela Cruz, Jose Mari P.", "Fernandez, Kristoffer Ivan M.", "Lopez, Maria Isabella T.", "Villanueva, Gabriel Angelo S.", "Reyes, Patricia Anne G.", "Gomez, Emmanuel D.", "Mendoza, Catherine Joy L.", "Santiago, Rommel C.", "Ramirez, Maria Lourdes E.", "Torres, Victor Emmanuel A.", "Bautista, Anna Patricia F.", "Aquino, Francis Joseph T."],
         "last_name": ["Santos","Dela Cruz","Fernandez","Lopez","Villanueva","Reyes","Gomez","Mendoza","Santiago","Ramirez","Torres","Bautista","Aquino"],
         "first_name": ["Maria Concepcion","Jose Mari","Kristoffer Ivan","Maria Isabella","Gabriel Angelo","Patricia Anne","Emmanuel","Catherine Joy","Rommel","Maria Lourdes","Victor Emmanuel","Anna Patricia","Francis Joseph"],
@@ -493,6 +494,10 @@ def load_data():
         empty_df = pd.DataFrame(columns=create_demo_students().columns)
         save_data(empty_df)
         return empty_df
+
+    # Ensure password column exists
+    if "password" not in df.columns:
+        df["password"] = ""
 
     numeric_cols = ["ay_start","gwa","total_units_taken","total_units_required",
                     "thesis_units_taken","thesis_units_limit","thesis_extension_units",
@@ -1497,6 +1502,7 @@ def register_new_student_form():
                 # Create a brand new row with NO inherited values
                 new_row = {
                     "student_number": student_number,
+                    "password": student_number,  # Default password = student number
                     "name": full_name,
                     "last_name": last_name,
                     "first_name": first_name,
@@ -1560,8 +1566,6 @@ def register_new_student_form():
                 # Append the new student
                 df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                 save_data(df)
-                # Add student login to USERS dictionary for immediate access
-                USERS[student_number] = {"password": student_number, "role": "Student", "display_name": full_name}
                 # Create empty milestone tracking for this student
                 get_student_milestones(student_number, get_program_type(program))
                 st.session_state.reg_success = True
@@ -2351,130 +2355,3 @@ def student_dashboard():
                         <div class="next-step-card">
                             <strong>🎉 Congratulations!</strong><br>
                             You have completed all milestones. Contact the Graduate School for graduation.
-                        </div>
-                        """, unsafe_allow_html=True)
-    
-    st.caption("For corrections, contact your adviser or SESAM Staff.")
-
-# ==================== MAIN APP ====================
-if not st.session_state.logged_in:
-    st.markdown("<h1 style='text-align:center'>🎓 SESAM KMIS</h1>", unsafe_allow_html=True)
-    col1, col2, col3 = st.columns([1,2,1])
-    with col2:
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        if st.button("Login", use_container_width=True):
-            if username in USERS and USERS[username]["password"] == password:
-                st.session_state.logged_in = True
-                st.session_state.username = username
-                st.session_state.role = USERS[username]["role"]
-                st.session_state.display_name = USERS[username]["display_name"]
-                st.session_state.consent_given = False
-                st.rerun()
-            else: st.error("Invalid credentials")
-        st.caption("Demo (staff only): staff1/admin123 | adviser1/adv123 | Register students first, then use their student number as password.")
-    st.stop()
-
-if st.session_state.logged_in and not st.session_state.consent_given:
-    show_consent_form()
-    st.stop()
-
-convert_expired_grades()
-df = load_data()
-
-with st.sidebar:
-    st.markdown(f"<div style='text-align:center'><h3>👤 {st.session_state.display_name}</h3><div>{st.session_state.role}</div><div>✅ Consent given</div></div>", unsafe_allow_html=True)
-    if st.button("🚪 Logout", use_container_width=True):
-        st.session_state.logged_in = False
-        st.session_state.consent_given = False
-        st.rerun()
-    st.markdown("---")
-    st.caption("Version 28.2 | Clean Registration (no inherited GWA) & Empty DB on start")
-
-st.title("🎓 SESAM Graduate Student Lifecycle Management")
-st.caption("Fully compliant with UPLB Graduate School policies. Coursework handled in its own tab; milestones can be submitted anytime.")
-
-role = st.session_state.role
-
-if role == "SESAM Staff":
-    st.subheader("📋 Student Directory")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("➕ Register New Student", use_container_width=True):
-            st.session_state.show_registration = True
-            st.session_state.staff_show_update = False
-            st.session_state.staff_selected_student = None
-    with col2:
-        if st.button("✏️ Update Student Information", use_container_width=True):
-            st.session_state.show_registration = False
-            st.session_state.staff_show_update = True
-            st.session_state.staff_selected_student = None
-    if st.session_state.get("show_registration", False):
-        register_new_student_form()
-    elif st.session_state.get("staff_show_update", False):
-        if st.session_state.staff_selected_student is None:
-            st.subheader("🔍 Search and Select a Student")
-            search_term = st.text_input("Search by name or student number", key="staff_search")
-            filtered = filter_dataframe(search_term, df)
-            if filtered.empty:
-                st.warning("No students match your search.")
-            else:
-                st.markdown(f"#### Found {len(filtered)} student(s)")
-                for _, row in filtered.iterrows():
-                    col_name, col_prog, col_gwa = st.columns([3,2,1])
-                    with col_name:
-                        if st.button(f"📌 {row['name']}", key=f"select_{row['student_number']}", help="Click to open profile"):
-                            st.session_state.staff_selected_student = row["student_number"]
-                            st.rerun()
-                    with col_prog:
-                        st.write(row['program'])
-                    with col_gwa:
-                        gwa_disp = f"{row['gwa']:.2f}" if pd.notna(row['gwa']) else "—"
-                        st.write(f"GWA: {gwa_disp}")
-        else:
-            view_student_profile(st.session_state.staff_selected_student, viewer_role="SESAM Staff")
-    else:
-        st.info("Select an action using the buttons above.")
-
-elif role == "Faculty Adviser":
-    st.subheader(f"👨‍🏫 Faculty Adviser Dashboard – {st.session_state.display_name}")
-    advisees = df[df["advisor"] == st.session_state.display_name].copy()
-    if advisees.empty:
-        st.warning("No students assigned to you.")
-    else:
-        all_semesters = load_semester_records()
-        advisee_numbers = advisees["student_number"].tolist()
-        pending_sems = all_semesters[(all_semesters["student_number"].isin(advisee_numbers)) & (all_semesters["doc_status"] == "Pending")]
-        pending_count = len(pending_sems)
-        profile_count = 0
-        if "profile_pending_status" in advisees.columns:
-            profile_count = len(advisees[advisees["profile_pending_status"] == "Pending"])
-        col1, col2, col3 = st.columns(3)
-        with col1: st.metric("Total Advisees", len(advisees))
-        with col2: st.metric("📄 Pending Documents", pending_count)
-        with col3: st.metric("👤 Pending Profiles", profile_count)
-        st.markdown("---")
-        search_term = st.text_input("🔍 Search advisees", key="adviser_search")
-        if search_term:
-            advisees = advisees[advisees["name"].str.contains(search_term, case=False, na=False) | 
-                               advisees["student_number"].str.contains(search_term, case=False, na=False)]
-        st.markdown(f"#### Your Advisees ({len(advisees)} student(s))")
-        for _, student in advisees.iterrows():
-            col_name, col_prog, col_gwa = st.columns([3,2,1])
-            with col_name:
-                if st.button(f"📌 {student['name']}", key=f"advisee_{student['student_number']}", help="Click to open profile"):
-                    st.session_state.adviser_selected_student = student["student_number"]
-                    st.rerun()
-            with col_prog:
-                st.write(student['program'])
-            with col_gwa:
-                gwa_disp = f"{student['gwa']:.2f}" if pd.notna(student['gwa']) else "—"
-                st.write(f"GWA: {gwa_disp}")
-        if st.session_state.get("adviser_selected_student"):
-            view_student_profile(st.session_state.adviser_selected_student, viewer_role="Faculty Adviser")
-
-elif role == "Student":
-    student_dashboard()
-
-st.markdown("---")
-st.caption("SESAM KMIS v28.2 | Clean Registration (no inherited GWA) & Empty DB on start")
