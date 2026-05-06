@@ -1,6 +1,6 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 28.10 | No POS Blocking or Warnings
+Version: 28.11 | POS Warning Only After Second Semester
 """
 
 import streamlit as st
@@ -136,6 +136,7 @@ USERS = {
     "staff1": {"password": "admin123", "role": "SESAM Staff", "display_name": "SESAM Administrator"},
     "adviser1": {"password": "adv123", "role": "Faculty Adviser", "display_name": "Dr. Eslava"},
     "adviser2": {"password": "adv456", "role": "Faculty Adviser", "display_name": "Dr. Sanchez"},
+    # Student credentials will be validated from students.csv
 }
 
 # ==================== PROGRAM & UNIT REQUIREMENTS ====================
@@ -1848,7 +1849,7 @@ def view_student_profile(student_number, viewer_role):
         else:
             st.markdown(f"**External Reviewer:** {student.get('external_reviewer','Not assigned')}")
     
-    # ---- Coursework Tab ----
+    # ---- Coursework Tab (no POS warnings) ----
     with tabs[1]:
         st.subheader("Academic Record")
         
@@ -2128,8 +2129,9 @@ def student_dashboard():
             st.markdown(f'<div class="warning-banner">⚠️ {inc["course"]} ({inc["semester"]}) INC/4.0 deadline in {inc["days_left"]} days ({inc["deadline"]}).</div>', unsafe_allow_html=True)
     
     semester_count = len(get_student_semesters(student["student_number"]))
-    if semester_count >= 1 and is_master_program(student["program"]) and student.get("pos_status","Pending") != "Approved":
-        st.markdown('<div class="danger-banner">⚠️ Your Plan of Study (POS) is not yet approved. You will not be able to register for the next semester until it is approved.</div>', unsafe_allow_html=True)
+    # FIXED: Show warning only after second semester (>=2 semesters)
+    if semester_count >= 2 and is_master_program(student["program"]) and student.get("pos_status","Pending") != "Approved":
+        st.markdown('<div class="danger-banner">⚠️ Your Plan of Study (POS) is not yet approved. You will not be able to register for the next semester until it is approved. Please contact your adviser.</div>', unsafe_allow_html=True)
     
     milestones_df = get_student_milestones(student["student_number"], program_type)
     milestone_list = MILESTONE_DEFS.get(program_type, MILESTONE_DEFS["MS_Thesis"])
@@ -2421,7 +2423,7 @@ with st.sidebar:
         st.session_state.consent_given = False
         st.rerun()
     st.markdown("---")
-    st.caption("Version 28.10 | No POS Blocking or Warnings")
+    st.caption("Version 28.11 | POS Warning Only After Second Semester")
 
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
 st.caption("Fully compliant with UPLB Graduate School policies. Coursework handled in its own tab; milestones can be submitted anytime.")
@@ -2509,4 +2511,4 @@ elif role == "Student":
     student_dashboard()
 
 st.markdown("---")
-st.caption("SESAM KMIS v28.10 | No POS Blocking or Warnings")
+st.caption("SESAM KMIS v28.11 | POS Warning Only After Second Semester")
