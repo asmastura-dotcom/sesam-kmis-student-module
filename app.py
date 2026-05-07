@@ -1411,57 +1411,79 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
         if doc_status == "Rejected" and doc_remarks:
             st.warning(f"Rejection reason: {doc_remarks}")
         
-        if semester_status == "Regular" and (not is_staff or (is_staff and override_edit)):
-            df_edit = pd.DataFrame(subjects) if subjects else pd.DataFrame(columns=["course_code","course_description","units","grade"])
-            for col in ["course_code","course_description","units","grade"]:
-                if col not in df_edit.columns:
-                    df_edit[col] = 0 if col == "units" else ""
-            df_edit = df_edit[["course_code","course_description","units","grade"]]
-            df_edit["units"] = pd.to_numeric(df_edit["units"], errors='coerce').fillna(0).astype(int)
-            
-            df_key = f"df_{student_number}_{ay}_{sem}"
-            if df_key not in st.session_state:
-                st.session_state[df_key] = df_edit.copy()
-            
-            edited_df = st.data_editor(
-                st.session_state[df_key],
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "course_code": "Course Code",
-                    "course_description": "Course Description",
-                    "units": st.column_config.NumberColumn("Units", step=1, min_value=0),
-                    "grade": st.column_config.SelectboxColumn("Grade", options=GRADE_OPTIONS, default="1.00")
-                },
-                key=f"editor_{student_number}_{ay}_{sem}"
-            )
-            st.session_state[df_key] = edited_df
-            
-            col_add, col_save = st.columns([1, 4])
-            with col_add:
-                if st.button("➕ Add Row", key=f"add_{student_number}_{ay}_{sem}"):
-                    new_row = pd.DataFrame([{"course_code": "", "course_description": "", "units": 0, "grade": "1.00"}])
-                    st.session_state[df_key] = pd.concat([st.session_state[df_key], new_row], ignore_index=True)
-                    st.rerun()
-            with col_save:
-                if st.button("💾 Save Subjects", key=f"save_{student_number}_{ay}_{sem}"):
-                    if not doc_path or doc_path == "":
-                        st.error("❌ Cannot save subjects: Proof of grades (AMIS screenshot) is required. Please upload a file first.")
-                    else:
-                        new_subjects = st.session_state[df_key].to_dict("records")
-                        for s in new_subjects:
-                            s["units"] = int(s["units"]) if s["units"] else 0
-                            s["course_code"] = str(s.get("course_code", ""))
-                            s["course_description"] = str(s.get("course_description", ""))
-                            s["grade"] = str(s.get("grade", "1.00"))
-                        if update_semester_subjects(student_number, ay, sem, new_subjects):
-                            st.success("Subjects saved! Refreshing totals...")
-                            update_student_academic_summary(student_number)
-                            if df_key in st.session_state:
-                                del st.session_state[df_key]
-                            st.rerun()
+        # ---- Display subjects based on user role ----
+        if semester_status == "Regular":
+            # For student: editable data editor
+            if not is_staff:
+                # Student view: editable table
+                df_edit = pd.DataFrame(subjects) if subjects else pd.DataFrame(columns=["course_code","course_description","units","grade"])
+                for col in ["course_code","course_description","units","grade"]:
+                    if col not in df_edit.columns:
+                        df_edit[col] = 0 if col == "units" else ""
+                df_edit = df_edit[["course_code","course_description","units","grade"]]
+                df_edit["units"] = pd.to_numeric(df_edit["units"], errors='coerce').fillna(0).astype(int)
+                
+                df_key = f"df_{student_number}_{ay}_{sem}"
+                if df_key not in st.session_state:
+                    st.session_state[df_key] = df_edit.copy()
+                
+                edited_df = st.data_editor(
+                    st.session_state[df_key],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "course_code": "Course Code",
+                        "course_description": "Course Description",
+                        "units": st.column_config.NumberColumn("Units", step=1, min_value=0),
+                        "grade": st.column_config.SelectboxColumn("Grade", options=GRADE_OPTIONS, default="1.00")
+                    },
+                    key=f"editor_{student_number}_{ay}_{sem}"
+                )
+                st.session_state[df_key] = edited_df
+                
+                col_add, col_save = st.columns([1, 4])
+                with col_add:
+                    if st.button("➕ Add Row", key=f"add_{student_number}_{ay}_{sem}"):
+                        new_row = pd.DataFrame([{"course_code": "", "course_description": "", "units": 0, "grade": "1.00"}])
+                        st.session_state[df_key] = pd.concat([st.session_state[df_key], new_row], ignore_index=True)
+                        st.rerun()
+                with col_save:
+                    if st.button("💾 Save Subjects", key=f"save_{student_number}_{ay}_{sem}"):
+                        if not doc_path or doc_path == "":
+                            st.error("❌ Cannot save subjects: Proof of grades (AMIS screenshot) is required. Please upload a file first.")
                         else:
-                            st.error("Save failed.")
+                            new_subjects = st.session_state[df_key].to_dict("records")
+                            for s in new_subjects:
+                                s["units"] = int(s["units"]) if s["units"] else 0
+                                s["course_code"] = str(s.get("course_code", ""))
+                                s["course_description"] = str(s.get("course_description", ""))
+                                s["grade"] = str(s.get("grade", "1.00"))
+                            if update_semester_subjects(student_number, ay, sem, new_subjects):
+                                st.success("Subjects saved! Refreshing totals...")
+                                update_student_academic_summary(student_number)
+                                if df_key in st.session_state:
+                                    del st.session_state[df_key]
+                                st.rerun()
+                            else:
+                                st.error("Save failed.")
+            else:
+                # Staff/Adviser view: read‑only table (no editing)
+                if subjects:
+                    df_subjects = pd.DataFrame(subjects)
+                    # Rename columns for display
+                    display_cols = {}
+                    if "course_code" in df_subjects.columns:
+                        display_cols["course_code"] = "Course Code"
+                    if "course_description" in df_subjects.columns:
+                        display_cols["course_description"] = "Course Description"
+                    if "units" in df_subjects.columns:
+                        display_cols["units"] = "Units"
+                    if "grade" in df_subjects.columns:
+                        display_cols["grade"] = "Grade"
+                    st.dataframe(df_subjects[list(display_cols.keys())].rename(columns=display_cols),
+                                 use_container_width=True, hide_index=True)
+                else:
+                    st.info("No subjects have been entered for this semester.")
         elif semester_status != "Regular":
             st.info(f"Semester marked as **{semester_status}**. Subject input disabled.")
             if subjects:
@@ -1475,6 +1497,23 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
         if semester_status == "Regular":
             if doc_path and doc_path != "" and os.path.exists(doc_path):
                 st.info(f"Current file: {os.path.basename(doc_path)}")
+                # For staff/adviser: show preview
+                if is_staff:
+                    # Preview based on file extension
+                    file_ext = os.path.splitext(doc_path)[1].lower()
+                    if file_ext in ['.jpg', '.jpeg', '.png', '.gif']:
+                        st.image(doc_path, caption="Proof of Grades", width=400)  # Smaller image
+                    elif file_ext == '.pdf':
+                        import base64
+                        with open(doc_path, "rb") as f:
+                            base64_pdf = base64.b64encode(f.read()).decode('utf-8')
+                        pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="400" type="application/pdf"></iframe>'  # Reduced height
+                        st.markdown(pdf_display, unsafe_allow_html=True)
+                    else:
+                        st.warning("Preview not available for this file type.")
+                        # Fallback link to open in new tab
+                        with open(doc_path, "rb") as f:
+                            st.download_button("Open file", f, file_name=os.path.basename(doc_path), key=f"fallback_{student_number}_{ay}_{sem}")
             if not is_staff:
                 with st.form(key=f"upload_{student_number}_{ay}_{sem}"):
                     uploaded = st.file_uploader("Choose file (PDF/JPG/PNG)", type=["pdf","jpg","jpeg","png"], key=f"upload_file_{ay}_{sem}")
@@ -1507,8 +1546,8 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
         else:
             st.info(f"Semester status **{semester_status}** – no upload required.")
         
-        # ---- POS Management Section (Staff/Adviser only) ----
-        if is_staff and (override_edit or st.session_state.role in ["SESAM Staff", "Faculty Adviser"]):
+        # ---- POS Management Section (SESAM Staff only, with override) ----
+        if st.session_state.role == "SESAM Staff" and override_edit:
             st.markdown("---")
             st.markdown("#### 📋 Plan of Study (POS) for this Semester")
             pos_status = semester_row.get("pos_approved_status", "")
