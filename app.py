@@ -1,6 +1,6 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 28.12 | Temporary Adviser Assignment (UPLB Graduate School Policy)
+Version: 28.14 | Complete UPLB Compliance (POS before 2nd semester, Adviser auto-update)
 """
 
 import streamlit as st
@@ -274,6 +274,39 @@ FINAL_EXAM_VOTES_FILE = "final_exam_votes.csv"
 for folder in [UPLOAD_FOLDER, PROFILE_PIC_FOLDER]:
     if not os.path.exists(folder): os.makedirs(folder)
 
+# ==================== COMMITTEE MEMBERS HELPERS ====================
+def get_committee_members(student_number):
+    df = load_data()
+    student = df[df["student_number"] == student_number]
+    if student.empty:
+        return []
+    committee_json = student.iloc[0].get("committee_members_structured", "")
+    if committee_json and committee_json.strip():
+        try:
+            members = json.loads(committee_json)
+            if isinstance(members, list):
+                return members
+        except:
+            pass
+    return []
+
+def set_committee_members(student_number, members):
+    df = load_data()
+    idx = df[df["student_number"] == student_number].index
+    if len(idx) > 0:
+        df.at[idx[0], "committee_members_structured"] = json.dumps(members)
+        save_data(df)
+        return True
+    return False
+
+def get_committee_chair(student_number):
+    """Return the name of the committee member with role 'Chair', or None if not found."""
+    members = get_committee_members(student_number)
+    for member in members:
+        if member.get("role") == "Chair":
+            return member.get("name", "").strip()
+    return None
+
 # ==================== POS SUBMISSIONS FUNCTIONS ====================
 def load_pos_submissions():
     if not os.path.exists(POS_SUBMISSIONS_FILE) or os.path.getsize(POS_SUBMISSIONS_FILE) == 0:
@@ -403,31 +436,6 @@ def update_milestone_status_from_pos(student_number, status, approval_date):
         df_milestone = pd.concat([df_milestone, new_row], ignore_index=True)
         save_milestone_tracking(df_milestone)
 
-# ==================== COMMITTEE MEMBERS HELPERS ====================
-def get_committee_members(student_number):
-    df = load_data()
-    student = df[df["student_number"] == student_number]
-    if student.empty:
-        return []
-    committee_json = student.iloc[0].get("committee_members_structured", "")
-    if committee_json and committee_json.strip():
-        try:
-            members = json.loads(committee_json)
-            if isinstance(members, list):
-                return members
-        except:
-            pass
-    return []
-
-def set_committee_members(student_number, members):
-    df = load_data()
-    idx = df[df["student_number"] == student_number].index
-    if len(idx) > 0:
-        df.at[idx[0], "committee_members_structured"] = json.dumps(members)
-        save_data(df)
-        return True
-    return False
-
 # ==================== CORE DATA FUNCTIONS ====================
 def create_demo_students():
     # Kept for possible future use – not called automatically
@@ -451,6 +459,7 @@ def create_demo_students():
         "residency_years_used": [3,1,3,3,3,1,2,2,3,3,3,3,3],
         "residency_extension_years": [0]*13,
         "pos_status": ["Approved","Pending","Approved","Approved","Approved","Approved","Pending","Approved","Approved","Approved","Approved","Approved","Approved"],
+        "pos_approval_date": [""]*13,
         "qualifying_exam_status": ["N/A","N/A","Passed","N/A","N/A","N/A","N/A","N/A","Passed","N/A","N/A","N/A","N/A"],
         "written_comprehensive_status": ["N/A","N/A","Failed","N/A","N/A","N/A","N/A","N/A","Passed","N/A","N/A","N/A","N/A"],
         "oral_comprehensive_status": ["N/A","N/A","Not Taken","N/A","N/A","N/A","N/A","N/A","Failed","N/A","N/A","N/A","N/A"],
@@ -522,6 +531,8 @@ def load_data():
 
     if "password" not in df.columns:
         df["password"] = ""
+    if "pos_approval_date" not in df.columns:
+        df["pos_approval_date"] = ""
 
     numeric_cols = ["ay_start","gwa","total_units_taken","total_units_required",
                     "thesis_units_taken","thesis_units_limit","thesis_extension_units",
@@ -698,7 +709,18 @@ def check_coursework_consistency(student_number, ay, sem):
 
 # ==================== RULE FUNCTIONS ====================
 def check_pos_approval(student_number, semester_index):
-    # Always return True – allow any semester regardless of POS status
+    """
+    semester_index: number of existing semesters before adding the new one.
+    For second semester (semester_index >= 1), require POS approval.
+    """
+    if semester_index >= 1:  # about to add second or later semester
+        df = load_data()
+        student = df[df["student_number"] == student_number]
+        if student.empty:
+            return False, "Student not found."
+        pos_status = student.iloc[0].get("pos_status", "Pending")
+        if pos_status != "Approved":
+            return False, "Your Plan of Study (POS) must be approved by your adviser before you can enroll in the second semester. Please contact your Guidance Committee."
     return True, ""
 
 def check_thesis_units_limit(student_number, new_thesis_units):
@@ -840,9 +862,9 @@ def add_semester_record(student_number, ay, sem, subjects, doc_path="", doc_uplo
     student = df[df["student_number"] == student_number].iloc[0]
     sems = get_student_semesters(student_number)
     semester_count = len(sems)
-    ok, msg = check_pos_approval(student_number, semester_count)  # Always returns True now
+    ok, msg = check_pos_approval(student_number, semester_count)
     if not ok:
-        raise ValueError(msg)  # This will never happen because check_pos_approval now always returns True
+        raise ValueError(msg)
     ok, msg = check_residency_enforcement(student_number)
     if isinstance(ok, bool) and not ok:
         raise ValueError(msg)
@@ -1113,6 +1135,44 @@ def get_student_milestones(student_number, program_type):
         return df[df["student_number"] == student_number]
 
 def update_milestone(student_number, milestone, status, date_str, file_path, remarks, reviewer_name=None):
+    # For committee milestones, when approving, attempt to update the student's adviser to the committee chair
+    committee_milestones = ["Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]
+    if milestone in committee_milestones and status == "Approved":
+        # Get the committee chair
+        chair_name = get_committee_chair(student_number)
+        if chair_name:
+            # Check if chair exists in USERS as a Faculty Adviser
+            if chair_name in USERS and USERS[chair_name]["role"] == "Faculty Adviser":
+                # Update the student's advisor field
+                df = load_data()
+                idx = df[df["student_number"] == student_number].index
+                if len(idx) > 0:
+                    old_advisor = df.at[idx[0], "advisor"]
+                    df.at[idx[0], "advisor"] = chair_name
+                    save_data(df)
+                    st.success(f"✅ Student's temporary adviser has been automatically updated from '{old_advisor}' to committee chair: {chair_name}")
+                else:
+                    st.error("Student record not found - adviser not updated.")
+            else:
+                st.warning(f"⚠️ Committee Chair '{chair_name}' is not a valid faculty adviser in the system. Adviser not updated. Please contact staff to add '{chair_name}' to the system.")
+        else:
+            st.warning("⚠️ No committee chair found in the committee members list. Adviser not updated.")
+    
+    # For POS milestone approval, update pos_status and pos_approval_date
+    if milestone == "Plan of Study (POS)" and status == "Approved":
+        df_students = load_data()
+        idx = df_students[df_students["student_number"] == student_number].index
+        if len(idx) > 0:
+            # Only update if not already approved (to preserve approval date)
+            if df_students.at[idx[0], "pos_status"] != "Approved":
+                df_students.at[idx[0], "pos_status"] = "Approved"
+                df_students.at[idx[0], "pos_approval_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                save_data(df_students)
+                st.success(f"✅ POS has been approved. Student can now enroll in the second semester.")
+        else:
+            st.error("Student record not found.")
+    
+    # Original milestone update logic
     if milestone in ["Final Examination", "Final Defense"] and status == "Approved":
         ok, msg = check_external_reviewer_required(student_number)
         if not ok:
@@ -1481,7 +1541,7 @@ def render_profile_approval_section(student, is_staff=False):
     elif student.get("profile_pending_status") == "Rejected":
         st.error(f"Profile update rejected: {student.get('profile_pending_remarks','')}")
 
-# ==================== REGISTRATION FORM (with temporary adviser dropdown) ====================
+# ==================== REGISTRATION FORM ====================
 def register_new_student_form():
     if st.session_state.get("reg_success", False):
         st.success("✅ Student successfully registered!")
@@ -1501,8 +1561,7 @@ def register_new_student_form():
             ay_start = int(ay_sel.split("-")[0])
             semester = st.selectbox("Starting Semester *", SEMESTERS)
             student_status = st.selectbox("Student Status", ["Regular", "Probationary", "Conditional"])
-        # TEMPORARY ADVISER DROPDOWN (UPLB policy)
-        advisor = st.selectbox("Temporary Adviser (assigned upon admission)", ["Not assigned", "Dr. Eslava", "Dr. Sanchez"])
+        advisor = st.selectbox("Temporary Adviser", ["Dr. Uno", "Dr. Dos", "Dr. Eslava", "Dr. Sanchez", "])
         prior_ms = False
         if program == "PhD Environmental Science":
             prior_ms = st.checkbox("Student is an MS Environmental Science graduate")
@@ -1532,7 +1591,7 @@ def register_new_student_form():
                     "first_name": first_name,
                     "middle_name": middle_name,
                     "program": program,
-                    "advisor": advisor,  # temporary adviser
+                    "advisor": advisor,
                     "ay_start": ay_start,
                     "semester": semester,
                     "gwa": None,
@@ -1545,6 +1604,7 @@ def register_new_student_form():
                     "residency_extension_years": 0,
                     "residency_max_years": get_residency_max_from_program(program),
                     "pos_status": "Not Started",
+                    "pos_approval_date": "",
                     "qualifying_exam_status": "N/A",
                     "written_comprehensive_status": "N/A",
                     "oral_comprehensive_status": "N/A",
@@ -1657,7 +1717,6 @@ def render_compact_profile(student, is_own_profile=True):
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown(f"**Program:** {student['program']}")
-            # Label changed to indicate temporary adviser
             st.markdown(f"**Temporary Adviser (assigned upon admission):** {student['advisor']}")
             st.markdown(f"**Admitted:** {format_ay(student['ay_start'], student['semester'])}")
         with col_b:
@@ -1665,6 +1724,10 @@ def render_compact_profile(student, is_own_profile=True):
             st.markdown(f"**Special Status:** {student.get('special_status','Regular')}")
             if not is_own_profile:
                 st.markdown(f"**External Reviewer:** {student.get('external_reviewer','Not assigned')}")
+        
+        # Show POS approval date if approved
+        if student.get("pos_status") == "Approved" and student.get("pos_approval_date"):
+            st.caption(f"✅ POS approved on: {student['pos_approval_date']}")
     
     st.markdown("---")
     st.markdown("#### 📞 Contact & Personal Information")
@@ -1850,7 +1913,7 @@ def view_student_profile(student_number, viewer_role):
         else:
             st.markdown(f"**External Reviewer:** {student.get('external_reviewer','Not assigned')}")
     
-    # ---- Coursework Tab (no POS warnings) ----
+    # ---- Coursework Tab (with POS warnings) ----
     with tabs[1]:
         st.subheader("Academic Record")
         
@@ -1872,7 +1935,7 @@ def view_student_profile(student_number, viewer_role):
         semesters["ay_num"] = semesters["academic_year"].apply(lambda x: int(x.split("-")[0]))
         semesters = semesters.sort_values(["ay_num", "order"]).reset_index(drop=True)
         
-        # No POS warnings
+        # No POS warnings in staff/adviser view – they can manage
         
         for _, row in semesters.iterrows():
             render_semester_block_general(student_number, row, is_staff=True, override_edit=can_edit_subjects)
@@ -2117,6 +2180,11 @@ def student_dashboard():
         required_fields_missing = True
         st.warning(f"⚠️ **Required Information Missing**\n\nPlease complete the following fields in your Profile before accessing your coursework: {', '.join(missing_fields)}")
     
+    # Check if student is in first semester (exactly one semester exists) and POS not approved
+    existing_sems = get_student_semesters(student["student_number"])
+    if len(existing_sems) == 1 and student.get("pos_status", "Pending") != "Approved":
+        st.warning("⚠️ **Action Required:** You are in your first semester. Your Plan of Study (POS) must be approved by your adviser before the end of this semester to allow enrollment in the second semester. Please work with your adviser to complete and approve your POS.")
+    
     resid_status, used, max_y = check_residency_alert(student)
     if resid_status == "exceeded":
         st.markdown(f'<div class="danger-banner">⚠️ RESIDENCY EXCEEDED: {used} years used (max {max_y}). Please consult your adviser.</div>', unsafe_allow_html=True)
@@ -2133,7 +2201,7 @@ def student_dashboard():
             st.markdown(f'<div class="warning-banner">⚠️ {inc["course"]} ({inc["semester"]}) INC/4.0 deadline in {inc["days_left"]} days ({inc["deadline"]}).</div>', unsafe_allow_html=True)
     
     semester_count = len(get_student_semesters(student["student_number"]))
-    # Warning only after second semester
+    # Warning only after second semester if POS not approved (additional safeguard)
     if semester_count >= 2 and is_master_program(student["program"]) and student.get("pos_status","Pending") != "Approved":
         st.markdown('<div class="danger-banner">⚠️ Your Plan of Study (POS) is not yet approved. You will not be able to register for the next semester until it is approved. Please contact your adviser.</div>', unsafe_allow_html=True)
     
@@ -2204,7 +2272,7 @@ def student_dashboard():
                         else:
                             st.error("Student record not found.")
     
-    # ---- Coursework Tab (no POS warnings) ----
+    # ---- Coursework Tab (with POS warnings and blocking) ----
     with main_tabs[1]:
         if required_fields_missing:
             st.error("❌ **Cannot access Coursework**\n\nPlease complete your profile information (Address, Phone Number, and Institutional Email) before proceeding to your coursework.")
@@ -2216,24 +2284,28 @@ def student_dashboard():
         total_terms = len(timeline)
         existing_sems = get_student_semesters(student["student_number"])
         
+        # Create missing semesters – this will block if second semester and POS not approved
         for ay, sem in timeline:
             if not ((existing_sems["academic_year"] == ay) & (existing_sems["semester"] == sem)).any():
                 try:
                     add_semester_record(student["student_number"], ay, sem, [], semester_status="Regular")
                 except ValueError as e:
                     st.error(str(e))
+                    # If error occurs (POS not approved for second semester), break out of loop
+                    break
         
+        # Reload semesters after potential creation
         semesters = get_student_semesters(student["student_number"])
         sem_order = {"1st Sem": 0, "2nd Sem": 1, "Summer": 2}
         semesters["order"] = semesters["semester"].map(sem_order)
         semesters["ay_num"] = semesters["academic_year"].apply(lambda x: int(x.split("-")[0]))
         semesters = semesters.sort_values(["ay_num", "order"]).reset_index(drop=True)
         
-        # No POS warnings
-        
+        # Display semester blocks
         for _, row in semesters.iterrows():
             render_semester_block_general(student["student_number"], row, is_staff=False, override_edit=False)
         
+        # Add Next Semester button only if within timeline and POS is approved (checked inside create_next_semester)
         if len(semesters) < total_terms:
             if st.button("➕ Add Next Semester"):
                 last_sem = semesters.iloc[-1] if not semesters.empty else None
@@ -2259,7 +2331,7 @@ def student_dashboard():
         
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
-            if st.button("🔄 Recalculate Totals (Refresh)"):
+            if st.button("🔄 Refresh GWA & Units"):
                 with st.spinner("Recalculating from saved records..."):
                     success = update_student_academic_summary(student["student_number"])
                     if success:
@@ -2427,7 +2499,7 @@ with st.sidebar:
         st.session_state.consent_given = False
         st.rerun()
     st.markdown("---")
-    st.caption("Version 28.12 | Temporary Adviser Assignment (UPLB Graduate School Policy)")
+    st.caption("Version 28.14 | Complete UPLB Compliance (POS before 2nd semester, Adviser auto-update)")
 
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
 st.caption("Fully compliant with UPLB Graduate School policies. Coursework handled in its own tab; milestones can be submitted anytime.")
@@ -2515,4 +2587,4 @@ elif role == "Student":
     student_dashboard()
 
 st.markdown("---")
-st.caption("SESAM KMIS v28.12 | Temporary Adviser Assignment (UPLB Graduate School Policy)")
+st.caption("SESAM KMIS v28.14 | Complete UPLB Compliance (POS before 2nd semester, Adviser auto-update)")
