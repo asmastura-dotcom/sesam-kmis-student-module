@@ -1561,7 +1561,7 @@ def register_new_student_form():
             ay_start = int(ay_sel.split("-")[0])
             semester = st.selectbox("Starting Semester *", SEMESTERS)
             student_status = st.selectbox("Student Status", ["Regular", "Probationary", "Conditional"])
-        advisor = st.selectbox("Temporary Adviser", ["Dr. Uno", "Dr. Dos", "Dr. Eslava", "Dr. Sanchez", "])
+        advisor = st.selectbox("Temporary Adviser", ["Dr. Uno", "Dr. Dos", "Dr. Eslava", "Dr. Sanchez"])
         prior_ms = False
         if program == "PhD Environmental Science":
             prior_ms = st.checkbox("Student is an MS Environmental Science graduate")
