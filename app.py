@@ -1976,8 +1976,6 @@ def reject_pos_submission(submission_id, reviewer_name, remarks):
     return True
 
 # ==================== RENDER POS MILESTONE (SIDE-BY-SIDE) ====================
-# ==================== RENDER POS MILESTONE (SIDE-BY-SIDE, SWAPPED, WITH UNIQUE KEYS) ====================
-
 def render_pos_milestone(student_number, viewer_role, is_own_view=False):
     # Generate a unique suffix for this function call to avoid duplicate form keys
     if "_pos_form_counter" not in st.session_state:
