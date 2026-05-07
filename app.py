@@ -169,7 +169,7 @@ def get_required_units(program, prior_ms_graduate=False):
 # ==================== MILESTONE DEFINITIONS (UPLB Graduate School Handbook) ====================
 MILESTONE_DEFS = {
     "MS_Thesis": [
-        "Guidance Committee Formation",
+        "Guidance Committee Members",
         "Plan of Study (POS)",
         "General Examination",
         "Thesis Work",
