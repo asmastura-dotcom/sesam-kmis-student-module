@@ -1937,28 +1937,77 @@ def reject_pos_submission(submission_id, reviewer_name, remarks):
     return True
 
 # ==================== RENDER POS MILESTONE (SIDE-BY-SIDE) ====================
+# ==================== RENDER POS MILESTONE (SIDE-BY-SIDE, SWAPPED, WITH UNIQUE KEYS) ====================
 
 def render_pos_milestone(student_number, viewer_role, is_own_view=False):
+    # Generate a unique suffix for this function call to avoid duplicate form keys
+    if "_pos_form_counter" not in st.session_state:
+        st.session_state._pos_form_counter = 0
+    st.session_state._pos_form_counter += 1
+    form_suffix = st.session_state._pos_form_counter
+
     original = get_original_pos(student_number)
     revisions = get_revisions(student_number)
     
-    # Determine if user can submit revisions
     can_submit = (is_own_view or viewer_role == "SESAM Staff")
-    # Adviser can approve revisions; Staff can approve as GS
     is_adviser = (viewer_role == "Faculty Adviser")
     is_staff = (viewer_role == "SESAM Staff")
     
     st.markdown("## Plan of Study (POS) – Version Control")
     
-    # Two columns: Left = Revisions, Right = Original
+    # Two columns: LEFT = ORIGINAL, RIGHT = REVISIONS
     col_left, col_right = st.columns(2, gap="large")
     
-    # ==================== LEFT COLUMN: REVISED POS ====================
+    # ==================== LEFT COLUMN: ORIGINAL POS (GS baseline) ====================
     with col_left:
+        st.markdown("### 🏛️ Original Approved POS (Graduate School Baseline)")
+        st.caption("Official GS‑approved document – read only for adviser")
+        
+        if original is None:
+            if can_submit:
+                st.warning("No original POS has been submitted yet. Please upload the initial POS for GS approval.")
+                with st.form(key=f"submit_original_{student_number}_{form_suffix}"):
+                    uploaded_file = st.file_uploader("Upload initial POS (PDF/JPG/PNG) - Max 5MB", type=["pdf","jpg","jpeg","png"], key=f"original_pos_{student_number}_{form_suffix}")
+                    if st.form_submit_button("Submit Initial POS for GS Approval", use_container_width=True):
+                        if uploaded_file:
+                            if uploaded_file.size > 5 * 1024 * 1024:
+                                st.error("File size exceeds 5MB.")
+                            else:
+                                if submit_pos_document(student_number, uploaded_file, submission_type="original"):
+                                    st.success("Initial POS submitted. Awaiting GS approval.")
+                                    st.rerun()
+                                else:
+                                    st.error("Submission failed.")
+                        else:
+                            st.error("Please select a file.")
+            else:
+                st.info("No original POS document has been approved by the Graduate School yet.")
+        else:
+            st.success(f"✅ GS Approved on: {original['approval_date']}")
+            if original["file_path"] and os.path.exists(original["file_path"]):
+                with open(original["file_path"], "rb") as f:
+                    st.download_button("📎 Download Original POS", f, file_name=os.path.basename(original["file_path"]))
+            else:
+                st.info("Document file not available.")
+            
+            # Adviser verification (only for advisers, not for students)
+            if is_adviser and not is_own_view:
+                st.markdown("---")
+                st.markdown("#### 🔍 Adviser Verification")
+                if "original_verified" not in st.session_state:
+                    st.session_state.original_verified = False
+                if not st.session_state.original_verified:
+                    if st.button("✅ Mark as Verified (I have reviewed the original POS)"):
+                        st.session_state.original_verified = True
+                        st.success("You have verified the original POS. Thank you.")
+                else:
+                    st.info("You have already verified this original POS.")
+    
+    # ==================== RIGHT COLUMN: REVISED POS ====================
+    with col_right:
         st.markdown("### 📝 Revised POS (Updated Versions)")
         st.caption("Student proposes changes → Adviser reviews → GS approves")
         
-        # Show all revisions
         if revisions.empty:
             st.info("No revised POS submissions yet.")
         else:
@@ -1981,12 +2030,12 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
                         st.caption(f"Remarks: {rev['remarks']}")
                     if rev["file_path"] and os.path.exists(rev["file_path"]):
                         with open(rev["file_path"], "rb") as f:
-                            st.download_button("📎 Download", f, file_name=os.path.basename(rev["file_path"]), key=f"download_rev_{rev['submission_id']}")
+                            st.download_button("📎 Download", f, file_name=os.path.basename(rev["file_path"]), key=f"download_rev_{rev['submission_id']}_{form_suffix}")
                     
                     # Approval actions based on role and current status
                     if is_adviser and status == "Pending":
-                        with st.form(key=f"adviser_rev_{rev['submission_id']}"):
-                            remarks = st.text_area("Remarks (optional)", key=f"rev_remarks_{rev['submission_id']}")
+                        with st.form(key=f"adviser_rev_{rev['submission_id']}_{form_suffix}"):
+                            remarks = st.text_area("Remarks (optional)", key=f"rev_remarks_{rev['submission_id']}_{form_suffix}")
                             if st.form_submit_button("✅ Approve as Adviser", use_container_width=True):
                                 success, msg = approve_pos_revision(rev['submission_id'], st.session_state.display_name, remarks, "adviser")
                                 if success:
@@ -2001,8 +2050,8 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
                                 else:
                                     st.error("Rejection failed.")
                     elif is_staff and status == "Adviser Approved":
-                        with st.form(key=f"gs_rev_{rev['submission_id']}"):
-                            remarks = st.text_area("Remarks (optional)", key=f"gs_rev_remarks_{rev['submission_id']}")
+                        with st.form(key=f"gs_rev_{rev['submission_id']}_{form_suffix}"):
+                            remarks = st.text_area("Remarks (optional)", key=f"gs_rev_remarks_{rev['submission_id']}_{form_suffix}")
                             if st.form_submit_button("🏛️ Approve as Graduate School", use_container_width=True):
                                 success, msg = approve_pos_revision(rev['submission_id'], st.session_state.display_name, remarks, "gs")
                                 if success:
@@ -2021,8 +2070,8 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
         if can_submit:
             st.markdown("---")
             st.markdown("### 📤 Submit Revised POS")
-            with st.form(key=f"submit_revision_{student_number}"):
-                uploaded_file = st.file_uploader("Upload revised POS (PDF/JPG/PNG) - Max 5MB", type=["pdf","jpg","jpeg","png"], key=f"revised_pos_{student_number}")
+            with st.form(key=f"submit_revision_{student_number}_{form_suffix}"):
+                uploaded_file = st.file_uploader("Upload revised POS (PDF/JPG/PNG) - Max 5MB", type=["pdf","jpg","jpeg","png"], key=f"revised_pos_{student_number}_{form_suffix}")
                 if st.form_submit_button("Submit Revised Version", use_container_width=True):
                     if uploaded_file:
                         if uploaded_file.size > 5 * 1024 * 1024:
@@ -2035,55 +2084,6 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
                                 st.error("Submission failed.")
                     else:
                         st.error("Please select a file.")
-    
-    # ==================== RIGHT COLUMN: ORIGINAL POS ====================
-    with col_right:
-        st.markdown("### 🏛️ Original Approved POS (Graduate School Baseline)")
-        st.caption("Official GS‑approved document – read only for adviser")
-        
-        if original is None:
-            if can_submit:
-                st.warning("No original POS has been submitted yet. Please upload the initial POS for GS approval.")
-                with st.form(key=f"submit_original_{student_number}"):
-                    uploaded_file = st.file_uploader("Upload initial POS (PDF/JPG/PNG)", type=["pdf","jpg","jpeg","png"], key=f"original_pos_{student_number}")
-                    if st.form_submit_button("Submit Initial POS for GS Approval", use_container_width=True):
-                        if uploaded_file:
-                            if uploaded_file.size > 5 * 1024 * 1024:
-                                st.error("File size exceeds 5MB.")
-                            else:
-                                if submit_pos_document(student_number, uploaded_file, submission_type="original"):
-                                    st.success("Initial POS submitted. Awaiting GS approval.")
-                                    st.rerun()
-                                else:
-                                    st.error("Submission failed.")
-                        else:
-                            st.error("Please select a file.")
-            else:
-                st.info("No original POS document has been approved by the Graduate School yet.")
-        else:
-            # Display original POS details
-            st.success(f"✅ GS Approved on: {original['approval_date']}")
-            if original["file_path"] and os.path.exists(original["file_path"]):
-                with open(original["file_path"], "rb") as f:
-                    st.download_button("📎 Download Original POS", f, file_name=os.path.basename(original["file_path"]))
-            else:
-                st.info("Document file not available.")
-            
-            # Adviser verification (only for advisers, not for students)
-            if is_adviser and not is_own_view:
-                st.markdown("---")
-                st.markdown("#### 🔍 Adviser Verification")
-                # We can add a simple button to mark as verified (no change to document)
-                if "original_verified" not in st.session_state:
-                    st.session_state.original_verified = False
-                if not st.session_state.original_verified:
-                    if st.button("✅ Mark as Verified (I have reviewed the original POS)"):
-                        st.session_state.original_verified = True
-                        st.success("You have verified the original POS. Thank you.")
-                        # Optionally log verification in remarks
-                        # For persistence, we could add a field in student record, but keeping simple.
-                else:
-                    st.info("You have already verified this original POS.")
     
     st.markdown("---")
     st.caption("Note: The original POS is the first version approved by GS. Revisions go through Adviser → GS approval.")
