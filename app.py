@@ -1,6 +1,6 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 28.14 | Complete UPLB Compliance (POS before 2nd semester, Adviser auto-update)
+Version: 28.17 | Two‑panel committee interface + transfer workflow
 """
 
 import streamlit as st
@@ -166,7 +166,7 @@ def get_required_units(program, prior_ms_graduate=False):
     elif program == "PhD Environmental Science": return 37 if prior_ms_graduate else 50
     else: return None
 
-# ==================== MILESTONE DEFINITIONS (UPLB Graduate School Handbook) ====================
+# ==================== MILESTONE DEFINITIONS ====================
 MILESTONE_DEFS = {
     "MS_Thesis": [
         "Guidance Committee Members",
@@ -270,6 +270,7 @@ PROFILE_PIC_FOLDER = "profile_pics"
 UPLOAD_FILE = "uploads.csv"
 DATA_REQUEST_FILE = "data_requests.csv"
 FINAL_EXAM_VOTES_FILE = "final_exam_votes.csv"
+ADVISER_TRANSFER_REQUESTS_FILE = "adviser_transfer_requests.csv"
 
 for folder in [UPLOAD_FOLDER, PROFILE_PIC_FOLDER]:
     if not os.path.exists(folder): os.makedirs(folder)
@@ -291,21 +292,81 @@ def get_committee_members(student_number):
     return []
 
 def set_committee_members(student_number, members):
+    # Validate exactly one Chair
+    chairs = [m for m in members if m.get("role") == "Chair"]
+    if len(chairs) != 1:
+        return False, "Committee must have exactly one Chair."
     df = load_data()
     idx = df[df["student_number"] == student_number].index
     if len(idx) > 0:
         df.at[idx[0], "committee_members_structured"] = json.dumps(members)
         save_data(df)
-        return True
-    return False
+        return True, "Committee members saved."
+    return False, "Student not found."
 
 def get_committee_chair(student_number):
-    """Return the name of the committee member with role 'Chair', or None if not found."""
     members = get_committee_members(student_number)
     for member in members:
         if member.get("role") == "Chair":
             return member.get("name", "").strip()
     return None
+
+# ==================== ADVISER TRANSFER REQUESTS ====================
+def load_transfer_requests():
+    if not os.path.exists(ADVISER_TRANSFER_REQUESTS_FILE) or os.path.getsize(ADVISER_TRANSFER_REQUESTS_FILE) == 0:
+        return pd.DataFrame(columns=["request_id", "student_number", "current_advisor", "requested_advisor", "status", "request_date", "milestone_name"])
+    df = pd.read_csv(ADVISER_TRANSFER_REQUESTS_FILE, dtype=str)
+    for col in ["request_id", "student_number", "current_advisor", "requested_advisor", "status", "request_date", "milestone_name"]:
+        if col not in df.columns:
+            df[col] = ""
+    df["request_id"] = pd.to_numeric(df["request_id"], errors='coerce').fillna(0).astype(int)
+    return df
+
+def save_transfer_requests(df):
+    df.to_csv(ADVISER_TRANSFER_REQUESTS_FILE, index=False)
+
+def create_transfer_request(student_number, current_advisor, requested_advisor, milestone_name):
+    df = load_transfer_requests()
+    new_id = df["request_id"].max() + 1 if not df.empty else 1
+    new = pd.DataFrame([{
+        "request_id": new_id,
+        "student_number": student_number,
+        "current_advisor": current_advisor,
+        "requested_advisor": requested_advisor,
+        "status": "Pending",
+        "request_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "milestone_name": milestone_name
+    }])
+    df = pd.concat([df, new], ignore_index=True)
+    save_transfer_requests(df)
+    return new_id
+
+def accept_transfer_request(request_id):
+    df = load_transfer_requests()
+    mask = df["request_id"] == request_id
+    if not mask.any():
+        return False, "Request not found."
+    row = df[mask].iloc[0]
+    student_number = row["student_number"]
+    requested_advisor = row["requested_advisor"]
+    students_df = load_data()
+    idx = students_df[students_df["student_number"] == student_number].index
+    if len(idx) == 0:
+        return False, "Student not found."
+    students_df.at[idx[0], "advisor"] = requested_advisor
+    save_data(students_df)
+    df = df[~mask]
+    save_transfer_requests(df)
+    return True, f"Student transferred to {requested_advisor}."
+
+def reject_transfer_request(request_id):
+    df = load_transfer_requests()
+    mask = df["request_id"] == request_id
+    if not mask.any():
+        return False, "Request not found."
+    df = df[~mask]
+    save_transfer_requests(df)
+    return True, "Transfer request rejected."
 
 # ==================== POS SUBMISSIONS FUNCTIONS ====================
 def load_pos_submissions():
@@ -438,7 +499,7 @@ def update_milestone_status_from_pos(student_number, status, approval_date):
 
 # ==================== CORE DATA FUNCTIONS ====================
 def create_demo_students():
-    # Kept for possible future use – not called automatically
+    # Demo data - not auto-called
     data = {
         "student_number": [f"S00{i}" for i in range(1,14)],
         "password": [""]*13,
@@ -709,11 +770,7 @@ def check_coursework_consistency(student_number, ay, sem):
 
 # ==================== RULE FUNCTIONS ====================
 def check_pos_approval(student_number, semester_index):
-    """
-    semester_index: number of existing semesters before adding the new one.
-    For second semester (semester_index >= 1), require POS approval.
-    """
-    if semester_index >= 1:  # about to add second or later semester
+    if semester_index >= 1:
         df = load_data()
         student = df[df["student_number"] == student_number]
         if student.empty:
@@ -1135,53 +1192,40 @@ def get_student_milestones(student_number, program_type):
         return df[df["student_number"] == student_number]
 
 def update_milestone(student_number, milestone, status, date_str, file_path, remarks, reviewer_name=None):
-    # For committee milestones, when approving, attempt to update the student's adviser to the committee chair
-    committee_milestones = ["Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]
+    committee_milestones = ["Guidance Committee Members", "Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]
     if milestone in committee_milestones and status == "Approved":
-        # Get the committee chair
         chair_name = get_committee_chair(student_number)
-        if chair_name:
-            # Check if chair exists in USERS as a Faculty Adviser
-            if chair_name in USERS and USERS[chair_name]["role"] == "Faculty Adviser":
-                # Update the student's advisor field
-                df = load_data()
-                idx = df[df["student_number"] == student_number].index
-                if len(idx) > 0:
-                    old_advisor = df.at[idx[0], "advisor"]
-                    df.at[idx[0], "advisor"] = chair_name
-                    save_data(df)
-                    st.success(f"✅ Student's temporary adviser has been automatically updated from '{old_advisor}' to committee chair: {chair_name}")
-                else:
-                    st.error("Student record not found - adviser not updated.")
-            else:
-                st.warning(f"⚠️ Committee Chair '{chair_name}' is not a valid faculty adviser in the system. Adviser not updated. Please contact staff to add '{chair_name}' to the system.")
-        else:
-            st.warning("⚠️ No committee chair found in the committee members list. Adviser not updated.")
+        if not chair_name:
+            return False, "No committee chair found. Cannot approve."
+        if chair_name not in USERS or USERS[chair_name]["role"] != "Faculty Adviser":
+            return False, f"Committee Chair '{chair_name}' is not a valid faculty adviser in the system. Please contact staff to add them."
+        df_students = load_data()
+        student_row = df_students[df_students["student_number"] == student_number]
+        if student_row.empty:
+            return False, "Student not found."
+        current_advisor = student_row.iloc[0]["advisor"]
+        create_transfer_request(student_number, current_advisor, chair_name, milestone)
+        st.success(f"Committee approved. A transfer request has been sent to {chair_name}. The student will remain under {current_advisor} until {chair_name} accepts the transfer.")
     
-    # For POS milestone approval, update pos_status and pos_approval_date
     if milestone == "Plan of Study (POS)" and status == "Approved":
         df_students = load_data()
         idx = df_students[df_students["student_number"] == student_number].index
         if len(idx) > 0:
-            # Only update if not already approved (to preserve approval date)
             if df_students.at[idx[0], "pos_status"] != "Approved":
                 df_students.at[idx[0], "pos_status"] = "Approved"
                 df_students.at[idx[0], "pos_approval_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 save_data(df_students)
-                st.success(f"✅ POS has been approved. Student can now enroll in the second semester.")
+                st.success("✅ POS has been approved. Student can now enroll in the second semester.")
         else:
-            st.error("Student record not found.")
+            return False, "Student record not found."
     
-    # Original milestone update logic
     if milestone in ["Final Examination", "Final Defense"] and status == "Approved":
         ok, msg = check_external_reviewer_required(student_number)
         if not ok:
-            st.error(msg)
-            return False
+            return False, msg
         ok, msg = check_residency_enforcement(student_number)
         if isinstance(ok, bool) and not ok:
-            st.error(msg)
-            return False
+            return False, msg
     df = load_milestone_tracking()
     mask = (df["student_number"] == student_number) & (df["milestone"] == milestone)
     if mask.any():
@@ -1208,7 +1252,7 @@ def update_milestone(student_number, milestone, status, date_str, file_path, rem
         }])
         df = pd.concat([df, new], ignore_index=True)
     save_milestone_tracking(df)
-    return True
+    return True, ""
 
 def save_milestone_file(student_number, milestone_name, uploaded_file):
     if uploaded_file is None: return None
@@ -1368,8 +1412,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
             st.warning(f"Rejection reason: {doc_remarks}")
         
         if semester_status == "Regular" and (not is_staff or (is_staff and override_edit)):
-            # No warning about missing document (removed)
-            
             df_edit = pd.DataFrame(subjects) if subjects else pd.DataFrame(columns=["course_code","course_description","units","grade"])
             for col in ["course_code","course_description","units","grade"]:
                 if col not in df_edit.columns:
@@ -1403,7 +1445,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                     st.rerun()
             with col_save:
                 if st.button("💾 Save Subjects", key=f"save_{student_number}_{ay}_{sem}"):
-                    # Still require proof of grades
                     if not doc_path or doc_path == "":
                         st.error("❌ Cannot save subjects: Proof of grades (AMIS screenshot) is required. Please upload a file first.")
                     else:
@@ -1650,8 +1691,15 @@ def register_new_student_form():
                 df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                 save_data(df)
                 get_student_milestones(student_number, get_program_type(program))
-                st.session_state.reg_success = True
-                st.rerun()
+                
+                # Create only the first (admission) semester
+                try:
+                    add_semester_record(student_number, f"{ay_start}-{ay_start+1}", semester, [], semester_status="Regular")
+                except Exception as e:
+                    st.error(f"Could not create initial semester: {e}")
+                else:
+                    st.session_state.reg_success = True
+                    st.rerun()
 
 # ==================== GET INC/4.0 ALERTS ====================
 def get_inc_alert(student_number):
@@ -1725,7 +1773,6 @@ def render_compact_profile(student, is_own_profile=True):
             if not is_own_profile:
                 st.markdown(f"**External Reviewer:** {student.get('external_reviewer','Not assigned')}")
         
-        # Show POS approval date if approved
         if student.get("pos_status") == "Approved" and student.get("pos_approval_date"):
             st.caption(f"✅ POS approved on: {student['pos_approval_date']}")
     
@@ -1754,101 +1801,292 @@ def render_compact_profile(student, is_own_profile=True):
         st.markdown(f"**Phone:** {student['emergency_country_code'] or ''} {student['emergency_phone'] or ''}")
 
 # ==================== POS MILESTONE RENDERER ====================
+# ==================== POS SUBMISSIONS FUNCTIONS (UPDATED) ====================
+
+def load_pos_submissions():
+    if not os.path.exists(POS_SUBMISSIONS_FILE) or os.path.getsize(POS_SUBMISSIONS_FILE) == 0:
+        return pd.DataFrame(columns=["submission_id", "student_number", "file_path", "upload_date", "version", 
+                                     "status", "approval_date", "approved_by", "remarks", "submission_type",
+                                     "adviser_approved", "gs_approved"])
+    df = pd.read_csv(POS_SUBMISSIONS_FILE, dtype=str)
+    required_cols = ["submission_id", "student_number", "file_path", "upload_date", "version", "status", 
+                     "approval_date", "approved_by", "remarks", "submission_type", "adviser_approved", "gs_approved"]
+    for col in required_cols:
+        if col not in df.columns:
+            df[col] = ""
+    df["submission_id"] = pd.to_numeric(df["submission_id"], errors='coerce').fillna(0).astype(int)
+    df["version"] = pd.to_numeric(df["version"], errors='coerce').fillna(0).astype(int)
+    df["adviser_approved"] = df["adviser_approved"].astype(bool) if "adviser_approved" in df.columns else False
+    df["gs_approved"] = df["gs_approved"].astype(bool) if "gs_approved" in df.columns else False
+    if "submission_type" not in df.columns:
+        df["submission_type"] = ""
+    return df
+
+def save_pos_submissions(df):
+    df.to_csv(POS_SUBMISSIONS_FILE, index=False)
+
+def get_pos_submissions(student_number):
+    df = load_pos_submissions()
+    return df[df["student_number"] == student_number].sort_values("submission_id", ascending=False)
+
+def get_original_pos(student_number):
+    """Return the first approved submission (version 1, status Approved) as the Original POS."""
+    df = load_pos_submissions()
+    original = df[(df["student_number"] == student_number) & 
+                  (df["version"] == 1) & 
+                  (df["status"] == "Approved")]
+    if original.empty:
+        return None
+    return original.iloc[0]
+
+def get_revisions(student_number):
+    """Return all submissions with version >= 2, sorted by version descending."""
+    df = load_pos_submissions()
+    revisions = df[(df["student_number"] == student_number) & (df["version"] >= 2)]
+    return revisions.sort_values("version", ascending=False)
+
+def submit_pos_document(student_number, uploaded_file, submission_type="revision"):
+    """Submit a new POS document. For original, use submission_type='original' (first submission)."""
+    if uploaded_file is None:
+        return False
+    df = load_pos_submissions()
+    student_submissions = df[df["student_number"] == student_number]
+    if student_submissions.empty:
+        new_id = 1
+        version = 1
+        # First submission is always original
+        submission_type = "original"
+    else:
+        new_id = student_submissions["submission_id"].max() + 1
+        version = len(student_submissions) + 1
+    folder = os.path.join(UPLOAD_FOLDER, student_number, "pos_submissions")
+    os.makedirs(folder, exist_ok=True)
+    ext = uploaded_file.name.split('.')[-1].lower()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"POS_v{version}_{timestamp}.{ext}"
+    filepath = os.path.join(folder, filename)
+    with open(filepath, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    new_row = pd.DataFrame([{
+        "submission_id": new_id,
+        "student_number": student_number,
+        "file_path": filepath,
+        "upload_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "version": version,
+        "status": "Pending",
+        "approval_date": "",
+        "approved_by": "",
+        "remarks": "",
+        "submission_type": submission_type,
+        "adviser_approved": False,
+        "gs_approved": False
+    }])
+    df = pd.concat([df, new_row], ignore_index=True)
+    save_pos_submissions(df)
+    update_pos_milestone_status(student_number)
+    return True
+
+def approve_pos_revision(submission_id, reviewer_name, remarks, role):
+    """
+    Approve a revision. Role can be 'adviser' or 'gs'.
+    Adviser approval sets adviser_approved = True.
+    GS approval sets gs_approved = True and status = 'GS Approved'.
+    """
+    df = load_pos_submissions()
+    mask = df["submission_id"] == submission_id
+    if not mask.any():
+        return False, "Submission not found."
+    row = df[mask].iloc[0]
+    if role == "adviser":
+        df.loc[mask, "adviser_approved"] = True
+        df.loc[mask, "status"] = "Adviser Approved"
+        df.loc[mask, "approved_by"] = reviewer_name
+        df.loc[mask, "approval_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if remarks:
+            df.loc[mask, "remarks"] = remarks
+        save_pos_submissions(df)
+        return True, "Revision approved by adviser. Awaiting GS approval."
+    elif role == "gs":
+        df.loc[mask, "gs_approved"] = True
+        df.loc[mask, "status"] = "GS Approved"
+        df.loc[mask, "approved_by"] = reviewer_name
+        df.loc[mask, "approval_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if remarks:
+            df.loc[mask, "remarks"] = remarks
+        save_pos_submissions(df)
+        # Update milestone status
+        student_number = row["student_number"]
+        update_pos_milestone_status(student_number)
+        return True, "Revision approved by Graduate School."
+    else:
+        return False, "Invalid role."
+
+def reject_pos_submission(submission_id, reviewer_name, remarks):
+    df = load_pos_submissions()
+    mask = df["submission_id"] == submission_id
+    if not mask.any():
+        return False
+    df.loc[mask, "status"] = "Rejected"
+    df.loc[mask, "approval_date"] = ""
+    df.loc[mask, "approved_by"] = reviewer_name
+    if remarks:
+        df.loc[mask, "remarks"] = remarks
+    save_pos_submissions(df)
+    student_number = df.loc[mask, "student_number"].iloc[0]
+    update_pos_milestone_status(student_number)
+    return True
+
+# ==================== RENDER POS MILESTONE (SIDE-BY-SIDE) ====================
+
 def render_pos_milestone(student_number, viewer_role, is_own_view=False):
-    submissions = get_pos_submissions(student_number)
-    latest_approved = get_latest_approved_pos(student_number)
-    has_any_submission = not submissions.empty
+    original = get_original_pos(student_number)
+    revisions = get_revisions(student_number)
     
-    st.markdown("### 📄 Current Approved Plan of Study")
-    if latest_approved is not None:
-        st.success("✅ **POS is approved**")
-        approval_date = latest_approved.get("approval_date", "")
-        if approval_date:
-            st.caption(f"**Approved on:** {approval_date}")
-        file_path = latest_approved.get("file_path", "")
-        if file_path and os.path.exists(file_path):
-            with open(file_path, "rb") as f:
-                st.download_button("📎 Download current POS", f, file_name=os.path.basename(file_path))
+    # Determine if user can submit revisions
+    can_submit = (is_own_view or viewer_role == "SESAM Staff")
+    # Adviser can approve revisions; Staff can approve as GS
+    is_adviser = (viewer_role == "Faculty Adviser")
+    is_staff = (viewer_role == "SESAM Staff")
+    
+    st.markdown("## Plan of Study (POS) – Version Control")
+    
+    # Two columns: Left = Revisions, Right = Original
+    col_left, col_right = st.columns(2, gap="large")
+    
+    # ==================== LEFT COLUMN: REVISED POS ====================
+    with col_left:
+        st.markdown("### 📝 Revised POS (Updated Versions)")
+        st.caption("Student proposes changes → Adviser reviews → GS approves")
+        
+        # Show all revisions
+        if revisions.empty:
+            st.info("No revised POS submissions yet.")
         else:
-            st.info("Approved POS document not found on server.")
-        st.markdown("---")
-    else:
-        st.info("No approved POS document yet. Please submit your initial POS for approval.")
-        st.markdown("---")
-    
-    st.markdown("### 📋 Submission History")
-    if submissions.empty:
-        st.info("No POS submissions found.")
-    else:
-        for idx, sub in submissions.iterrows():
-            with st.container(border=True):
-                col_info, col_status = st.columns([3,1])
-                with col_info:
-                    st.write(f"**Version {sub['version']}** (Uploaded: {sub['upload_date']})")
-                    if sub["status"] == "Pending":
-                        st.warning("Status: Pending approval")
-                    elif sub["status"] == "Approved":
-                        st.success("Status: Approved")
-                        if sub["approval_date"]:
-                            st.caption(f"Approved on: {sub['approval_date']} by {sub['approved_by']}")
-                    elif sub["status"] == "Rejected":
-                        st.error("Status: Rejected")
-                        if sub["remarks"]:
-                            st.caption(f"Remarks: {sub['remarks']}")
-                    if sub["file_path"] and os.path.exists(sub["file_path"]):
-                        with open(sub["file_path"], "rb") as f:
-                            st.download_button("📎 Download", f, file_name=os.path.basename(sub["file_path"]), key=f"download_{sub['submission_id']}")
-                with col_status:
-                    if viewer_role == "Faculty Adviser" and sub["status"] == "Pending":
-                        with st.form(key=f"review_pos_{sub['submission_id']}"):
-                            remarks = st.text_area("Remarks", key=f"remarks_{sub['submission_id']}")
-                            col_app, col_rej = st.columns(2)
-                            if col_app.form_submit_button("✅ Approve", use_container_width=True):
-                                if approve_pos_submission(sub['submission_id'], st.session_state.display_name, remarks):
-                                    st.success("POS approved.")
+            for _, rev in revisions.iterrows():
+                with st.container(border=True):
+                    st.markdown(f"**Version {rev['version']}** – Uploaded: {rev['upload_date']}")
+                    status = rev["status"]
+                    if status == "Pending":
+                        st.warning("🟡 Status: Pending (Awaiting Adviser Review)")
+                    elif status == "Adviser Approved":
+                        st.info("🔵 Status: Adviser Approved – Awaiting GS Approval")
+                    elif status == "GS Approved":
+                        st.success("✅ Status: GS Approved")
+                    elif status == "Rejected":
+                        st.error("❌ Status: Rejected")
+                    else:
+                        st.write(f"Status: {status}")
+                    
+                    if rev["remarks"]:
+                        st.caption(f"Remarks: {rev['remarks']}")
+                    if rev["file_path"] and os.path.exists(rev["file_path"]):
+                        with open(rev["file_path"], "rb") as f:
+                            st.download_button("📎 Download", f, file_name=os.path.basename(rev["file_path"]), key=f"download_rev_{rev['submission_id']}")
+                    
+                    # Approval actions based on role and current status
+                    if is_adviser and status == "Pending":
+                        with st.form(key=f"adviser_rev_{rev['submission_id']}"):
+                            remarks = st.text_area("Remarks (optional)", key=f"rev_remarks_{rev['submission_id']}")
+                            if st.form_submit_button("✅ Approve as Adviser", use_container_width=True):
+                                success, msg = approve_pos_revision(rev['submission_id'], st.session_state.display_name, remarks, "adviser")
+                                if success:
+                                    st.success(msg)
                                     st.rerun()
                                 else:
-                                    st.error("Approval failed.")
-                            if col_rej.form_submit_button("❌ Reject", use_container_width=True):
-                                if reject_pos_submission(sub['submission_id'], st.session_state.display_name, remarks):
-                                    st.warning("POS rejected.")
+                                    st.error(msg)
+                            if st.form_submit_button("❌ Reject", use_container_width=True):
+                                if reject_pos_submission(rev['submission_id'], st.session_state.display_name, remarks):
+                                    st.warning("Revision rejected.")
                                     st.rerun()
                                 else:
                                     st.error("Rejection failed.")
+                    elif is_staff and status == "Adviser Approved":
+                        with st.form(key=f"gs_rev_{rev['submission_id']}"):
+                            remarks = st.text_area("Remarks (optional)", key=f"gs_rev_remarks_{rev['submission_id']}")
+                            if st.form_submit_button("🏛️ Approve as Graduate School", use_container_width=True):
+                                success, msg = approve_pos_revision(rev['submission_id'], st.session_state.display_name, remarks, "gs")
+                                if success:
+                                    st.success(msg)
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
+                            if st.form_submit_button("❌ Reject", use_container_width=True):
+                                if reject_pos_submission(rev['submission_id'], st.session_state.display_name, remarks):
+                                    st.warning("Revision rejected.")
+                                    st.rerun()
+                                else:
+                                    st.error("Rejection failed.")
+        
+        # Submit new revision
+        if can_submit:
+            st.markdown("---")
+            st.markdown("### 📤 Submit Revised POS")
+            with st.form(key=f"submit_revision_{student_number}"):
+                uploaded_file = st.file_uploader("Upload revised POS (PDF/JPG/PNG) - Max 5MB", type=["pdf","jpg","jpeg","png"], key=f"revised_pos_{student_number}")
+                if st.form_submit_button("Submit Revised Version", use_container_width=True):
+                    if uploaded_file:
+                        if uploaded_file.size > 5 * 1024 * 1024:
+                            st.error("File size exceeds 5MB.")
+                        else:
+                            if submit_pos_document(student_number, uploaded_file, submission_type="revision"):
+                                st.success("Revised POS submitted for review.")
+                                st.rerun()
+                            else:
+                                st.error("Submission failed.")
+                    else:
+                        st.error("Please select a file.")
+    
+    # ==================== RIGHT COLUMN: ORIGINAL POS ====================
+    with col_right:
+        st.markdown("### 🏛️ Original Approved POS (Graduate School Baseline)")
+        st.caption("Official GS‑approved document – read only for adviser")
+        
+        if original is None:
+            if can_submit:
+                st.warning("No original POS has been submitted yet. Please upload the initial POS for GS approval.")
+                with st.form(key=f"submit_original_{student_number}"):
+                    uploaded_file = st.file_uploader("Upload initial POS (PDF/JPG/PNG)", type=["pdf","jpg","jpeg","png"], key=f"original_pos_{student_number}")
+                    if st.form_submit_button("Submit Initial POS for GS Approval", use_container_width=True):
+                        if uploaded_file:
+                            if uploaded_file.size > 5 * 1024 * 1024:
+                                st.error("File size exceeds 5MB.")
+                            else:
+                                if submit_pos_document(student_number, uploaded_file, submission_type="original"):
+                                    st.success("Initial POS submitted. Awaiting GS approval.")
+                                    st.rerun()
+                                else:
+                                    st.error("Submission failed.")
+                        else:
+                            st.error("Please select a file.")
+            else:
+                st.info("No original POS document has been approved by the Graduate School yet.")
+        else:
+            # Display original POS details
+            st.success(f"✅ GS Approved on: {original['approval_date']}")
+            if original["file_path"] and os.path.exists(original["file_path"]):
+                with open(original["file_path"], "rb") as f:
+                    st.download_button("📎 Download Original POS", f, file_name=os.path.basename(original["file_path"]))
+            else:
+                st.info("Document file not available.")
+            
+            # Adviser verification (only for advisers, not for students)
+            if is_adviser and not is_own_view:
+                st.markdown("---")
+                st.markdown("#### 🔍 Adviser Verification")
+                # We can add a simple button to mark as verified (no change to document)
+                if "original_verified" not in st.session_state:
+                    st.session_state.original_verified = False
+                if not st.session_state.original_verified:
+                    if st.button("✅ Mark as Verified (I have reviewed the original POS)"):
+                        st.session_state.original_verified = True
+                        st.success("You have verified the original POS. Thank you.")
+                        # Optionally log verification in remarks
+                        # For persistence, we could add a field in student record, but keeping simple.
+                else:
+                    st.info("You have already verified this original POS.")
     
     st.markdown("---")
-    if (is_own_view or viewer_role == "SESAM Staff") and not has_any_submission:
-        st.markdown("### 📤 Initial POS Submission")
-        st.info("Submit your first Plan of Study for approval.")
-        with st.form(key=f"submit_initial_pos_{student_number}"):
-            uploaded_file = st.file_uploader("Upload initial POS document (PDF/JPG/PNG)", type=["pdf","jpg","jpeg","png"], key=f"initial_pos_{student_number}")
-            if st.form_submit_button("Submit Initial POS for Approval", use_container_width=True):
-                if uploaded_file:
-                    if submit_pos_document(student_number, uploaded_file):
-                        st.success("Initial POS submitted for approval.")
-                        st.rerun()
-                    else:
-                        st.error("Submission failed.")
-                else:
-                    st.error("Please select a file.")
-    
-    if (is_own_view or viewer_role == "SESAM Staff") and has_any_submission:
-        st.markdown("### 📤 Submit Revised POS")
-        st.info("If you need to update your Plan of Study, upload a revised version here. The new version will require adviser approval.")
-        with st.form(key=f"submit_revised_pos_{student_number}"):
-            uploaded_file = st.file_uploader("Upload revised POS document (PDF/JPG/PNG)", type=["pdf","jpg","jpeg","png"], key=f"revised_pos_{student_number}")
-            if st.form_submit_button("Submit Revised POS for Approval", use_container_width=True):
-                if uploaded_file:
-                    if submit_pos_document(student_number, uploaded_file):
-                        st.success("Revised POS submitted for approval.")
-                        st.rerun()
-                    else:
-                        st.error("Submission failed.")
-                else:
-                    st.error("Please select a file.")
-    
-    if not (is_own_view or viewer_role == "SESAM Staff"):
-        st.info("Only the student or staff can submit POS documents.")
+    st.caption("Note: The original POS is the first version approved by GS. Revisions go through Adviser → GS approval.")
 
 # ==================== UNIFIED STUDENT PROFILE VIEW ====================
 def view_student_profile(student_number, viewer_role):
@@ -1857,7 +2095,6 @@ def view_student_profile(student_number, viewer_role):
     program_type = get_program_type(student["program"])
     
     is_staff = (viewer_role == "SESAM Staff")
-    is_adviser = (viewer_role == "Faculty Adviser")
     
     can_edit_subjects = False
     if is_staff:
@@ -1913,7 +2150,7 @@ def view_student_profile(student_number, viewer_role):
         else:
             st.markdown(f"**External Reviewer:** {student.get('external_reviewer','Not assigned')}")
     
-    # ---- Coursework Tab (with POS warnings) ----
+    # ---- Coursework Tab (with POS warnings and on‑demand semester creation) ----
     with tabs[1]:
         st.subheader("Academic Record")
         
@@ -1921,35 +2158,39 @@ def view_student_profile(student_number, viewer_role):
         total_terms = len(timeline)
         existing_sems = get_student_semesters(student_number)
         
-        # Create missing semesters
-        for ay, sem in timeline:
-            if not ((existing_sems["academic_year"] == ay) & (existing_sems["semester"] == sem)).any():
-                try:
-                    add_semester_record(student_number, ay, sem, [], semester_status="Regular")
-                except ValueError as e:
-                    st.error(str(e))
-        
         semesters = get_student_semesters(student_number)
-        sem_order = {"1st Sem": 0, "2nd Sem": 1, "Summer": 2}
-        semesters["order"] = semesters["semester"].map(sem_order)
-        semesters["ay_num"] = semesters["academic_year"].apply(lambda x: int(x.split("-")[0]))
-        semesters = semesters.sort_values(["ay_num", "order"]).reset_index(drop=True)
-        
-        # No POS warnings in staff/adviser view – they can manage
+        if not semesters.empty:
+            sem_order = {"1st Sem": 0, "2nd Sem": 1, "Summer": 2}
+            semesters["order"] = semesters["semester"].map(sem_order)
+            semesters["ay_num"] = semesters["academic_year"].apply(lambda x: int(x.split("-")[0]))
+            semesters = semesters.sort_values(["ay_num", "order"]).reset_index(drop=True)
         
         for _, row in semesters.iterrows():
             render_semester_block_general(student_number, row, is_staff=True, override_edit=can_edit_subjects)
         
         if can_edit_subjects and len(semesters) < total_terms:
-            if st.button("➕ Add Next Semester (Staff Only)"):
-                last_sem = semesters.iloc[-1] if not semesters.empty else None
-                if last_sem is not None:
-                    create_next_semester(student_number, last_sem["academic_year"], last_sem["semester"])
-                else:
-                    create_next_semester(student_number, timeline[0][0], timeline[0][1])
-                st.rerun()
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("➕ Add Next Semester (Staff Only)"):
+                    last_sem = semesters.iloc[-1] if not semesters.empty else None
+                    if last_sem is not None:
+                        create_next_semester(student_number, last_sem["academic_year"], last_sem["semester"])
+                    else:
+                        create_next_semester(student_number, timeline[0][0], timeline[0][1])
+                    st.rerun()
+            with col2:
+                if st.button("📅 Create All Missing Semesters (Bulk)") and can_edit_subjects:
+                    for ay, sem in timeline:
+                        if not ((existing_sems["academic_year"] == ay) & (existing_sems["semester"] == sem)).any():
+                            try:
+                                add_semester_record(student_number, ay, sem, [], semester_status="Regular")
+                            except ValueError as e:
+                                st.error(f"Could not create {ay} {sem}: {e}")
+                                break
+                    st.success("All missing semesters created (where allowed by policy).")
+                    st.rerun()
         elif can_edit_subjects:
-            st.success("✅ All required semesters have been created.")
+            st.success("✅ All required semesters have been created. Student may still need to enroll in subjects.")
         
         st.markdown("---")
         cola, colb, colc, cold = st.columns(4)
@@ -1959,7 +2200,7 @@ def view_student_profile(student_number, viewer_role):
         gwa_val = student["gwa"] if pd.notna(student["gwa"]) else None
         cold.metric("Cumulative GWA", f"{gwa_val:.2f}" if gwa_val is not None else "—")
     
-    # ---- Milestone Tabs (unchanged) ----
+    # ---- Milestone Tabs ----
     milestones_df = get_student_milestones(student_number, program_type)
     for i, milestone_name in enumerate(milestone_list):
         with tabs[2 + i]:
@@ -1992,97 +2233,142 @@ def view_student_profile(student_number, viewer_role):
                 if status == "Rejected" and remarks:
                     st.error(f"**Rejection reason:** {remarks}")
                 
-                if milestone_name in ["Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
+                # Committee milestone with two‑panel layout
+                if milestone_name in ["Guidance Committee Members", "Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
                     committee_members = get_committee_members(student_number)
-                    if committee_members:
-                        st.markdown("**Committee Members:**")
-                        for member in committee_members:
-                            st.write(f"- {member.get('name', '')} ({member.get('role', 'Member')})")
-                    else:
-                        st.info("No committee members have been added yet.")
+                    
+                    # Two-column layout: left = member list, right = management
+                    col_left, col_right = st.columns([1, 1])
+                    
+                    with col_left:
+                        st.markdown("#### 📋 Committee Members")
+                        if committee_members:
+                            for member in committee_members:
+                                st.write(f"- **{member.get('name', '')}** ({member.get('role', 'Member')})")
+                        else:
+                            st.info("No committee members added yet.")
+                    
+                    with col_right:
+                        st.markdown("#### ✏️ Manage Committee")
+                        if status != "Approved":
+                            edit_key = f"committee_edit_{student_number}"
+                            if edit_key not in st.session_state:
+                                st.session_state[edit_key] = committee_members.copy() if committee_members else []
+                            
+                            remove_indices = []
+                            for idx, member in enumerate(st.session_state[edit_key]):
+                                with st.container():
+                                    col_name, col_role, col_del = st.columns([2, 1.5, 0.5])
+                                    with col_name:
+                                        new_name = st.text_input("Name", value=member.get("name", ""), key=f"name_{idx}_{student_number}", placeholder="Firstname Lastname")
+                                    with col_role:
+                                        new_role = st.selectbox("Role", ["Chair", "Co-chair", "Member"], index=["Chair","Co-chair","Member"].index(member.get("role", "Member")), key=f"role_{idx}_{student_number}")
+                                    with col_del:
+                                        if st.button("🗑️", key=f"remove_{idx}_{student_number}"):
+                                            remove_indices.append(idx)
+                                    st.session_state[edit_key][idx] = {"name": new_name, "role": new_role}
+                            
+                            for idx in sorted(remove_indices, reverse=True):
+                                st.session_state[edit_key].pop(idx)
+                                st.rerun()
+                            
+                            if st.button("➕ Add Committee Member"):
+                                st.session_state[edit_key].append({"name": "", "role": "Member"})
+                                st.rerun()
+                            
+                            if st.button("💾 Save Committee Members"):
+                                chairs = [m for m in st.session_state[edit_key] if m.get("role") == "Chair"]
+                                if len(chairs) != 1:
+                                    st.error("Committee must have exactly one Chair.")
+                                elif any(not m.get("name", "").strip() for m in st.session_state[edit_key]):
+                                    st.error("All members must have a name (Firstname Lastname).")
+                                else:
+                                    valid, msg = set_committee_members(student_number, st.session_state[edit_key])
+                                    if valid:
+                                        st.success(msg)
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
+                        else:
+                            st.info("Committee already approved. No further changes allowed.")
+                    
+                    st.markdown("---")
+                    
+                    if status == "Not Started":
+                        st.warning("⚠️ **Requirement not yet submitted.** Please upload the required document and submit for approval.")
                     
                     if status != "Approved":
-                        st.subheader("Manage Committee Members")
-                        committee_members = get_committee_members(student_number)
-                        edit_key = f"committee_edit_{student_number}"
-                        if edit_key not in st.session_state:
-                            st.session_state[edit_key] = committee_members.copy() if committee_members else []
-                        
-                        if len(st.session_state[edit_key]) == 0:
-                            st.info("No committee members added yet. Add members below.")
-                        
-                        remove_indices = []
-                        for idx, member in enumerate(st.session_state[edit_key]):
-                            col1, col2, col3 = st.columns([2,2,1])
-                            with col1:
-                                new_name = st.text_input("Name", value=member.get("name", ""), key=f"name_{idx}_{student_number}")
-                            with col2:
-                                new_role = st.selectbox("Role", ["Chair", "Co-chair", "Member"], index=["Chair","Co-chair","Member"].index(member.get("role", "Member")), key=f"role_{idx}_{student_number}")
-                            with col3:
-                                if st.button("🗑️ Remove", key=f"remove_{idx}_{student_number}"):
-                                    remove_indices.append(idx)
-                            st.session_state[edit_key][idx] = {"name": new_name, "role": new_role}
-                        
-                        for idx in sorted(remove_indices, reverse=True):
-                            st.session_state[edit_key].pop(idx)
-                            st.rerun()
-                        
-                        if st.button("➕ Add Committee Member"):
-                            st.session_state[edit_key].append({"name": "", "role": "Member"})
-                            st.rerun()
-                        
-                        if st.button("💾 Save Committee Members"):
-                            valid = True
-                            for m in st.session_state[edit_key]:
-                                if not m.get("name", "").strip():
-                                    st.error("All members must have a name.")
-                                    valid = False
-                                    break
-                            if valid:
-                                set_committee_members(student_number, st.session_state[edit_key])
-                                st.success("Committee members saved.")
-                                st.rerun()
-                
-                if status == "Not Started":
-                    st.warning("⚠️ **Requirement not yet submitted.** Please upload the required document and submit for approval.")
-                
-                if status != "Approved":
-                    if viewer_role == "Student" or (viewer_role == "SESAM Staff"):
                         with st.form(key=f"submit_{milestone_name}_{student_number}"):
                             st.markdown("**Required document:** Please upload the official form or certificate for this milestone.")
-                            uploaded_file = st.file_uploader("Upload document (PDF/JPG/PNG)", type=["pdf","jpg","jpeg","png"], key=f"upload_{milestone_name}_{student_number}")
+                            uploaded_file = st.file_uploader(
+                                "Upload document (PDF/JPG/PNG) - Max 5MB",
+                                type=["pdf", "jpg", "jpeg", "png"],
+                                key=f"upload_{milestone_name}_{student_number}"
+                            )
                             date_completed = st.date_input("Date of completion/event", value=date.today())
                             if st.form_submit_button("Submit for Approval", use_container_width=True):
                                 if not uploaded_file:
                                     st.error("Please upload a document.")
+                                elif uploaded_file.size > 5 * 1024 * 1024:
+                                    st.error("File size exceeds 5MB. Please compress or choose a smaller file.")
                                 else:
                                     filepath = save_milestone_file(student_number, milestone_name, uploaded_file)
-                                    if update_milestone(student_number, milestone_name, "Pending", date_completed.strftime("%Y-%m-%d"), filepath, "", None):
+                                    success, msg = update_milestone(student_number, milestone_name, "Pending", date_completed.strftime("%Y-%m-%d"), filepath, "", None)
+                                    if success:
                                         st.success(f"{milestone_name} submitted for approval.")
                                         st.rerun()
                                     else:
-                                        st.error("Submission failed due to policy rules.")
+                                        st.error(msg)
                     else:
-                        st.info("Only the student or staff can submit milestone requirements.")
+                        st.success("✅ This milestone has been approved.")
                 
-                if status == "Pending" and viewer_role == "Faculty Adviser":
-                    st.markdown("---")
-                    st.markdown("**Review this milestone**")
-                    with st.form(key=f"review_{milestone_name}_{student_number}"):
-                        review_remarks = st.text_area("Remarks (optional)", key=f"review_remarks_{milestone_name}_{student_number}")
-                        col_app, col_rej = st.columns(2)
-                        if col_app.form_submit_button("✅ Approve", use_container_width=True):
-                            if update_milestone(student_number, milestone_name, "Approved", None, None, review_remarks, st.session_state.display_name):
-                                st.success("Milestone approved.")
-                                st.rerun()
-                            else:
-                                st.error("Approval failed.")
-                        if col_rej.form_submit_button("❌ Reject", use_container_width=True):
-                            if update_milestone(student_number, milestone_name, "Rejected", None, None, review_remarks, st.session_state.display_name):
-                                st.warning("Milestone rejected.")
-                                st.rerun()
-                            else:
-                                st.error("Rejection failed.")
+                # Non‑committee milestones (unchanged)
+                else:
+                    if status == "Not Started":
+                        st.warning("⚠️ **Requirement not yet submitted.** Please upload the required document and submit for approval.")
+                    
+                    if status != "Approved":
+                        if viewer_role == "Student" or (viewer_role == "SESAM Staff"):
+                            with st.form(key=f"submit_{milestone_name}_{student_number}"):
+                                st.markdown("**Required document:** Please upload the official form or certificate for this milestone.")
+                                uploaded_file = st.file_uploader("Upload document (PDF/JPG/PNG) - Max 5MB", type=["pdf","jpg","jpeg","png"], key=f"upload_{milestone_name}_{student_number}")
+                                date_completed = st.date_input("Date of completion/event", value=date.today())
+                                if st.form_submit_button("Submit for Approval", use_container_width=True):
+                                    if not uploaded_file:
+                                        st.error("Please upload a document.")
+                                    elif uploaded_file.size > 5 * 1024 * 1024:
+                                        st.error("File size exceeds 5MB.")
+                                    else:
+                                        filepath = save_milestone_file(student_number, milestone_name, uploaded_file)
+                                        success, msg = update_milestone(student_number, milestone_name, "Pending", date_completed.strftime("%Y-%m-%d"), filepath, "", None)
+                                        if success:
+                                            st.success(f"{milestone_name} submitted for approval.")
+                                            st.rerun()
+                                        else:
+                                            st.error(msg)
+                        else:
+                            st.info("Only the student or staff can submit milestone requirements.")
+                    
+                    if status == "Pending" and viewer_role == "Faculty Adviser":
+                        st.markdown("---")
+                        st.markdown("**Review this milestone**")
+                        with st.form(key=f"review_{milestone_name}_{student_number}"):
+                            review_remarks = st.text_area("Remarks (optional)", key=f"review_remarks_{milestone_name}_{student_number}")
+                            col_app, col_rej = st.columns(2)
+                            if col_app.form_submit_button("✅ Approve", use_container_width=True):
+                                success, msg = update_milestone(student_number, milestone_name, "Approved", None, None, review_remarks, st.session_state.display_name)
+                                if success:
+                                    st.success("Milestone approved.")
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
+                            if col_rej.form_submit_button("❌ Reject", use_container_width=True):
+                                success, msg = update_milestone(student_number, milestone_name, "Rejected", None, None, review_remarks, st.session_state.display_name)
+                                if success:
+                                    st.warning("Milestone rejected.")
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
     
     # ---- Admin Controls Tab (Staff only) ----
     if is_staff:
@@ -2163,11 +2449,8 @@ def student_dashboard():
         st.session_state.profile_update_success = False
     
     st.subheader(f"📘 Your Dashboard – {student['name']}")
+    st.info("ℹ️ **Note:** The adviser shown above is a **temporary adviser** assigned upon admission. Once your Guidance/Advisory Committee is formed and approved, a transfer request will be sent to the Chair. You will be officially transferred only when the Chair accepts.")
     
-    # Informational note about temporary adviser vs permanent committee
-    st.info("ℹ️ **Note:** The adviser shown above is a **temporary adviser** assigned upon admission. Once your Guidance/Advisory Committee is formed and approved, that committee will take over milestone approvals.")
-    
-    # Required fields check
     required_fields_missing = False
     missing_fields = []
     if not student.get("address") or student.get("address") == "":
@@ -2180,7 +2463,6 @@ def student_dashboard():
         required_fields_missing = True
         st.warning(f"⚠️ **Required Information Missing**\n\nPlease complete the following fields in your Profile before accessing your coursework: {', '.join(missing_fields)}")
     
-    # Check if student is in first semester (exactly one semester exists) and POS not approved
     existing_sems = get_student_semesters(student["student_number"])
     if len(existing_sems) == 1 and student.get("pos_status", "Pending") != "Approved":
         st.warning("⚠️ **Action Required:** You are in your first semester. Your Plan of Study (POS) must be approved by your adviser before the end of this semester to allow enrollment in the second semester. Please work with your adviser to complete and approve your POS.")
@@ -2201,7 +2483,6 @@ def student_dashboard():
             st.markdown(f'<div class="warning-banner">⚠️ {inc["course"]} ({inc["semester"]}) INC/4.0 deadline in {inc["days_left"]} days ({inc["deadline"]}).</div>', unsafe_allow_html=True)
     
     semester_count = len(get_student_semesters(student["student_number"]))
-    # Warning only after second semester if POS not approved (additional safeguard)
     if semester_count >= 2 and is_master_program(student["program"]) and student.get("pos_status","Pending") != "Approved":
         st.markdown('<div class="danger-banner">⚠️ Your Plan of Study (POS) is not yet approved. You will not be able to register for the next semester until it is approved. Please contact your adviser.</div>', unsafe_allow_html=True)
     
@@ -2272,7 +2553,7 @@ def student_dashboard():
                         else:
                             st.error("Student record not found.")
     
-    # ---- Coursework Tab (with POS warnings and blocking) ----
+    # ---- Coursework Tab (with on‑demand semester creation) ----
     with main_tabs[1]:
         if required_fields_missing:
             st.error("❌ **Cannot access Coursework**\n\nPlease complete your profile information (Address, Phone Number, and Institutional Email) before proceeding to your coursework.")
@@ -2282,40 +2563,39 @@ def student_dashboard():
         
         timeline = generate_timeline(student["ay_start"], student["semester"], student["program"])
         total_terms = len(timeline)
-        existing_sems = get_student_semesters(student["student_number"])
         
-        # Create missing semesters – this will block if second semester and POS not approved
-        for ay, sem in timeline:
-            if not ((existing_sems["academic_year"] == ay) & (existing_sems["semester"] == sem)).any():
-                try:
-                    add_semester_record(student["student_number"], ay, sem, [], semester_status="Regular")
-                except ValueError as e:
-                    st.error(str(e))
-                    # If error occurs (POS not approved for second semester), break out of loop
-                    break
-        
-        # Reload semesters after potential creation
         semesters = get_student_semesters(student["student_number"])
-        sem_order = {"1st Sem": 0, "2nd Sem": 1, "Summer": 2}
-        semesters["order"] = semesters["semester"].map(sem_order)
-        semesters["ay_num"] = semesters["academic_year"].apply(lambda x: int(x.split("-")[0]))
-        semesters = semesters.sort_values(["ay_num", "order"]).reset_index(drop=True)
+        if not semesters.empty:
+            sem_order = {"1st Sem": 0, "2nd Sem": 1, "Summer": 2}
+            semesters["order"] = semesters["semester"].map(sem_order)
+            semesters["ay_num"] = semesters["academic_year"].apply(lambda x: int(x.split("-")[0]))
+            semesters = semesters.sort_values(["ay_num", "order"]).reset_index(drop=True)
         
-        # Display semester blocks
         for _, row in semesters.iterrows():
             render_semester_block_general(student["student_number"], row, is_staff=False, override_edit=False)
         
-        # Add Next Semester button only if within timeline and POS is approved (checked inside create_next_semester)
         if len(semesters) < total_terms:
-            if st.button("➕ Add Next Semester"):
-                last_sem = semesters.iloc[-1] if not semesters.empty else None
-                if last_sem is not None:
-                    create_next_semester(student["student_number"], last_sem["academic_year"], last_sem["semester"])
-                else:
-                    create_next_semester(student["student_number"], timeline[0][0], timeline[0][1])
-                st.rerun()
+            pos_ok = True
+            if len(semesters) >= 1 and student.get("pos_status") != "Approved":
+                pos_ok = False
+                st.warning("⚠️ Your Plan of Study (POS) must be approved before you can add the next semester. Please work with your adviser.")
+            
+            if pos_ok:
+                if st.button("➕ Add Next Semester"):
+                    if not semesters.empty:
+                        last_sem = semesters.iloc[-1]
+                        success = create_next_semester(student["student_number"], last_sem["academic_year"], last_sem["semester"])
+                    else:
+                        success = create_next_semester(student["student_number"], f"{student['ay_start']}-{student['ay_start']+1}", student["semester"])
+                    if success:
+                        st.rerun()
         else:
-            st.success("✅ All required semesters have been created. You have completed the full coursework timeline.")
+            total_taken = student["total_units_taken"] if not pd.isna(student["total_units_taken"]) else 0
+            total_required = student["total_units_required"] if not pd.isna(student["total_units_required"]) else 24
+            if total_taken >= total_required:
+                st.success("✅ You have earned the required number of units. Please request your adviser to approve the **Graduation Clearance** milestone to complete your coursework.")
+            else:
+                st.info(f"📚 You have created all {total_terms} semester(s). Continue enrolling in subjects to meet the required {total_required} units (currently {total_taken}).")
         
         st.markdown("---")
         st.subheader("📊 Cumulative Summary")
@@ -2342,7 +2622,7 @@ def student_dashboard():
         with col_btn2:
             st.caption("⚠️ Only **saved subjects** are included. Use 'Save Subjects' before refreshing.")
     
-    # ---- Milestone Tabs (unchanged) ----
+    # ---- Milestone Tabs (student view, with two‑panel committee interface) ----
     for i, milestone_name in enumerate(milestone_list):
         with main_tabs[2 + i]:
             if milestone_name == "Plan of Study (POS)":
@@ -2374,84 +2654,126 @@ def student_dashboard():
                 if status == "Rejected" and remarks:
                     st.error(f"**Rejection reason:** {remarks}")
                 
-                if milestone_name in ["Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
+                # Committee milestone with two‑panel layout
+                if milestone_name in ["Guidance Committee Members", "Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
                     committee_members = get_committee_members(student["student_number"])
-                    if committee_members:
-                        st.markdown("**Committee Members:**")
-                        for member in committee_members:
-                            st.write(f"- {member.get('name', '')} ({member.get('role', 'Member')})")
-                    else:
-                        st.info("No committee members have been added yet.")
+                    
+                    col_left, col_right = st.columns([1, 1])
+                    
+                    with col_left:
+                        st.markdown("#### 📋 Committee Members")
+                        if committee_members:
+                            for member in committee_members:
+                                st.write(f"- **{member.get('name', '')}** ({member.get('role', 'Member')})")
+                        else:
+                            st.info("No committee members added yet.")
+                    
+                    with col_right:
+                        st.markdown("#### ✏️ Manage Committee")
+                        if status != "Approved":
+                            edit_key = f"committee_edit_{student['student_number']}"
+                            if edit_key not in st.session_state:
+                                st.session_state[edit_key] = committee_members.copy() if committee_members else []
+                            
+                            remove_indices = []
+                            for idx, member in enumerate(st.session_state[edit_key]):
+                                with st.container():
+                                    col_name, col_role, col_del = st.columns([2, 1.5, 0.5])
+                                    with col_name:
+                                        new_name = st.text_input("Name", value=member.get("name", ""), key=f"name_{idx}_{student['student_number']}", placeholder="Firstname Lastname")
+                                    with col_role:
+                                        new_role = st.selectbox("Role", ["Chair", "Co-chair", "Member"], index=["Chair","Co-chair","Member"].index(member.get("role", "Member")), key=f"role_{idx}_{student['student_number']}")
+                                    with col_del:
+                                        if st.button("🗑️", key=f"remove_{idx}_{student['student_number']}"):
+                                            remove_indices.append(idx)
+                                    st.session_state[edit_key][idx] = {"name": new_name, "role": new_role}
+                            
+                            for idx in sorted(remove_indices, reverse=True):
+                                st.session_state[edit_key].pop(idx)
+                                st.rerun()
+                            
+                            if st.button("➕ Add Committee Member"):
+                                st.session_state[edit_key].append({"name": "", "role": "Member"})
+                                st.rerun()
+                            
+                            if st.button("💾 Save Committee Members"):
+                                chairs = [m for m in st.session_state[edit_key] if m.get("role") == "Chair"]
+                                if len(chairs) != 1:
+                                    st.error("Committee must have exactly one Chair.")
+                                elif any(not m.get("name", "").strip() for m in st.session_state[edit_key]):
+                                    st.error("All members must have a name (Firstname Lastname).")
+                                else:
+                                    valid, msg = set_committee_members(student["student_number"], st.session_state[edit_key])
+                                    if valid:
+                                        st.success(msg)
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
+                        else:
+                            st.info("Committee already approved. No further changes allowed.")
+                    
+                    st.markdown("---")
+                    
+                    if status == "Not Started":
+                        st.warning("⚠️ **Requirement not yet submitted.** Please upload the required document and submit for approval.")
                     
                     if status != "Approved":
-                        st.subheader("Manage Committee Members")
-                        committee_members = get_committee_members(student["student_number"])
-                        edit_key = f"committee_edit_{student['student_number']}"
-                        if edit_key not in st.session_state:
-                            st.session_state[edit_key] = committee_members.copy() if committee_members else []
-                        
-                        if len(st.session_state[edit_key]) == 0:
-                            st.info("No committee members added yet. Add members below.")
-                        
-                        remove_indices = []
-                        for idx, member in enumerate(st.session_state[edit_key]):
-                            col1, col2, col3 = st.columns([2,2,1])
-                            with col1:
-                                new_name = st.text_input("Name", value=member.get("name", ""), key=f"name_{idx}_{student['student_number']}")
-                            with col2:
-                                new_role = st.selectbox("Role", ["Chair", "Co-chair", "Member"], index=["Chair","Co-chair","Member"].index(member.get("role", "Member")), key=f"role_{idx}_{student['student_number']}")
-                            with col3:
-                                if st.button("🗑️ Remove", key=f"remove_{idx}_{student['student_number']}"):
-                                    remove_indices.append(idx)
-                            st.session_state[edit_key][idx] = {"name": new_name, "role": new_role}
-                        
-                        for idx in sorted(remove_indices, reverse=True):
-                            st.session_state[edit_key].pop(idx)
-                            st.rerun()
-                        
-                        if st.button("➕ Add Committee Member"):
-                            st.session_state[edit_key].append({"name": "", "role": "Member"})
-                            st.rerun()
-                        
-                        if st.button("💾 Save Committee Members"):
-                            valid = True
-                            for m in st.session_state[edit_key]:
-                                if not m.get("name", "").strip():
-                                    st.error("All members must have a name.")
-                                    valid = False
-                                    break
-                            if valid:
-                                set_committee_members(student["student_number"], st.session_state[edit_key])
-                                st.success("Committee members saved.")
-                                st.rerun()
-                
-                if status == "Not Started":
-                    st.warning("⚠️ **Requirement not yet submitted.** Please upload the required document and submit for approval.")
-                
-                if status != "Approved":
-                    with st.form(key=f"student_submit_{milestone_name}_{student['student_number']}"):
-                        st.markdown("**Required document:** Please upload the official form or certificate for this milestone.")
-                        uploaded_file = st.file_uploader("Upload document (PDF/JPG/PNG)", type=["pdf","jpg","jpeg","png"], key=f"upload_student_{milestone_name}_{student['student_number']}")
-                        date_completed = st.date_input("Date of completion/event", value=date.today())
-                        if st.form_submit_button("Submit for Approval", use_container_width=True):
-                            if not uploaded_file:
-                                st.error("Please upload a document.")
-                            else:
-                                filepath = save_milestone_file(student["student_number"], milestone_name, uploaded_file)
-                                if update_milestone(student["student_number"], milestone_name, "Pending", date_completed.strftime("%Y-%m-%d"), filepath, "", None):
-                                    st.success(f"{milestone_name} submitted for approval.")
-                                    st.rerun()
+                        with st.form(key=f"student_submit_{milestone_name}_{student['student_number']}"):
+                            st.markdown("**Required document:** Please upload the official form or certificate for this milestone.")
+                            uploaded_file = st.file_uploader(
+                                "Upload document (PDF/JPG/PNG) - Max 5MB",
+                                type=["pdf", "jpg", "jpeg", "png"],
+                                key=f"upload_student_{milestone_name}_{student['student_number']}"
+                            )
+                            date_completed = st.date_input("Date of completion/event", value=date.today())
+                            if st.form_submit_button("Submit for Approval", use_container_width=True):
+                                if not uploaded_file:
+                                    st.error("Please upload a document.")
+                                elif uploaded_file.size > 5 * 1024 * 1024:
+                                    st.error("File size exceeds 5MB.")
                                 else:
-                                    st.error("Submission failed due to policy rules.")
-                elif status == "Approved":
-                    st.success("✅ This milestone has been approved.")
-                    if milestone_name == milestone_list[-1]:
-                        st.markdown("""
-                        <div class="next-step-card">
-                            <strong>🎉 Congratulations!</strong><br>
-                            You have completed all milestones. Contact the Graduate School for graduation.
-                        </div>
-                        """, unsafe_allow_html=True)
+                                    filepath = save_milestone_file(student["student_number"], milestone_name, uploaded_file)
+                                    success, msg = update_milestone(student["student_number"], milestone_name, "Pending", date_completed.strftime("%Y-%m-%d"), filepath, "", None)
+                                    if success:
+                                        st.success(f"{milestone_name} submitted for approval.")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
+                    else:
+                        st.success("✅ This milestone has been approved.")
+                
+                # Non‑committee milestones
+                else:
+                    if status == "Not Started":
+                        st.warning("⚠️ **Requirement not yet submitted.** Please upload the required document and submit for approval.")
+                    
+                    if status != "Approved":
+                        with st.form(key=f"student_submit_{milestone_name}_{student['student_number']}"):
+                            st.markdown("**Required document:** Please upload the official form or certificate for this milestone.")
+                            uploaded_file = st.file_uploader("Upload document (PDF/JPG/PNG) - Max 5MB", type=["pdf","jpg","jpeg","png"], key=f"upload_student_{milestone_name}_{student['student_number']}")
+                            date_completed = st.date_input("Date of completion/event", value=date.today())
+                            if st.form_submit_button("Submit for Approval", use_container_width=True):
+                                if not uploaded_file:
+                                    st.error("Please upload a document.")
+                                elif uploaded_file.size > 5 * 1024 * 1024:
+                                    st.error("File size exceeds 5MB.")
+                                else:
+                                    filepath = save_milestone_file(student["student_number"], milestone_name, uploaded_file)
+                                    success, msg = update_milestone(student["student_number"], milestone_name, "Pending", date_completed.strftime("%Y-%m-%d"), filepath, "", None)
+                                    if success:
+                                        st.success(f"{milestone_name} submitted for approval.")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
+                    elif status == "Approved":
+                        st.success("✅ This milestone has been approved.")
+                        if milestone_name == milestone_list[-1]:
+                            st.markdown("""
+                            <div class="next-step-card">
+                                <strong>🎉 Congratulations!</strong><br>
+                                You have completed all milestones. Contact the Graduate School for graduation.
+                            </div>
+                            """, unsafe_allow_html=True)
     
     st.caption("For corrections, contact your adviser or SESAM Staff.")
 
@@ -2494,12 +2816,20 @@ df = load_data()
 
 with st.sidebar:
     st.markdown(f"<div style='text-align:center'><h3>👤 {st.session_state.display_name}</h3><div>{st.session_state.role}</div><div>✅ Consent given</div></div>", unsafe_allow_html=True)
+    
+    if st.session_state.role == "Faculty Adviser":
+        transfer_df = load_transfer_requests()
+        pending_for_me = transfer_df[transfer_df["requested_advisor"] == st.session_state.display_name]
+        pending_count = len(pending_for_me)
+        if pending_count > 0:
+            st.info(f"📬 **{pending_count} pending transfer request(s)** – see below")
+    
     if st.button("🚪 Logout", use_container_width=True):
         st.session_state.logged_in = False
         st.session_state.consent_given = False
         st.rerun()
     st.markdown("---")
-    st.caption("Version 28.14 | Complete UPLB Compliance (POS before 2nd semester, Adviser auto-update)")
+    st.caption("Version 28.17 | Two‑panel committee interface + transfer workflow")
 
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
 st.caption("Fully compliant with UPLB Graduate School policies. Coursework handled in its own tab; milestones can be submitted anytime.")
@@ -2548,6 +2878,35 @@ if role == "SESAM Staff":
 
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Faculty Adviser Dashboard – {st.session_state.display_name}")
+    
+    transfer_df = load_transfer_requests()
+    pending_for_me = transfer_df[transfer_df["requested_advisor"] == st.session_state.display_name]
+    if not pending_for_me.empty:
+        st.markdown("### 📬 Pending Transfer Requests")
+        for _, req in pending_for_me.iterrows():
+            with st.container(border=True):
+                st.write(f"**Student:** {req['student_number']}")
+                st.write(f"**Current Adviser:** {req['current_advisor']}")
+                st.write(f"**Requested Adviser (You):** {req['requested_advisor']}")
+                st.write(f"**Milestone:** {req['milestone_name']}")
+                st.write(f"**Date:** {req['request_date']}")
+                col_acc, col_rej = st.columns(2)
+                if col_acc.button("✅ Accept", key=f"accept_{req['request_id']}"):
+                    success, msg = accept_transfer_request(req['request_id'])
+                    if success:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+                if col_rej.button("❌ Reject", key=f"reject_{req['request_id']}"):
+                    success, msg = reject_transfer_request(req['request_id'])
+                    if success:
+                        st.warning(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+        st.markdown("---")
+    
     advisees = df[df["advisor"] == st.session_state.display_name].copy()
     if advisees.empty:
         st.warning("No students assigned to you.")
@@ -2587,4 +2946,4 @@ elif role == "Student":
     student_dashboard()
 
 st.markdown("---")
-st.caption("SESAM KMIS v28.14 | Complete UPLB Compliance (POS before 2nd semester, Adviser auto-update)")
+st.caption("SESAM KMIS v28.17 | Two‑panel committee interface + transfer workflow")
