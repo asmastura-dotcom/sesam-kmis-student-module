@@ -1,6 +1,6 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 28.11 | POS Warning Only After Second Semester
+Version: 28.12 | Temporary Adviser Assignment (UPLB Graduate School Policy)
 """
 
 import streamlit as st
@@ -697,7 +697,6 @@ def check_coursework_consistency(student_number, ay, sem):
     return len(mismatches) == 0, mismatches
 
 # ==================== RULE FUNCTIONS ====================
-# POS approval check REMOVED – no blocking, no warnings
 def check_pos_approval(student_number, semester_index):
     # Always return True – allow any semester regardless of POS status
     return True, ""
@@ -1482,7 +1481,7 @@ def render_profile_approval_section(student, is_staff=False):
     elif student.get("profile_pending_status") == "Rejected":
         st.error(f"Profile update rejected: {student.get('profile_pending_remarks','')}")
 
-# ==================== REGISTRATION FORM (NO INHERITED GWA) ====================
+# ==================== REGISTRATION FORM (with temporary adviser dropdown) ====================
 def register_new_student_form():
     if st.session_state.get("reg_success", False):
         st.success("✅ Student successfully registered!")
@@ -1502,7 +1501,8 @@ def register_new_student_form():
             ay_start = int(ay_sel.split("-")[0])
             semester = st.selectbox("Starting Semester *", SEMESTERS)
             student_status = st.selectbox("Student Status", ["Regular", "Probationary", "Conditional"])
-        advisor = st.selectbox("Adviser (optional)", ["Not assigned", "Dr. Eslava", "Dr. Sanchez"])
+        # TEMPORARY ADVISER DROPDOWN (UPLB policy)
+        advisor = st.selectbox("Temporary Adviser (assigned upon admission)", ["Not assigned", "Dr. Eslava", "Dr. Sanchez"])
         prior_ms = False
         if program == "PhD Environmental Science":
             prior_ms = st.checkbox("Student is an MS Environmental Science graduate")
@@ -1532,7 +1532,7 @@ def register_new_student_form():
                     "first_name": first_name,
                     "middle_name": middle_name,
                     "program": program,
-                    "advisor": advisor,
+                    "advisor": advisor,  # temporary adviser
                     "ay_start": ay_start,
                     "semester": semester,
                     "gwa": None,
@@ -1657,7 +1657,8 @@ def render_compact_profile(student, is_own_profile=True):
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown(f"**Program:** {student['program']}")
-            st.markdown(f"**Adviser:** {student['advisor']}")
+            # Label changed to indicate temporary adviser
+            st.markdown(f"**Temporary Adviser (assigned upon admission):** {student['advisor']}")
             st.markdown(f"**Admitted:** {format_ay(student['ay_start'], student['semester'])}")
         with col_b:
             st.markdown(f"**Required Units:** {student['total_units_required']}")
@@ -1845,7 +1846,7 @@ def view_student_profile(student_number, viewer_role):
         if is_staff:
             st.markdown("---")
             st.markdown("#### ℹ️ Staff Note")
-            st.info("Profile editing is not allowed. To change adviser or external reviewer, use the **Admin Controls** tab.")
+            st.info("Profile editing is not allowed. To change temporary adviser or external reviewer, use the **Admin Controls** tab.")
         else:
             st.markdown(f"**External Reviewer:** {student.get('external_reviewer','Not assigned')}")
     
@@ -1871,7 +1872,7 @@ def view_student_profile(student_number, viewer_role):
         semesters["ay_num"] = semesters["academic_year"].apply(lambda x: int(x.split("-")[0]))
         semesters = semesters.sort_values(["ay_num", "order"]).reset_index(drop=True)
         
-        # No POS warnings at all
+        # No POS warnings
         
         for _, row in semesters.iterrows():
             render_semester_block_general(student_number, row, is_staff=True, override_edit=can_edit_subjects)
@@ -2024,14 +2025,14 @@ def view_student_profile(student_number, viewer_role):
     if is_staff:
         with tabs[-1]:
             st.subheader("Administrative Controls")
-            st.markdown("**Change Adviser**")
+            st.markdown("**Change Temporary Adviser**")
             adviser_options = ["Not assigned", "Dr. Eslava", "Dr. Sanchez"]
             new_advisor = st.selectbox("Select adviser", adviser_options, index=adviser_options.index(student["advisor"]) if student["advisor"] in adviser_options else 0)
-            if st.button("Update Adviser"):
+            if st.button("Update Temporary Adviser"):
                 df = load_data()
                 df.loc[df["student_number"] == student_number, "advisor"] = new_advisor
                 save_data(df)
-                st.success(f"Adviser updated to {new_advisor}")
+                st.success(f"Temporary adviser updated to {new_advisor}")
                 st.rerun()
             st.markdown("**Change Program**")
             new_program = st.selectbox("New Program", PROGRAMS, index=PROGRAMS.index(student["program"]) if student["program"] in PROGRAMS else 0)
@@ -2100,6 +2101,9 @@ def student_dashboard():
     
     st.subheader(f"📘 Your Dashboard – {student['name']}")
     
+    # Informational note about temporary adviser vs permanent committee
+    st.info("ℹ️ **Note:** The adviser shown above is a **temporary adviser** assigned upon admission. Once your Guidance/Advisory Committee is formed and approved, that committee will take over milestone approvals.")
+    
     # Required fields check
     required_fields_missing = False
     missing_fields = []
@@ -2129,7 +2133,7 @@ def student_dashboard():
             st.markdown(f'<div class="warning-banner">⚠️ {inc["course"]} ({inc["semester"]}) INC/4.0 deadline in {inc["days_left"]} days ({inc["deadline"]}).</div>', unsafe_allow_html=True)
     
     semester_count = len(get_student_semesters(student["student_number"]))
-    # FIXED: Show warning only after second semester (>=2 semesters)
+    # Warning only after second semester
     if semester_count >= 2 and is_master_program(student["program"]) and student.get("pos_status","Pending") != "Approved":
         st.markdown('<div class="danger-banner">⚠️ Your Plan of Study (POS) is not yet approved. You will not be able to register for the next semester until it is approved. Please contact your adviser.</div>', unsafe_allow_html=True)
     
@@ -2423,7 +2427,7 @@ with st.sidebar:
         st.session_state.consent_given = False
         st.rerun()
     st.markdown("---")
-    st.caption("Version 28.11 | POS Warning Only After Second Semester")
+    st.caption("Version 28.12 | Temporary Adviser Assignment (UPLB Graduate School Policy)")
 
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
 st.caption("Fully compliant with UPLB Graduate School policies. Coursework handled in its own tab; milestones can be submitted anytime.")
@@ -2511,4 +2515,4 @@ elif role == "Student":
     student_dashboard()
 
 st.markdown("---")
-st.caption("SESAM KMIS v28.11 | POS Warning Only After Second Semester")
+st.caption("SESAM KMIS v28.12 | Temporary Adviser Assignment (UPLB Graduate School Policy)")
