@@ -1,6 +1,8 @@
-""""
+"""
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 28.19 | Complete fixes: load_data, filter_dataframe, POS sync, profile clear
+Version: 31.0 | Strict rule enforcement + extension grants (thesis & residency) allowed by UPLB GS rules
+Roles: Student (data input), Adviser (academic evaluation), Staff (admin + extension grants only)
+No bypasses for POS or committee approval – progression requires approved prerequisites.
 """
 
 import streamlit as st
@@ -8,6 +10,50 @@ import pandas as pd
 import os
 import json
 from datetime import date, datetime, timedelta
+import smtplib
+from email.message import EmailMessage
+import base64
+
+# ==================== EMAIL CONFIGURATION (placeholder) ====================
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
+SMTP_USER = "kmis@sesam.uplb.edu.ph"
+SMTP_PASSWORD = "your_app_password_here"
+
+def send_welcome_email(student_number, personal_email, name):
+    if not personal_email or personal_email.strip() == "":
+        return False
+    try:
+        msg = EmailMessage()
+        msg["Subject"] = "Welcome to SESAM KMIS – Your Account Has Been Created"
+        msg["From"] = SMTP_USER
+        msg["To"] = personal_email
+        msg.set_content(f"""
+Dear {name},
+
+Your SESAM KMIS account has been created based on your Notice of Admission (NOA).
+
+Login credentials:
+    Username: {student_number}
+    Temporary Password: {student_number}
+
+Please log in at: [Insert KMIS URL here]
+
+After your first login, we strongly recommend that you change your password and update your institutional email address (UP mail) once it becomes active.
+
+For any issues, please contact the SESAM ICT Coordination Unit.
+
+Regards,
+SESAM KMIS Administrator
+""")
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as smtp:
+            smtp.starttls()
+            smtp.login(SMTP_USER, SMTP_PASSWORD)
+            smtp.send_message(msg)
+        return True
+    except Exception as e:
+        print(f"Email sending failed for {personal_email}: {e}")
+        return False
 
 # ==================== PAGE CONFIG ====================
 st.set_page_config(page_title="SESAM KMIS", page_icon="🎓", layout="wide", initial_sidebar_state="expanded")
@@ -15,54 +61,18 @@ st.set_page_config(page_title="SESAM KMIS", page_icon="🎓", layout="wide", ini
 # ==================== CUSTOM CSS ====================
 st.markdown("""
 <style>
-    .profile-card {
-        background: white;
-        border-radius: 20px;
-        padding: 1.2rem;
-        margin-bottom: 1rem;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-        border: 1px solid #e9ecef;
-    }
-    .profile-header {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        margin-bottom: 0.75rem;
-        border-bottom: 2px solid #f0f2f6;
-        padding-bottom: 0.5rem;
-    }
-    .profile-header h3 {
-        margin: 0;
-        color: #1f3b4c;
-        font-size: 1.2rem;
-    }
-    .status-badge {
-        display: inline-block;
-        padding: 0.2rem 0.6rem;
-        border-radius: 20px;
-        font-size: 0.7rem;
-        font-weight: 500;
-    }
+    .profile-card { background: white; border-radius: 20px; padding: 1.2rem; margin-bottom: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #e9ecef; }
+    .profile-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; border-bottom: 2px solid #f0f2f6; padding-bottom: 0.5rem; }
+    .profile-header h3 { margin: 0; color: #1f3b4c; font-size: 1.2rem; }
+    .status-badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 20px; font-size: 0.7rem; font-weight: 500; }
     .status-not-started { background-color: #e9ecef; color: #495057; }
     .status-pending { background-color: #fff3cd; color: #856404; }
     .status-approved { background-color: #d4edda; color: #155724; }
     .status-rejected { background-color: #f8d7da; color: #721c24; }
     .warning-banner { background-color: #ffcc00; color: #333; padding: 0.5rem; border-radius: 8px; margin: 0.5rem 0; font-weight: bold; }
     .danger-banner { background-color: #dc3545; color: white; padding: 0.5rem; border-radius: 8px; margin: 0.5rem 0; font-weight: bold; }
-    .next-step-card {
-        background-color: #e3f2fd;
-        border-left: 5px solid #1e88e5;
-        padding: 1rem;
-        border-radius: 12px;
-        margin: 1rem 0;
-    }
-    .stButton button {
-        border-radius: 30px !important;
-        padding: 0.4rem 1.2rem !important;
-        font-weight: 500 !important;
-    }
-    .pos-match { color: green; font-weight: bold; }
-    .pos-mismatch { color: red; font-weight: bold; }
+    .next-step-card { background-color: #e3f2fd; border-left: 5px solid #1e88e5; padding: 1rem; border-radius: 12px; margin: 1rem 0; }
+    .stButton button { border-radius: 30px !important; padding: 0.4rem 1.2rem !important; font-weight: 500 !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -283,10 +293,6 @@ MILESTONE_FILE = "milestone_tracking.csv"
 POS_SUBMISSIONS_FILE = "pos_submissions.csv"
 UPLOAD_FOLDER = "student_uploads"
 PROFILE_PIC_FOLDER = "profile_pics"
-UPLOAD_FILE = "uploads.csv"
-DATA_REQUEST_FILE = "data_requests.csv"
-FINAL_EXAM_VOTES_FILE = "final_exam_votes.csv"
-ADVISER_TRANSFER_REQUESTS_FILE = "adviser_transfer_requests.csv"
 
 for folder in [UPLOAD_FOLDER, PROFILE_PIC_FOLDER]:
     if not os.path.exists(folder):
@@ -327,62 +333,24 @@ def get_committee_chair(student_number):
             return member.get("name", "").strip()
     return None
 
-# ==================== ADVISER TRANSFER REQUESTS ====================
-def load_transfer_requests():
-    if not os.path.exists(ADVISER_TRANSFER_REQUESTS_FILE) or os.path.getsize(ADVISER_TRANSFER_REQUESTS_FILE) == 0:
-        return pd.DataFrame(columns=["request_id", "student_number", "current_advisor", "requested_advisor", "status", "request_date", "milestone_name"])
-    df = pd.read_csv(ADVISER_TRANSFER_REQUESTS_FILE, dtype=str)
-    for col in ["request_id", "student_number", "current_advisor", "requested_advisor", "status", "request_date", "milestone_name"]:
-        if col not in df.columns:
-            df[col] = ""
-    df["request_id"] = pd.to_numeric(df["request_id"], errors='coerce').fillna(0).astype(int)
-    return df
+def is_committee_approved(student_number):
+    milestones = load_milestone_tracking()
+    committee_milestones = ["Guidance Committee Members", "Guidance Committee Formation", 
+                            "Advisory Committee Formation", "Supervisory Committee Formation"]
+    student_milestones = milestones[milestones["student_number"] == student_number]
+    for m in committee_milestones:
+        if m in student_milestones["milestone"].values:
+            status = student_milestones[student_milestones["milestone"] == m]["status"].values[0]
+            if status == "Approved":
+                return True
+    return False
 
-def save_transfer_requests(df):
-    df.to_csv(ADVISER_TRANSFER_REQUESTS_FILE, index=False)
-
-def create_transfer_request(student_number, current_advisor, requested_advisor, milestone_name):
-    df = load_transfer_requests()
-    new_id = df["request_id"].max() + 1 if not df.empty else 1
-    new = pd.DataFrame([{
-        "request_id": new_id,
-        "student_number": student_number,
-        "current_advisor": current_advisor,
-        "requested_advisor": requested_advisor,
-        "status": "Pending",
-        "request_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "milestone_name": milestone_name
-    }])
-    df = pd.concat([df, new], ignore_index=True)
-    save_transfer_requests(df)
-    return new_id
-
-def accept_transfer_request(request_id):
-    df = load_transfer_requests()
-    mask = df["request_id"] == request_id
-    if not mask.any():
-        return False, "Request not found."
-    row = df[mask].iloc[0]
-    student_number = row["student_number"]
-    requested_advisor = row["requested_advisor"]
-    students_df = load_data()
-    idx = students_df[students_df["student_number"] == student_number].index
-    if len(idx) == 0:
-        return False, "Student not found."
-    students_df.at[idx[0], "advisor"] = requested_advisor
-    save_data(students_df)
-    df = df[~mask]
-    save_transfer_requests(df)
-    return True, f"Student transferred to {requested_advisor}."
-
-def reject_transfer_request(request_id):
-    df = load_transfer_requests()
-    mask = df["request_id"] == request_id
-    if not mask.any():
-        return False, "Request not found."
-    df = df[~mask]
-    save_transfer_requests(df)
-    return True, "Transfer request rejected."
+def check_committee_approval(student_number, semester_index):
+    """Require committee approval before second semester."""
+    if semester_index >= 1:  # second semester or later
+        if not is_committee_approved(student_number):
+            return False, "Your Guidance/Advisory Committee must be approved before you can enroll in the second semester. Please submit the Committee Nomination Form to the Graduate School."
+    return True, ""
 
 # ==================== POS SUBMISSIONS FUNCTIONS ====================
 def load_pos_submissions():
@@ -475,6 +443,7 @@ def approve_pos_revision(submission_id, reviewer_name, remarks, role):
         return False, "Submission not found."
     row = df[mask].iloc[0]
     if role == "adviser":
+        # Adviser approves – now student must upload GS-approved document
         df.loc[mask, "adviser_approved"] = True
         df.loc[mask, "status"] = "Adviser Approved"
         df.loc[mask, "approved_by"] = reviewer_name
@@ -482,20 +451,27 @@ def approve_pos_revision(submission_id, reviewer_name, remarks, role):
         if remarks:
             df.loc[mask, "remarks"] = remarks
         save_pos_submissions(df)
-        return True, "Revision approved by adviser. Awaiting GS approval."
-    elif role == "gs":
-        df.loc[mask, "gs_approved"] = True
-        df.loc[mask, "status"] = "GS Approved"
-        df.loc[mask, "approved_by"] = reviewer_name
-        df.loc[mask, "approval_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if remarks:
-            df.loc[mask, "remarks"] = remarks
-        save_pos_submissions(df)
-        student_number = row["student_number"]
-        update_pos_milestone_status(student_number)
-        return True, "Revision approved by Graduate School."
+        return True, "Revision approved by adviser. The student must now upload the GS-approved document to complete the process."
     else:
-        return False, "Invalid role."
+        return False, "Invalid role. Only adviser can approve the revision step."
+
+def finalize_gs_approval(student_number, submission_id, remarks):
+    """Student uploads the GS-approved document to mark the revision as GS Approved."""
+    df = load_pos_submissions()
+    mask = df["submission_id"] == submission_id
+    if not mask.any():
+        return False, "Submission not found."
+    if df.loc[mask, "adviser_approved"].iloc[0] != True:
+        return False, "This revision has not been approved by the adviser yet."
+    if df.loc[mask, "gs_approved"].iloc[0] == True:
+        return False, "This revision is already GS approved."
+    df.loc[mask, "gs_approved"] = True
+    df.loc[mask, "status"] = "GS Approved"
+    if remarks:
+        df.loc[mask, "remarks"] = remarks
+    save_pos_submissions(df)
+    update_pos_milestone_status(student_number)
+    return True, "GS approval recorded."
 
 def reject_pos_submission(submission_id, reviewer_name, remarks):
     df = load_pos_submissions()
@@ -569,16 +545,12 @@ def load_data():
         "total_units_required", "thesis_units_taken", "thesis_units_limit",
         "thesis_extension_units", "residency_years_used", "residency_extension_years",
         "pos_status", "pos_approval_date", "qualifying_exam_status", "written_comprehensive_status",
-        "oral_comprehensive_status", "general_exam_status", "final_exam_status", "external_reviewer",
+        "oral_comprehensive_status", "general_exam_status", "final_exam_status",
         "final_exam_attempts", "profile_pic", "committee_members_structured", "committee_approval_date",
         "thesis_outline_approved", "thesis_status", "prior_ms_graduate", "student_status", "address",
-        "phone", "institutional_email", "gender", "civil_status", "citizenship", "birthdate", "religion",
+        "phone", "institutional_email", "personal_email", "gender", "civil_status", "citizenship", "birthdate", "religion",
         "emergency_name", "emergency_relationship", "emergency_country_code", "emergency_phone",
-        "special_status", "residency_max_years", "profile_pending_status", "profile_pending_remarks",
-        "profile_pending_address", "profile_pending_phone", "profile_pending_email", "profile_pending_gender",
-        "profile_pending_civil_status", "profile_pending_citizenship", "profile_pending_birthdate",
-        "profile_pending_religion", "profile_pending_emergency_name", "profile_pending_emergency_relationship",
-        "profile_pending_emergency_country_code", "profile_pending_emergency_phone"
+        "special_status", "residency_max_years"
     ]
     numeric_cols = ["ay_start","gwa","total_units_taken","total_units_required",
                     "thesis_units_taken","thesis_units_limit","thesis_extension_units",
@@ -586,7 +558,6 @@ def load_data():
                     "final_exam_attempts"]
     if not os.path.exists(DATA_FILE) or os.path.getsize(DATA_FILE) == 0:
         empty_df = pd.DataFrame(columns=expected_columns)
-        # Ensure numeric columns are numeric type
         for col in numeric_cols:
             if col in empty_df.columns:
                 empty_df[col] = pd.to_numeric(empty_df[col], errors='coerce').fillna(0)
@@ -602,7 +573,6 @@ def load_data():
         save_data(empty_df)
         return empty_df
 
-    # Ensure all expected columns exist
     for col in expected_columns:
         if col not in df.columns:
             if col in numeric_cols:
@@ -612,22 +582,18 @@ def load_data():
             else:
                 df[col] = ""
 
-    # Convert numeric columns
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             if col != "gwa":
                 df[col] = df[col].astype(int)
 
-    # Fill NaN for text columns
     for col in df.columns:
         if col not in numeric_cols and col != "prior_ms_graduate":
             df[col] = df[col].fillna("").astype(str)
 
-    # Convert boolean
     df["prior_ms_graduate"] = df["prior_ms_graduate"].astype(bool)
 
-    # Ensure residency and thesis limits based on program
     for idx, row in df.iterrows():
         prog = row["program"]
         if prog and prog != "":
@@ -755,8 +721,9 @@ def check_coursework_consistency(student_number, ay, sem):
     mismatches = [code for code in enrolled if code not in approved]
     return len(mismatches) == 0, mismatches
 
-# ==================== RULE FUNCTIONS ====================
+# ==================== RULE FUNCTIONS (STRICT ENFORCEMENT) ====================
 def check_pos_approval(student_number, semester_index):
+    """Block semester creation if POS not approved (for semester index >= 1)."""
     if semester_index >= 1:
         df = load_data()
         student = df[df["student_number"] == student_number]
@@ -764,7 +731,7 @@ def check_pos_approval(student_number, semester_index):
             return False, "Student not found."
         pos_status = student.iloc[0].get("pos_status", "Pending")
         if pos_status != "Approved":
-            return False, "Your Plan of Study (POS) must be approved by your adviser before you can enroll in the second semester. Please contact your Guidance Committee."
+            return False, "Your Plan of Study (POS) must be approved before you can enroll in the second semester. Please work with your adviser to complete and approve your POS."
     return True, ""
 
 def get_semester_index(student_number, ay, sem):
@@ -787,7 +754,7 @@ def check_thesis_units_limit(student_number, new_thesis_units):
     limit = base_limit + extension
     if current + new_thesis_units > limit:
         remaining = limit - current
-        return False, f"Thesis unit limit would be exceeded: {current} + {new_thesis_units} > {limit}. Only {remaining} unit(s) remaining. If you need extension, request staff approval."
+        return False, f"Thesis unit limit would be exceeded: {current} + {new_thesis_units} > {limit}. Only {remaining} unit(s) remaining."
     return True, ""
 
 def convert_expired_grades():
@@ -830,7 +797,7 @@ def check_residency_enforcement(student_number):
     extension = student.get("residency_extension_years", 0)
     max_with_extension = max_years + extension
     if years_used > max_with_extension:
-        return False, f"Residency exceeded: {years_used} > {max_with_extension} years. Please request extension from Graduate School."
+        return False, f"Residency exceeded: {years_used} > {max_with_extension} years. This student is no longer eligible to enroll."
     elif years_used > max_years and years_used <= max_with_extension:
         return "warning", f"Residency warning: {years_used} out of {max_years} years (extension granted: +{extension} years)."
     return True, ""
@@ -872,62 +839,30 @@ def check_probationary_status(student_number):
         save_data(students)
         return f"Student {student['name']} failed probation (GWA {gwa:.2f} < 2.0). Status set to Disqualified."
 
-def check_external_reviewer_required(student_number):
-    students = load_data()
-    student = students[students["student_number"] == student_number].iloc[0]
-    if is_phd_program(student["program"]):
-        reviewer = student.get("external_reviewer", "")
-        if not reviewer or reviewer == "":
-            return False, "Cannot complete Final Examination/Defense: No external reviewer assigned. Please contact your adviser."
-    return True, ""
-
-def load_final_exam_votes():
-    if not os.path.exists(FINAL_EXAM_VOTES_FILE) or os.path.getsize(FINAL_EXAM_VOTES_FILE) == 0:
-        return pd.DataFrame(columns=["student_number", "milestone", "voter_name", "vote", "voter_role", "vote_date"])
-    return pd.read_csv(FINAL_EXAM_VOTES_FILE)
-
-def save_final_exam_votes(df):
-    df.to_csv(FINAL_EXAM_VOTES_FILE, index=False)
-
-def record_final_exam_vote(student_number, voter_name, vote, voter_role="Committee"):
-    df = load_final_exam_votes()
-    new_row = pd.DataFrame([{
-        "student_number": student_number,
-        "milestone": "Final Examination",
-        "voter_name": voter_name,
-        "vote": vote,
-        "voter_role": voter_role,
-        "vote_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }])
-    df = pd.concat([df, new_row], ignore_index=True)
-    save_final_exam_votes(df)
-    votes_df = load_final_exam_votes()
-    student_votes = votes_df[votes_df["student_number"] == student_number]
-    negative_count = len(student_votes[student_votes["vote"] == "Negative"])
-    if negative_count > 1:
-        students = load_data()
-        students.loc[students["student_number"] == student_number, "final_exam_status"] = "Failed"
-        save_data(students)
-        return False, f"Final Examination failed: {negative_count} negative votes. Re-examination may be allowed."
-    return True, ""
-
-# ==================== SEMESTER & ACADEMIC FUNCTIONS ====================
+# ==================== SEMESTER & ACADEMIC FUNCTIONS (STRICT) ====================
 def add_semester_record(student_number, ay, sem, subjects, doc_path="", doc_upload_time="", semester_status="Regular"):
     df = load_data()
     student = df[df["student_number"] == student_number].iloc[0]
     sems = get_student_semesters(student_number)
     semester_count = len(sems)
+    
+    # Strict checks – no bypass
+    ok, msg = check_committee_approval(student_number, semester_count)
+    if not ok:
+        raise ValueError(msg)
     ok, msg = check_pos_approval(student_number, semester_count)
     if not ok:
         raise ValueError(msg)
     ok, msg = check_residency_enforcement(student_number)
     if isinstance(ok, bool) and not ok:
         raise ValueError(msg)
+    
     thesis_units = sum(float(s.get("units",0)) for s in subjects if "thesis" in s.get("course_code","").lower() or "dissertation" in s.get("course_code","").lower())
     if thesis_units > 0:
         ok, msg = check_thesis_units_limit(student_number, thesis_units)
         if not ok:
             raise ValueError(msg)
+    
     df_sem = load_semester_records()
     gwa = compute_gwa_from_subjects(subjects)
     total_units = sum(float(s.get("units",0)) for s in subjects)
@@ -957,6 +892,10 @@ def add_semester_record(student_number, ay, sem, subjects, doc_path="", doc_uplo
 def update_semester_subjects(student_number, ay, sem, subjects):
     sem_index = get_semester_index(student_number, ay, sem)
     if sem_index >= 1:
+        ok, msg = check_committee_approval(student_number, sem_index)
+        if not ok:
+            st.error(msg)
+            return False
         ok, msg = check_pos_approval(student_number, sem_index)
         if not ok:
             st.error(msg)
@@ -1209,6 +1148,7 @@ def get_student_milestones(student_number, program_type):
         return df[df["student_number"] == student_number]
 
 def update_milestone(student_number, milestone, status, date_str, file_path, remarks, reviewer_name=None):
+    # Committee approval automatically updates the adviser (no override, just rule)
     committee_milestones = ["Guidance Committee Members", "Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]
     if milestone in committee_milestones and status == "Approved":
         chair_name = get_committee_chair(student_number)
@@ -1216,13 +1156,18 @@ def update_milestone(student_number, milestone, status, date_str, file_path, rem
             return False, "No committee chair found. Cannot approve."
         if chair_name not in USERS or USERS[chair_name]["role"] != "Faculty Adviser":
             return False, f"Committee Chair '{chair_name}' is not a valid faculty adviser in the system. Please contact staff to add them."
+        # Automatically update adviser to chair (this is a rule, not an override)
         df_students = load_data()
         student_row = df_students[df_students["student_number"] == student_number]
         if student_row.empty:
             return False, "Student not found."
         current_advisor = student_row.iloc[0]["advisor"]
-        create_transfer_request(student_number, current_advisor, chair_name, milestone)
-        return True, f"Committee approved. A transfer request has been sent to {chair_name}. The student will remain under {current_advisor} until {chair_name} accepts the transfer."
+        df_students.loc[df_students["student_number"] == student_number, "advisor"] = chair_name
+        save_data(df_students)
+        # Continue to update milestone status below
+        msg = f"Committee approved. Adviser updated from '{current_advisor}' to '{chair_name}'."
+    else:
+        msg = ""
 
     if milestone == "Plan of Study (POS)" and status == "Approved":
         df_students = load_data()
@@ -1237,9 +1182,6 @@ def update_milestone(student_number, milestone, status, date_str, file_path, rem
             return False, "Student record not found."
 
     if milestone in ["Final Examination", "Final Defense"] and status == "Approved":
-        ok, msg = check_external_reviewer_required(student_number)
-        if not ok:
-            return False, msg
         ok, msg = check_residency_enforcement(student_number)
         if isinstance(ok, bool) and not ok:
             return False, msg
@@ -1270,7 +1212,7 @@ def update_milestone(student_number, milestone, status, date_str, file_path, rem
         }])
         df = pd.concat([df, new], ignore_index=True)
     save_milestone_tracking(df)
-    return True, ""
+    return True, msg
 
 def save_milestone_file(student_number, milestone_name, uploaded_file):
     if uploaded_file is None:
@@ -1290,87 +1232,6 @@ def save_milestone_file(student_number, milestone_name, uploaded_file):
         return None
     return filepath
 
-# ==================== DATA REQUESTS ====================
-def load_data_requests():
-    if not os.path.exists(DATA_REQUEST_FILE) or os.path.getsize(DATA_REQUEST_FILE) == 0:
-        return pd.DataFrame(columns=["request_id","student_number","request_type","details","status","submitted_date","reviewer_comment","reviewed_by","review_date"])
-    df = pd.read_csv(DATA_REQUEST_FILE, dtype=str)
-    for col in df.columns:
-        df[col] = df[col].fillna("").astype(str)
-    return df
-
-def save_data_requests(df):
-    df.to_csv(DATA_REQUEST_FILE, index=False)
-
-def submit_data_request(student_number, request_type, details):
-    df = load_data_requests()
-    req_id = len(df) + 1 if not df.empty else 1
-    new = pd.DataFrame([{
-        "request_id": req_id,
-        "student_number": student_number,
-        "request_type": request_type,
-        "details": details,
-        "status": "Pending",
-        "submitted_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "reviewer_comment": "",
-        "reviewed_by": "",
-        "review_date": ""
-    }])
-    df = pd.concat([df, new], ignore_index=True)
-    save_data_requests(df)
-
-# ==================== UPLOADS HANDLING ====================
-UPLOAD_CATEGORIES = ["admission_letter", "amis_screenshot", "committee_form", "plan_of_study", "thesis_file"]
-UPLOAD_DISPLAY_NAMES = {
-    "admission_letter": "Admission Letter",
-    "amis_screenshot": "AMIS Screenshot",
-    "committee_form": "Committee Form",
-    "plan_of_study": "Plan of Study (POS)",
-    "thesis_file": "Thesis/Dissertation File"
-}
-
-def load_uploads():
-    if not os.path.exists(UPLOAD_FILE) or os.path.getsize(UPLOAD_FILE) == 0:
-        return pd.DataFrame(columns=["student_number", "category", "file_path", "original_filename", "upload_date", "status", "reviewer_comment", "reviewed_by", "review_date"])
-    df = pd.read_csv(UPLOAD_FILE, dtype=str)
-    for col in df.columns:
-        df[col] = df[col].fillna("").astype(str)
-    return df
-
-def save_uploads(df):
-    df.to_csv(UPLOAD_FILE, index=False)
-
-def save_uploaded_file(student_number, category, uploaded_file):
-    if uploaded_file is None:
-        return None
-    student_folder = os.path.join(UPLOAD_FOLDER, student_number)
-    os.makedirs(student_folder, exist_ok=True)
-    ext = uploaded_file.name.split('.')[-1].lower()
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{category}_{timestamp}.{ext}"
-    filepath = os.path.join(student_folder, filename)
-    try:
-        with open(filepath, "wb") as f:
-            f.write(uploaded_file.getbuffer())
-    except Exception as e:
-        st.error(f"File save error: {e}")
-        return None
-    up_df = load_uploads()
-    new_up = pd.DataFrame([{
-        "student_number": student_number,
-        "category": category,
-        "file_path": filepath,
-        "original_filename": uploaded_file.name,
-        "upload_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "status": "Pending",
-        "reviewer_comment": "",
-        "reviewed_by": "",
-        "review_date": ""
-    }])
-    up_df = pd.concat([up_df, new_up], ignore_index=True)
-    save_uploads(up_df)
-    return filepath
-
 # ==================== UI HELPERS ====================
 def get_status_badge(status):
     if status == "Approved":
@@ -1379,6 +1240,8 @@ def get_status_badge(status):
         return '<span class="status-badge status-rejected">❌ Rejected</span>'
     elif status == "Pending":
         return '<span class="status-badge status-pending">🟡 Pending</span>'
+    elif status == "Revision Requested":
+        return '<span class="status-badge status-pending">📝 Revision Requested</span>'
     else:
         return '<span class="status-badge status-not-started">⚪ Not Started</span>'
 
@@ -1391,7 +1254,7 @@ def filter_dataframe(search_term, data):
     return data[mask]
 
 # ==================== RENDER SEMESTER BLOCK ====================
-def render_semester_block_general(student_number, semester_row, is_staff=False, override_edit=False):
+def render_semester_block_general(student_number, semester_row, is_staff=False, is_adviser=False):
     ay = str(semester_row["academic_year"])
     sem = str(semester_row["semester"])
     semester_status = str(semester_row.get("semester_status","Regular")).strip()
@@ -1427,17 +1290,15 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
         st.info("📋 Plan of Study (POS) for this semester is pending approval. Courses will be validated after approval.")
     
     with st.expander(f"📅 {ay} | {sem} (Units: {total_units:.0f} | GWA: {gwa:.2f})", expanded=False):
-        can_edit_status = (is_staff and override_edit) or (not is_staff)
-        if can_edit_status:
-            new_status = st.selectbox("Semester Status", SEMESTER_STATUS_OPTIONS,
-                                      index=SEMESTER_STATUS_OPTIONS.index(semester_status) if semester_status in SEMESTER_STATUS_OPTIONS else 0,
-                                      key=f"status_{student_number}_{ay}_{sem}")
-            if new_status != semester_status:
-                if update_semester_status(student_number, ay, sem, new_status):
-                    st.success(f"Status updated to {new_status}.")
-                    st.rerun()
-        else:
-            st.markdown(f"**Semester Status:** {semester_status}")
+        # Semester status (only staff/adviser can change? Student can request via form, but we allow all roles for simplicity)
+        new_status = st.selectbox("Semester Status", SEMESTER_STATUS_OPTIONS,
+                                  index=SEMESTER_STATUS_OPTIONS.index(semester_status) if semester_status in SEMESTER_STATUS_OPTIONS else 0,
+                                  key=f"status_{student_number}_{ay}_{sem}",
+                                  disabled=not (is_staff or is_adviser))
+        if new_status != semester_status:
+            if update_semester_status(student_number, ay, sem, new_status):
+                st.success(f"Status updated to {new_status}.")
+                st.rerun()
         
         st.markdown(f"**Document Validation:** {get_status_badge(doc_status)}", unsafe_allow_html=True)
         if doc_status == "Rejected" and doc_remarks:
@@ -1445,7 +1306,8 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
         
         # Display subjects
         if semester_status == "Regular":
-            if not is_staff:
+            # Only students edit their subjects
+            if st.session_state.role == "Student":
                 df_edit = pd.DataFrame(subjects) if subjects else pd.DataFrame(columns=["course_code","course_description","units","grade"])
                 for col in ["course_code","course_description","units","grade"]:
                     if col not in df_edit.columns:
@@ -1484,6 +1346,10 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                         else:
                             sem_index = get_semester_index(student_number, ay, sem)
                             if sem_index >= 1:
+                                ok, msg = check_committee_approval(student_number, sem_index)
+                                if not ok:
+                                    st.error(msg)
+                                    st.stop()
                                 ok, msg = check_pos_approval(student_number, sem_index)
                                 if not ok:
                                     st.error(msg)
@@ -1503,6 +1369,7 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                             else:
                                 st.error("Save failed.")
             else:
+                # Staff or Adviser: view only
                 if subjects:
                     df_subjects = pd.DataFrame(subjects)
                     display_cols = {}
@@ -1531,12 +1398,11 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
         if semester_status == "Regular":
             if doc_path and doc_path != "" and os.path.exists(doc_path):
                 st.info(f"Current file: {os.path.basename(doc_path)}")
-                if is_staff:
+                if is_staff or is_adviser:
                     file_ext = os.path.splitext(doc_path)[1].lower()
                     if file_ext in ['.jpg', '.jpeg', '.png', '.gif']:
                         st.image(doc_path, caption="Proof of Grades", width=400)
                     elif file_ext == '.pdf':
-                        import base64
                         with open(doc_path, "rb") as f:
                             base64_pdf = base64.b64encode(f.read()).decode('utf-8')
                         pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="400" type="application/pdf"></iframe>'
@@ -1545,7 +1411,7 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                         st.warning("Preview not available for this file type.")
                         with open(doc_path, "rb") as f:
                             st.download_button("Open file", f, file_name=os.path.basename(doc_path), key=f"fallback_{student_number}_{ay}_{sem}")
-            if not is_staff:
+            if st.session_state.role == "Student":
                 with st.form(key=f"upload_{student_number}_{ay}_{sem}"):
                     uploaded = st.file_uploader("Choose file (PDF/JPG/PNG)", type=["pdf","jpg","jpeg","png"], key=f"upload_file_{ay}_{sem}")
                     if st.form_submit_button("📎 Upload Document") and uploaded:
@@ -1562,26 +1428,23 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                                 st.rerun()
                         except Exception as e:
                             st.error(f"Upload failed: {e}")
-            else:
-                if doc_path and doc_path != "" and os.path.exists(doc_path):
-                    st.caption("Document uploaded by student.")
-                if doc_status == "Pending":
-                    with st.form(key=f"validate_{student_number}_{ay}_{sem}"):
-                        remarks_val = st.text_area("Remarks", key=f"val_remarks_{student_number}_{ay}_{sem}")
-                        col1, col2 = st.columns(2)
-                        if col1.form_submit_button("✅ Approve"):
-                            validate_semester_document(student_number, ay, sem, "Approved", remarks_val, st.session_state.display_name)
-                            st.success("Approved.")
-                            st.rerun()
-                        if col2.form_submit_button("❌ Reject"):
-                            validate_semester_document(student_number, ay, sem, "Rejected", remarks_val, st.session_state.display_name)
-                            st.warning("Rejected.")
-                            st.rerun()
+            elif is_adviser and doc_status == "Pending":
+                with st.form(key=f"validate_{student_number}_{ay}_{sem}"):
+                    remarks_val = st.text_area("Remarks", key=f"val_remarks_{student_number}_{ay}_{sem}")
+                    col1, col2 = st.columns(2)
+                    if col1.form_submit_button("✅ Approve"):
+                        validate_semester_document(student_number, ay, sem, "Approved", remarks_val, st.session_state.display_name)
+                        st.success("Approved.")
+                        st.rerun()
+                    if col2.form_submit_button("❌ Reject"):
+                        validate_semester_document(student_number, ay, sem, "Rejected", remarks_val, st.session_state.display_name)
+                        st.warning("Rejected.")
+                        st.rerun()
         else:
             st.info(f"Semester status **{semester_status}** – no upload required.")
         
-        # POS Management Section (Staff only)
-        if st.session_state.role == "SESAM Staff" and override_edit:
+        # POS Management Section (Staff only - administrative data entry)
+        if st.session_state.role == "SESAM Staff":
             st.markdown("---")
             st.markdown("#### 📋 Plan of Study (POS) for this Semester")
             pos_status = semester_row.get("pos_approved_status", "")
@@ -1591,76 +1454,21 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                     st.write("**Approved courses:**", ", ".join(pos_courses))
                 else:
                     st.info("No specific courses listed in POS (free elective semester).")
-                if st.button("✏️ Edit/Update POS", key=f"edit_pos_{student_number}_{ay}_{sem}"):
-                    st.session_state[f"edit_pos_{student_number}_{ay}_{sem}"] = True
             else:
                 if pos_status == "Pending":
                     st.warning("POS Pending approval.")
                 else:
                     st.info("No POS submitted for this semester yet.")
-                if st.button("📝 Manage POS", key=f"manage_pos_{student_number}_{ay}_{sem}"):
-                    st.session_state[f"edit_pos_{student_number}_{ay}_{sem}"] = True
-            
-            if st.session_state.get(f"edit_pos_{student_number}_{ay}_{sem}", False):
-                with st.form(key=f"pos_form_{student_number}_{ay}_{sem}"):
-                    current_codes = pos_courses if pos_courses else []
-                    pos_codes_input = st.text_input("Course codes (comma-separated)", value=", ".join(current_codes))
-                    new_approval_status = st.selectbox("Approval Status", ["Pending", "Approved", "Rejected"], index=["Pending","Approved","Rejected"].index(pos_status) if pos_status in ["Pending","Approved","Rejected"] else 0)
-                    if st.form_submit_button("Save POS"):
-                        new_codes = [c.strip() for c in pos_codes_input.split(",") if c.strip()]
-                        set_pos_for_semester(student_number, ay, sem, new_codes, new_approval_status, st.session_state.display_name)
-                        st.success("POS updated.")
-                        st.session_state[f"edit_pos_{student_number}_{ay}_{sem}"] = False
-                        st.rerun()
-
-# ==================== PROFILE APPROVAL SECTION ====================
-def render_profile_approval_section(student, is_staff=False):
-    if student.get("profile_pending_status") == "Pending" and is_staff:
-        st.markdown("#### Pending Profile Update")
-        pending_fields = []
-        if student.get("profile_pending_address"): pending_fields.append(("Address", student["profile_pending_address"]))
-        if student.get("profile_pending_phone"): pending_fields.append(("Phone", student["profile_pending_phone"]))
-        if student.get("profile_pending_email"): pending_fields.append(("Institutional Email", student["profile_pending_email"]))
-        if student.get("profile_pending_gender"): pending_fields.append(("Gender", student["profile_pending_gender"]))
-        if student.get("profile_pending_civil_status"): pending_fields.append(("Civil Status", student["profile_pending_civil_status"]))
-        if student.get("profile_pending_citizenship"): pending_fields.append(("Citizenship", student["profile_pending_citizenship"]))
-        if student.get("profile_pending_birthdate"): pending_fields.append(("Birthdate", student["profile_pending_birthdate"]))
-        if student.get("profile_pending_religion"): pending_fields.append(("Religion", student["profile_pending_religion"]))
-        if student.get("profile_pending_emergency_name"): pending_fields.append(("Emergency Name", student["profile_pending_emergency_name"]))
-        if student.get("profile_pending_emergency_relationship"): pending_fields.append(("Emergency Relationship", student["profile_pending_emergency_relationship"]))
-        if student.get("profile_pending_emergency_country_code"): pending_fields.append(("Emergency Country Code", student["profile_pending_emergency_country_code"]))
-        if student.get("profile_pending_emergency_phone"): pending_fields.append(("Emergency Phone", student["profile_pending_emergency_phone"]))
-        for label, value in pending_fields:
-            st.write(f"**{label}:** {value}")
-        remarks = st.text_area("Remarks", key="prof_remarks")
-        col1, col2 = st.columns(2)
-        if col1.button("✅ Approve Profile Update"):
-            df = load_data()
-            for field in ["address","phone","institutional_email","gender","civil_status","citizenship","birthdate","religion",
-                          "emergency_name","emergency_relationship","emergency_country_code","emergency_phone"]:
-                pending_field = f"profile_pending_{field}"
-                if pending_field in student and student[pending_field]:
-                    df.loc[df["student_number"]==student["student_number"], field] = student[pending_field]
-                df.loc[df["student_number"]==student["student_number"], pending_field] = ""
-            df.loc[df["student_number"]==student["student_number"], "profile_pending_status"] = "Approved"
-            df.loc[df["student_number"]==student["student_number"], "profile_pending_remarks"] = remarks
-            save_data(df)
-            st.success("Profile approved.")
-            st.rerun()
-        if col2.button("❌ Reject Profile Update"):
-            df = load_data()
-            for field in ["address","phone","institutional_email","gender","civil_status","citizenship","birthdate","religion",
-                          "emergency_name","emergency_relationship","emergency_country_code","emergency_phone"]:
-                pending_field = f"profile_pending_{field}"
-                if pending_field in student:
-                    df.loc[df["student_number"]==student["student_number"], pending_field] = ""
-            df.loc[df["student_number"]==student["student_number"], "profile_pending_status"] = "Rejected"
-            df.loc[df["student_number"]==student["student_number"], "profile_pending_remarks"] = remarks
-            save_data(df)
-            st.warning("Profile rejected.")
-            st.rerun()
-    elif student.get("profile_pending_status") == "Rejected":
-        st.error(f"Profile update rejected: {student.get('profile_pending_remarks','')}")
+            # Staff can edit POS details (administrative data entry)
+            with st.expander("✏️ Edit POS (Administrative Only)"):
+                current_codes = pos_courses if pos_courses else []
+                pos_codes_input = st.text_input("Course codes (comma-separated)", value=", ".join(current_codes), key=f"pos_edit_{student_number}_{ay}_{sem}")
+                new_approval_status = st.selectbox("Approval Status", ["Pending", "Approved", "Rejected"], index=["Pending","Approved","Rejected"].index(pos_status) if pos_status in ["Pending","Approved","Rejected"] else 0, key=f"pos_status_{student_number}_{ay}_{sem}")
+                if st.button("Save POS Changes", key=f"save_pos_{student_number}_{ay}_{sem}"):
+                    new_codes = [c.strip() for c in pos_codes_input.split(",") if c.strip()]
+                    set_pos_for_semester(student_number, ay, sem, new_codes, new_approval_status, st.session_state.display_name)
+                    st.success("POS updated.")
+                    st.rerun()
 
 # ==================== REGISTRATION FORM ====================
 def register_new_student_form():
@@ -1669,13 +1477,16 @@ def register_new_student_form():
         st.session_state.reg_success = False
 
     with st.form("register_student_form"):
-        st.subheader("Register New Student")
+        st.subheader("➕ Enroll an Admitted Student")
+        st.info("ℹ️ **For Staff Use Only:** This function is used to create a record for an officially admitted student. Please verify the student's Notice of Admission (NOA) and complete the details below.")
+        
         col1, col2 = st.columns(2)
         with col1:
             student_number = st.text_input("Student Number *")
             last_name = st.text_input("Last Name *")
             first_name = st.text_input("First Name *")
             middle_name = st.text_input("Middle Name (optional)")
+            personal_email = st.text_input("Personal Email Address (from NOA) *")
         with col2:
             program = st.selectbox("Program *", PROGRAMS)
             ay_sel = st.selectbox("Admission Academic Year *", ACADEMIC_YEARS)
@@ -1697,6 +1508,7 @@ def register_new_student_form():
             if not program: errors.append("Program")
             if not ay_sel: errors.append("Academic Year")
             if not semester: errors.append("Semester")
+            if not personal_email: errors.append("Personal Email Address")
             df = load_data()
             if student_number in df["student_number"].values: errors.append("Student number already exists")
             if errors:
@@ -1731,7 +1543,6 @@ def register_new_student_form():
                     "oral_comprehensive_status": "N/A",
                     "general_exam_status": "Not Taken",
                     "final_exam_status": "Not Taken",
-                    "external_reviewer": "",
                     "final_exam_attempts": 0,
                     "profile_pic": "",
                     "committee_members_structured": "",
@@ -1743,6 +1554,7 @@ def register_new_student_form():
                     "address": "",
                     "phone": "",
                     "institutional_email": "",
+                    "personal_email": personal_email,
                     "gender": "",
                     "civil_status": "",
                     "citizenship": "",
@@ -1752,32 +1564,18 @@ def register_new_student_form():
                     "emergency_relationship": "",
                     "emergency_country_code": "",
                     "emergency_phone": "",
-                    "special_status": "Regular",
-                    "profile_pending_status": "",
-                    "profile_pending_remarks": "",
-                    "profile_pending_address": "",
-                    "profile_pending_phone": "",
-                    "profile_pending_email": "",
-                    "profile_pending_gender": "",
-                    "profile_pending_civil_status": "",
-                    "profile_pending_citizenship": "",
-                    "profile_pending_birthdate": "",
-                    "profile_pending_religion": "",
-                    "profile_pending_emergency_name": "",
-                    "profile_pending_emergency_relationship": "",
-                    "profile_pending_emergency_country_code": "",
-                    "profile_pending_emergency_phone": "",
+                    "special_status": "Regular"
                 }
                 df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                 save_data(df)
                 get_student_milestones(student_number, get_program_type(program))
                 try:
                     add_semester_record(student_number, f"{ay_start}-{ay_start+1}", semester, [], semester_status="Regular")
-                except Exception as e:
-                    st.error(f"Could not create initial semester: {e}")
-                else:
+                    send_welcome_email(student_number, personal_email, full_name)
                     st.session_state.reg_success = True
                     st.rerun()
+                except Exception as e:
+                    st.error(f"Could not create initial semester: {e}")
 
 # ==================== GET INC/4.0 ALERTS ====================
 def get_inc_alert(student_number):
@@ -1848,8 +1646,6 @@ def render_compact_profile(student, is_own_profile=True):
         with col_b:
             st.markdown(f"**Required Units:** {student['total_units_required']}")
             st.markdown(f"**Special Status:** {student.get('special_status','Regular')}")
-            if not is_own_profile:
-                st.markdown(f"**External Reviewer:** {student.get('external_reviewer','Not assigned')}")
         
         if student.get("pos_status") == "Approved" and student.get("pos_approval_date"):
             st.caption(f"✅ POS approved on: {student['pos_approval_date']}")
@@ -1860,7 +1656,8 @@ def render_compact_profile(student, is_own_profile=True):
     with col1:
         st.markdown(f"**Address:** {student['address'] or '—'}")
         st.markdown(f"**Phone:** {student['phone'] or '—'}")
-        st.markdown(f"**Email:** {student['institutional_email'] or '—'}")
+        st.markdown(f"**Personal Email:** {student['personal_email'] or '—'}")
+        st.markdown(f"**Institutional Email (UP mail):** {student['institutional_email'] or '—'}")
     with col2:
         st.markdown(f"**Gender:** {student['gender'] or '—'}")
         st.markdown(f"**Civil Status:** {student['civil_status'] or '—'}")
@@ -1888,7 +1685,7 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
     original = get_original_pos(student_number)
     revisions = get_revisions(student_number)
     
-    can_submit = (is_own_view or viewer_role == "SESAM Staff")
+    can_submit = (is_own_view or st.session_state.role == "SESAM Staff")  # Staff can submit on behalf? For keep.
     is_adviser = (viewer_role == "Faculty Adviser")
     is_staff = (viewer_role == "SESAM Staff")
     
@@ -1942,7 +1739,7 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
     
     with col_right:
         st.markdown("### 📝 Revised POS (Updated Versions)")
-        st.caption("Student proposes changes → Adviser reviews → GS approves")
+        st.caption("Student proposes changes → Adviser approves → Student uploads GS-approved document")
         
         if revisions.empty:
             st.info("No revised POS submissions yet.")
@@ -1954,7 +1751,7 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
                     if status == "Pending":
                         st.warning("🟡 Status: Pending (Awaiting Adviser Review)")
                     elif status == "Adviser Approved":
-                        st.info("🔵 Status: Adviser Approved – Awaiting GS Approval")
+                        st.info("🔵 Status: Adviser Approved – Student must upload the GS-approved document")
                     elif status == "GS Approved":
                         st.success("✅ Status: GS Approved")
                     elif status == "Rejected":
@@ -1968,10 +1765,11 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
                         with open(rev["file_path"], "rb") as f:
                             st.download_button("📎 Download", f, file_name=os.path.basename(rev["file_path"]), key=f"download_rev_{rev['submission_id']}_{form_suffix}")
                     
+                    # Adviser approval step
                     if is_adviser and status == "Pending":
                         with st.form(key=f"adviser_rev_{rev['submission_id']}_{form_suffix}"):
                             remarks = st.text_area("Remarks (optional)", key=f"rev_remarks_{rev['submission_id']}_{form_suffix}")
-                            if st.form_submit_button("✅ Approve as Adviser", use_container_width=True):
+                            if st.form_submit_button("✅ Approve Revision", use_container_width=True):
                                 success, msg = approve_pos_revision(rev['submission_id'], st.session_state.display_name, remarks, "adviser")
                                 if success:
                                     st.success(msg)
@@ -1984,29 +1782,38 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
                                     st.rerun()
                                 else:
                                     st.error("Rejection failed.")
-                    elif is_staff and status == "Adviser Approved":
-                        with st.form(key=f"gs_rev_{rev['submission_id']}_{form_suffix}"):
-                            remarks = st.text_area("Remarks (optional)", key=f"gs_rev_remarks_{rev['submission_id']}_{form_suffix}")
-                            if st.form_submit_button("🏛️ Approve as Graduate School", use_container_width=True):
-                                success, msg = approve_pos_revision(rev['submission_id'], st.session_state.display_name, remarks, "gs")
-                                if success:
-                                    st.success(msg)
-                                    st.rerun()
+                    
+                    # Student uploads GS-approved document (final step)
+                    if is_own_view and status == "Adviser Approved" and rev.get("gs_approved") == False:
+                        with st.form(key=f"student_gs_upload_{rev['submission_id']}_{form_suffix}"):
+                            st.info("Your adviser has approved the revision. Please upload the official GS-approved POS document to complete the process.")
+                            uploaded_file = st.file_uploader("Upload GS-approved POS (PDF/JPG/PNG)", type=["pdf","jpg","jpeg","png"], key=f"gs_upload_{rev['submission_id']}_{form_suffix}")
+                            if st.form_submit_button("Submit GS-Approved Document", use_container_width=True):
+                                if uploaded_file:
+                                    # Save the uploaded file as the final approved version
+                                    folder = os.path.join(UPLOAD_FOLDER, student_number, "pos_submissions")
+                                    os.makedirs(folder, exist_ok=True)
+                                    ext = uploaded_file.name.split('.')[-1].lower()
+                                    filename = f"POS_v{rev['version']}_GSApproved_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
+                                    filepath = os.path.join(folder, filename)
+                                    with open(filepath, "wb") as f:
+                                        f.write(uploaded_file.getbuffer())
+                                    # Mark as GS approved
+                                    success, msg = finalize_gs_approval(student_number, rev['submission_id'], "Student uploaded GS-approved document")
+                                    if success:
+                                        st.success(msg)
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
                                 else:
-                                    st.error(msg)
-                            if st.form_submit_button("❌ Reject", use_container_width=True):
-                                if reject_pos_submission(rev['submission_id'], st.session_state.display_name, remarks):
-                                    st.warning("Revision rejected.")
-                                    st.rerun()
-                                else:
-                                    st.error("Rejection failed.")
+                                    st.error("Please select a file.")
         
         if can_submit:
             st.markdown("---")
             st.markdown("### 📤 Submit Revised POS")
             with st.form(key=f"submit_revision_{student_number}_{form_suffix}"):
-                uploaded_file = st.file_uploader("Upload revised POS (PDF/JPG/PNG) - Max 5MB", type=["pdf","jpg","jpeg","png"], key=f"revised_pos_{student_number}_{form_suffix}")
-                if st.form_submit_button("Submit Revised Version", use_container_width=True):
+                uploaded_file = st.file_uploader("Upload proposed revised POS (PDF/JPG/PNG) - Max 5MB", type=["pdf","jpg","jpeg","png"], key=f"revised_pos_{student_number}_{form_suffix}")
+                if st.form_submit_button("Submit Revised Version for Adviser Approval", use_container_width=True):
                     if uploaded_file:
                         if uploaded_file.size > 5 * 1024 * 1024:
                             st.error("File size exceeds 5MB.")
@@ -2021,7 +1828,7 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
                         st.error("Please select a file.")
     
     st.markdown("---")
-    st.caption("Note: The original POS is the first version approved by GS. Revisions go through Adviser → GS approval.")
+    st.caption("Note: The original POS is the first version approved by GS. Revisions go through Adviser approval, then student uploads the GS-approved document.")
 
 # ==================== UNIFIED STUDENT PROFILE VIEW ====================
 def view_student_profile(student_number, viewer_role):
@@ -2030,22 +1837,11 @@ def view_student_profile(student_number, viewer_role):
     program_type = get_program_type(student["program"])
     
     is_staff = (viewer_role == "SESAM Staff")
-    
-    can_edit_subjects = False
-    if is_staff:
-        if student["advisor"] == "Not assigned":
-            can_edit_subjects = True
-            st.info("ℹ️ No adviser assigned. You can edit this student's records directly.")
-        else:
-            st.warning(f"⚠️ Adviser assigned: {student['advisor']}. Editing is restricted.")
-            override = st.checkbox("🔓 Override restrictions (admin override)")
-            if override:
-                can_edit_subjects = True
-                st.info("Override active – you can now edit this student's subjects and add semesters.")
+    is_adviser = (viewer_role == "Faculty Adviser" and student["advisor"] == st.session_state.display_name)
     
     resid_status, used, max_y = check_residency_alert(student)
     if resid_status == "exceeded":
-        st.markdown(f'<div class="danger-banner">⚠️ RESIDENCY EXCEEDED: {used} years used (max {max_y}). Action required.</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="danger-banner">⚠️ RESIDENCY EXCEEDED: {used} years used (max {max_y}). Student is no longer eligible to enroll.</div>', unsafe_allow_html=True)
     elif resid_status == "warning":
         st.markdown(f'<div class="warning-banner">⚠️ Residency warning: {used} out of {max_y} years used. Only one year remaining.</div>', unsafe_allow_html=True)
     elif resid_status == "warning_extension":
@@ -2071,19 +1867,32 @@ def view_student_profile(student_number, viewer_role):
     milestone_list = MILESTONE_DEFS.get(program_type, MILESTONE_DEFS["MS_Thesis"])
     tab_names = ["👤 My Profile", "📚 Coursework"] + milestone_list
     if is_staff:
-        tab_names.append("⚙️ Admin Controls")
+        tab_names.append("⚙️ Admin & Extensions")
     tabs = st.tabs(tab_names)
     
     with tabs[0]:
-        render_compact_profile(student, is_own_profile=False)
-        if is_staff:
-            render_profile_approval_section(student, is_staff=True)
+        render_compact_profile(student, is_own_profile=(viewer_role == "Student"))
         if is_staff:
             st.markdown("---")
-            st.markdown("#### ℹ️ Staff Note")
-            st.info("Profile editing is not allowed. To change temporary adviser or external reviewer, use the **Admin Controls** tab.")
-        else:
-            st.markdown(f"**External Reviewer:** {student.get('external_reviewer','Not assigned')}")
+            st.markdown("#### 📝 Edit Personal Information (Staff Only)")
+            with st.form("staff_edit_profile"):
+                new_address = st.text_input("Address", value=student.get("address",""))
+                new_phone = st.text_input("Phone", value=student.get("phone",""))
+                new_institutional_email = st.text_input("Institutional Email (UP mail)", value=student.get("institutional_email",""))
+                new_gender = st.selectbox("Gender", ["", "Male", "Female", "Other"], index=["", "Male", "Female", "Other"].index(student.get("gender","")) if student.get("gender","") in ["", "Male", "Female", "Other"] else 0)
+                new_civil = st.selectbox("Civil Status", ["", "Single", "Married", "Divorced", "Widowed"], index=["", "Single", "Married", "Divorced", "Widowed"].index(student.get("civil_status","")) if student.get("civil_status","") in ["", "Single", "Married", "Divorced", "Widowed"] else 0)
+                if st.form_submit_button("Update Personal Information"):
+                    df = load_data()
+                    idx = df[df["student_number"] == student_number].index
+                    if len(idx) > 0:
+                        df.at[idx[0], "address"] = new_address
+                        df.at[idx[0], "phone"] = new_phone
+                        df.at[idx[0], "institutional_email"] = new_institutional_email
+                        df.at[idx[0], "gender"] = new_gender
+                        df.at[idx[0], "civil_status"] = new_civil
+                        save_data(df)
+                        st.success("Information updated.")
+                        st.rerun()
     
     with tabs[1]:
         st.subheader("Academic Record")
@@ -2100,20 +1909,50 @@ def view_student_profile(student_number, viewer_role):
             semesters = semesters.sort_values(["ay_num", "order"]).reset_index(drop=True)
         
         for _, row in semesters.iterrows():
-            render_semester_block_general(student_number, row, is_staff=True, override_edit=can_edit_subjects)
+            render_semester_block_general(student_number, row, is_staff=is_staff, is_adviser=is_adviser)
         
-        if can_edit_subjects and len(semesters) < total_terms:
+        # Add semester buttons – only for students (if rules allow) or staff (admin data entry)
+        can_add_semester = (st.session_state.role == "Student") or is_staff
+        if can_add_semester and len(semesters) < total_terms:
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("➕ Add Next Semester (Staff Only)"):
-                    last_sem = semesters.iloc[-1] if not semesters.empty else None
-                    if last_sem is not None:
-                        create_next_semester(student_number, last_sem["academic_year"], last_sem["semester"])
+                if st.button("➕ Add Next Semester"):
+                    if st.session_state.role == "Student":
+                        # Check prerequisites before allowing
+                        sem_index = len(semesters)
+                        ok, msg = check_committee_approval(student_number, sem_index)
+                        if not ok:
+                            st.error(msg)
+                        else:
+                            ok, msg = check_pos_approval(student_number, sem_index)
+                            if not ok:
+                                st.error(msg)
+                            else:
+                                last_sem = semesters.iloc[-1] if not semesters.empty else None
+                                if last_sem is not None:
+                                    create_next_semester(student_number, last_sem["academic_year"], last_sem["semester"])
+                                else:
+                                    create_next_semester(student_number, timeline[0][0], timeline[0][1])
+                                st.rerun()
                     else:
-                        create_next_semester(student_number, timeline[0][0], timeline[0][1])
-                    st.rerun()
+                        # Staff can add without checks? No – strict rules: staff cannot bypass. So we also apply checks.
+                        sem_index = len(semesters)
+                        ok, msg = check_committee_approval(student_number, sem_index)
+                        if not ok:
+                            st.error(msg)
+                        else:
+                            ok, msg = check_pos_approval(student_number, sem_index)
+                            if not ok:
+                                st.error(msg)
+                            else:
+                                last_sem = semesters.iloc[-1] if not semesters.empty else None
+                                if last_sem is not None:
+                                    create_next_semester(student_number, last_sem["academic_year"], last_sem["semester"])
+                                else:
+                                    create_next_semester(student_number, timeline[0][0], timeline[0][1])
+                                st.rerun()
             with col2:
-                if st.button("📅 Create All Missing Semesters (Bulk)") and can_edit_subjects:
+                if st.button("📅 Create All Missing Semesters (Bulk)") and is_staff:
                     for ay, sem in timeline:
                         if not ((existing_sems["academic_year"] == ay) & (existing_sems["semester"] == sem)).any():
                             try:
@@ -2123,7 +1962,7 @@ def view_student_profile(student_number, viewer_role):
                                 break
                     st.success("All missing semesters created (where allowed by policy).")
                     st.rerun()
-        elif can_edit_subjects:
+        elif can_add_semester:
             st.success("✅ All required semesters have been created. Student may still need to enroll in subjects.")
         
         st.markdown("---")
@@ -2139,7 +1978,7 @@ def view_student_profile(student_number, viewer_role):
     for i, milestone_name in enumerate(milestone_list):
         with tabs[2 + i]:
             if milestone_name == "Plan of Study (POS)":
-                render_pos_milestone(student_number, viewer_role, is_own_view=False)
+                render_pos_milestone(student_number, viewer_role, is_own_view=(viewer_role == "Student"))
             else:
                 milestone_filtered = milestones_df[milestones_df["milestone"] == milestone_name]
                 if milestone_filtered.empty:
@@ -2171,7 +2010,7 @@ def view_student_profile(student_number, viewer_role):
                 if status == "Rejected" and remarks:
                     st.error(f"**Rejection reason:** {remarks}")
                 
-                # Committee milestone
+                # Committee milestone (student submits, adviser approves/rejects)
                 if milestone_name in ["Guidance Committee Members", "Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
                     committee_members = get_committee_members(student_number)
                     
@@ -2197,11 +2036,11 @@ def view_student_profile(student_number, viewer_role):
                                 with st.container():
                                     col_name, col_role, col_del = st.columns([2, 1.5, 0.5])
                                     with col_name:
-                                        new_name = st.text_input("Name", value=member.get("name", ""), key=f"name_{idx}_{student_number}", placeholder="Firstname Lastname")
+                                        new_name = st.text_input("Name", value=member.get("name", ""), key=f"name_{idx}_{student_number}", placeholder="Firstname Lastname", disabled=(viewer_role != "Student"))
                                     with col_role:
-                                        new_role = st.selectbox("Role", ["Chair", "Co-chair", "Member"], index=["Chair","Co-chair","Member"].index(member.get("role", "Member")), key=f"role_{idx}_{student_number}")
+                                        new_role = st.selectbox("Role", ["Chair", "Co-chair", "Member"], index=["Chair","Co-chair","Member"].index(member.get("role", "Member")), key=f"role_{idx}_{student_number}", disabled=(viewer_role != "Student"))
                                     with col_del:
-                                        if st.button("🗑️", key=f"remove_{idx}_{student_number}"):
+                                        if viewer_role == "Student" and st.button("🗑️", key=f"remove_{idx}_{student_number}"):
                                             remove_indices.append(idx)
                                     st.session_state[edit_key][idx] = {"name": new_name, "role": new_role}
                             
@@ -2209,23 +2048,24 @@ def view_student_profile(student_number, viewer_role):
                                 st.session_state[edit_key].pop(idx)
                                 st.rerun()
                             
-                            if st.button("➕ Add Committee Member"):
-                                st.session_state[edit_key].append({"name": "", "role": "Member"})
-                                st.rerun()
-                            
-                            if st.button("💾 Save Committee Members"):
-                                chairs = [m for m in st.session_state[edit_key] if m.get("role") == "Chair"]
-                                if len(chairs) != 1:
-                                    st.error("Committee must have exactly one Chair.")
-                                elif any(not m.get("name", "").strip() for m in st.session_state[edit_key]):
-                                    st.error("All members must have a name (Firstname Lastname).")
-                                else:
-                                    valid, msg = set_committee_members(student_number, st.session_state[edit_key])
-                                    if valid:
-                                        st.success(msg)
-                                        st.rerun()
+                            if viewer_role == "Student":
+                                if st.button("➕ Add Committee Member"):
+                                    st.session_state[edit_key].append({"name": "", "role": "Member"})
+                                    st.rerun()
+                                
+                                if st.button("💾 Save Committee Members"):
+                                    chairs = [m for m in st.session_state[edit_key] if m.get("role") == "Chair"]
+                                    if len(chairs) != 1:
+                                        st.error("Committee must have exactly one Chair.")
+                                    elif any(not m.get("name", "").strip() for m in st.session_state[edit_key]):
+                                        st.error("All members must have a name (Firstname Lastname).")
                                     else:
-                                        st.error(msg)
+                                        valid, msg = set_committee_members(student_number, st.session_state[edit_key])
+                                        if valid:
+                                            st.success(msg)
+                                            st.rerun()
+                                        else:
+                                            st.error(msg)
                         else:
                             st.info("Committee already approved. No further changes allowed.")
                     
@@ -2234,7 +2074,35 @@ def view_student_profile(student_number, viewer_role):
                     if status == "Not Started":
                         st.warning("⚠️ **Requirement not yet submitted.** Please upload the required document and submit for approval.")
                     
-                    if status != "Approved":
+                    # Revision request (optional, but allowed)
+                    if status == "Approved" and viewer_role == "Student":
+                        if st.button("📝 Request Committee Revision", key=f"req_rev_{milestone_name}_{student_number}"):
+                            st.session_state[f"revision_request_{milestone_name}_{student_number}"] = True
+                    
+                    if st.session_state.get(f"revision_request_{milestone_name}_{student_number}", False):
+                        with st.form(key=f"revision_form_{milestone_name}_{student_number}"):
+                            reason = st.text_area("Reason for revision (e.g., change of chair, member resignation)")
+                            new_members_text = st.text_area("Proposed new committee members (Name, Role per line)")
+                            if st.form_submit_button("Submit Revision Request"):
+                                update_milestone(student_number, milestone_name, "Revision Requested", 
+                                                 date.today().strftime("%Y-%m-%d"), "", 
+                                                 f"Revision requested: {reason}\nProposed: {new_members_text}", 
+                                                 st.session_state.display_name)
+                                st.success("Revision request submitted. Your adviser will review.")
+                                st.session_state[f"revision_request_{milestone_name}_{student_number}"] = False
+                                st.rerun()
+                    
+                    if status == "Revision Requested" and is_adviser:
+                        st.info(f"📬 **Revision Request** – {remarks}")
+                        col_acc, col_rej = st.columns(2)
+                        if col_acc.button("✅ Approve Revision", key=f"app_rev_{milestone_name}_{student_number}"):
+                            update_milestone(student_number, milestone_name, "Pending", None, None, "Revision approved – please update committee members", st.session_state.display_name)
+                            st.rerun()
+                        if col_rej.button("❌ Reject Revision", key=f"rej_rev_{milestone_name}_{student_number}"):
+                            update_milestone(student_number, milestone_name, "Approved", None, None, f"Revision rejected: {remarks}", st.session_state.display_name)
+                            st.rerun()
+                    
+                    if status != "Approved" and "Revision Requested" not in status and viewer_role == "Student":
                         with st.form(key=f"submit_{milestone_name}_{student_number}"):
                             st.markdown("**Required document:** Please upload the official form or certificate for this milestone.")
                             uploaded_file = st.file_uploader(
@@ -2247,7 +2115,7 @@ def view_student_profile(student_number, viewer_role):
                                 if not uploaded_file:
                                     st.error("Please upload a document.")
                                 elif uploaded_file.size > 5 * 1024 * 1024:
-                                    st.error("File size exceeds 5MB. Please compress or choose a smaller file.")
+                                    st.error("File size exceeds 5MB.")
                                 else:
                                     filepath = save_milestone_file(student_number, milestone_name, uploaded_file)
                                     success, msg = update_milestone(student_number, milestone_name, "Pending", date_completed.strftime("%Y-%m-%d"), filepath, "", None)
@@ -2259,40 +2127,7 @@ def view_student_profile(student_number, viewer_role):
                                         st.rerun()
                                     else:
                                         st.error(msg)
-                    else:
-                        st.success("✅ This milestone has been approved.")
-                
-                # Non-committee milestones
-                else:
-                    if status == "Not Started":
-                        st.warning("⚠️ **Requirement not yet submitted.** Please upload the required document and submit for approval.")
-                    
-                    if status != "Approved":
-                        if viewer_role == "Student" or (viewer_role == "SESAM Staff"):
-                            with st.form(key=f"submit_{milestone_name}_{student_number}"):
-                                st.markdown("**Required document:** Please upload the official form or certificate for this milestone.")
-                                uploaded_file = st.file_uploader("Upload document (PDF/JPG/PNG) - Max 5MB", type=["pdf","jpg","jpeg","png"], key=f"upload_{milestone_name}_{student_number}")
-                                date_completed = st.date_input("Date of completion/event", value=date.today())
-                                if st.form_submit_button("Submit for Approval", use_container_width=True):
-                                    if not uploaded_file:
-                                        st.error("Please upload a document.")
-                                    elif uploaded_file.size > 5 * 1024 * 1024:
-                                        st.error("File size exceeds 5MB.")
-                                    else:
-                                        filepath = save_milestone_file(student_number, milestone_name, uploaded_file)
-                                        success, msg = update_milestone(student_number, milestone_name, "Pending", date_completed.strftime("%Y-%m-%d"), filepath, "", None)
-                                        if success:
-                                            if msg:
-                                                st.success(msg)
-                                            else:
-                                                st.success(f"{milestone_name} submitted for approval.")
-                                            st.rerun()
-                                        else:
-                                            st.error(msg)
-                        else:
-                            st.info("Only the student or staff can submit milestone requirements.")
-                    
-                    if status == "Pending" and viewer_role == "Faculty Adviser":
+                    elif status == "Pending" and is_adviser:
                         st.markdown("---")
                         st.markdown("**Review this milestone**")
                         with st.form(key=f"review_{milestone_name}_{student_number}"):
@@ -2315,21 +2150,78 @@ def view_student_profile(student_number, viewer_role):
                                     st.rerun()
                                 else:
                                     st.error(msg)
+                    elif status == "Approved":
+                        st.success("✅ This milestone has been approved.")
+                    elif status == "Pending" and not is_adviser:
+                        st.info("⏳ Your submission is pending review.")
+                
+                # Non-committee milestones
+                else:
+                    if status == "Not Started" and viewer_role == "Student":
+                        st.warning("⚠️ **Requirement not yet submitted.** Please upload the required document and submit for approval.")
+                    
+                    if status in ["Not Started", "Rejected"] and viewer_role == "Student":
+                        with st.form(key=f"student_submit_{milestone_name}_{student_number}"):
+                            st.markdown("**Required document:** Please upload the official form or certificate for this milestone.")
+                            uploaded_file = st.file_uploader("Upload document (PDF/JPG/PNG) - Max 5MB", type=["pdf","jpg","jpeg","png"], key=f"upload_student_{milestone_name}_{student_number}")
+                            date_completed = st.date_input("Date of completion/event", value=date.today())
+                            if st.form_submit_button("Submit for Approval", use_container_width=True):
+                                if not uploaded_file:
+                                    st.error("Please upload a document.")
+                                elif uploaded_file.size > 5 * 1024 * 1024:
+                                    st.error("File size exceeds 5MB.")
+                                else:
+                                    filepath = save_milestone_file(student_number, milestone_name, uploaded_file)
+                                    success, msg = update_milestone(student_number, milestone_name, "Pending", date_completed.strftime("%Y-%m-%d"), filepath, "", None)
+                                    if success:
+                                        if msg:
+                                            st.success(msg)
+                                        else:
+                                            st.success(f"{milestone_name} submitted for approval.")
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
+                    elif status == "Pending" and is_adviser:
+                        st.markdown("---")
+                        st.markdown("**Review this milestone**")
+                        with st.form(key=f"review_{milestone_name}_{student_number}"):
+                            review_remarks = st.text_area("Remarks (optional)", key=f"review_remarks_{milestone_name}_{student_number}")
+                            col_app, col_rej = st.columns(2)
+                            if col_app.form_submit_button("✅ Approve", use_container_width=True):
+                                success, msg = update_milestone(student_number, milestone_name, "Approved", None, None, review_remarks, st.session_state.display_name)
+                                if success:
+                                    if msg:
+                                        st.success(msg)
+                                    else:
+                                        st.success("Milestone approved.")
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
+                            if col_rej.form_submit_button("❌ Reject", use_container_width=True):
+                                success, msg = update_milestone(student_number, milestone_name, "Rejected", None, None, review_remarks, st.session_state.display_name)
+                                if success:
+                                    st.warning("Milestone rejected.")
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
+                    elif status == "Pending" and not is_adviser:
+                        st.info("⏳ Your submission is pending review.")
+                    elif status == "Approved":
+                        st.success("✅ This milestone has been approved.")
+                        if milestone_name == milestone_list[-1]:
+                            st.markdown("""
+                            <div class="next-step-card">
+                                <strong>🎉 Congratulations!</strong><br>
+                                You have completed all milestones. Contact the Graduate School for graduation.
+                            </div>
+                            """, unsafe_allow_html=True)
     
-    # Admin Controls Tab
+    # Admin & Extensions Tab (Staff only)
     if is_staff:
         with tabs[-1]:
-            st.subheader("Administrative Controls")
-            st.markdown("**Change Temporary Adviser**")
-            adviser_options = ["Not assigned", "Dr. Eslava", "Dr. Sanchez"]
-            new_advisor = st.selectbox("Select adviser", adviser_options, index=adviser_options.index(student["advisor"]) if student["advisor"] in adviser_options else 0)
-            if st.button("Update Temporary Adviser"):
-                df = load_data()
-                df.loc[df["student_number"] == student_number, "advisor"] = new_advisor
-                save_data(df)
-                st.success(f"Temporary adviser updated to {new_advisor}")
-                st.rerun()
-            st.markdown("**Change Program**")
+            st.subheader("Administrative Data Entry & Extensions")
+            
+            st.markdown("**Update Student Program**")
             new_program = st.selectbox("New Program", PROGRAMS, index=PROGRAMS.index(student["program"]) if student["program"] in PROGRAMS else 0)
             if st.button("Update Program"):
                 prior = student.get("prior_ms_graduate", False)
@@ -2341,7 +2233,8 @@ def view_student_profile(student_number, viewer_role):
                 save_data(df)
                 st.success("Program updated.")
                 st.rerun()
-            st.markdown("**Special Student Status**")
+            
+            st.markdown("**Update Special Status**")
             status_options = ["Regular", "Transferred", "Shifted", "On Leave", "Inactive", "Deleted"]
             current_special = student.get("special_status", "Regular")
             new_special = st.selectbox("Status", status_options, index=status_options.index(current_special) if current_special in status_options else 0)
@@ -2351,40 +2244,51 @@ def view_student_profile(student_number, viewer_role):
                 save_data(df)
                 st.success("Special status updated.")
                 st.rerun()
-            st.markdown("**POS Status Override**")
-            pos_status = st.selectbox("POS Status", ["Approved", "Pending", "Rejected", "Not Started"], index=["Approved","Pending","Rejected","Not Started"].index(student.get("pos_status","Pending")))
-            if st.button("Update POS Status"):
-                df = load_data()
-                df.loc[df["student_number"] == student_number, "pos_status"] = pos_status
-                save_data(df)
-                if pos_status == "Approved":
-                    update_milestone(student_number, "Plan of Study (POS)", "Approved", datetime.now().strftime("%Y-%m-%d"), "", "Overridden by staff", st.session_state.display_name)
-                elif pos_status == "Pending":
-                    update_milestone(student_number, "Plan of Study (POS)", "Pending", "", "", "Overridden by staff", st.session_state.display_name)
-                else:
-                    update_milestone(student_number, "Plan of Study (POS)", "Not Started", "", "", "Overridden by staff", st.session_state.display_name)
-                st.success(f"POS status updated to {pos_status}")
-                st.rerun()
-            st.markdown("**Thesis & Residency Extensions**")
-            current_ext = student.get("thesis_extension_units", 0)
-            st.write(f"Thesis extension units: {current_ext} / 6")
-            if st.button("➕ Grant 1 Thesis Extension Unit"):
-                if current_ext < 6:
+            
+            st.markdown("---")
+            st.markdown("### 📜 Extension Grants (UPLB GS Rules)")
+            
+            # Thesis extension units
+            st.markdown("**Thesis/Dissertation Extension Units**")
+            current_thesis_ext = student.get("thesis_extension_units", 0)
+            max_thesis_ext = 6
+            st.write(f"Current thesis extension units granted: **{current_thesis_ext} / {max_thesis_ext}**")
+            if current_thesis_ext < max_thesis_ext:
+                if st.button("➕ Grant 1 Thesis Extension Unit", key=f"grant_thesis_ext_{student_number}"):
                     df = load_data()
-                    df.loc[df["student_number"] == student_number, "thesis_extension_units"] = current_ext + 1
+                    df.loc[df["student_number"] == student_number, "thesis_extension_units"] = current_thesis_ext + 1
                     save_data(df)
-                    st.success("Thesis extension unit granted.")
+                    st.success(f"Thesis extension unit granted. New total: {current_thesis_ext + 1}")
                     st.rerun()
-                else:
-                    st.error("Maximum reached.")
+            else:
+                st.info("Maximum thesis extension units (6) already granted.")
+            
+            # Residency extension years
+            st.markdown("**Residency Extension Years**")
             current_res_ext = student.get("residency_extension_years", 0)
-            st.write(f"Residency extension years: {current_res_ext}")
-            if st.button("➕ Grant 1 Residency Extension Year"):
-                df = load_data()
-                df.loc[df["student_number"] == student_number, "residency_extension_years"] = current_res_ext + 1
-                save_data(df)
-                st.success("Residency extended by 1 year.")
-                st.rerun()
+            max_res_ext = 2  # UPLB allows up to 2 years extension total (1 year + possible second year)
+            st.write(f"Current residency extension years granted: **{current_res_ext}**")
+            if current_res_ext < max_res_ext:
+                if st.button("➕ Grant 1 Residency Extension Year", key=f"grant_res_ext_{student_number}"):
+                    df = load_data()
+                    df.loc[df["student_number"] == student_number, "residency_extension_years"] = current_res_ext + 1
+                    # Also update max residency limit
+                    new_max = get_residency_max_from_program(student["program"]) + (current_res_ext + 1)
+                    df.loc[df["student_number"] == student_number, "residency_max_years"] = new_max
+                    save_data(df)
+                    st.success(f"Residency extended by 1 year. New max residency: {new_max} years")
+                    st.rerun()
+            else:
+                st.info("Maximum residency extension (2 years) already granted.")
+            
+            st.markdown("---")
+            st.markdown("**Export Student Data**")
+            if st.button("📥 Download All Students CSV"):
+                df_export = load_data()
+                csv = df_export.to_csv(index=False)
+                b64 = base64.b64encode(csv.encode()).decode()
+                href = f'<a href="data:file/csv;base64,{b64}" download="sesam_students.csv">Download CSV</a>'
+                st.markdown(href, unsafe_allow_html=True)
 
 # ==================== STUDENT DASHBOARD ====================
 def student_dashboard():
@@ -2401,7 +2305,7 @@ def student_dashboard():
         st.session_state.profile_update_success = False
     
     st.subheader(f"📘 Your Dashboard – {student['name']}")
-    st.info("ℹ️ **Note:** The adviser shown above is a **temporary adviser** assigned upon admission. Once your Guidance/Advisory Committee is formed and approved, a transfer request will be sent to the Chair. You will be officially transferred only when the Chair accepts.")
+    st.info("ℹ️ **Note:** The adviser shown above is a **temporary adviser** assigned upon admission. Once your Guidance/Advisory Committee is formed and approved, the Chair will automatically become your official adviser.")
     
     required_fields_missing = False
     missing_fields = []
@@ -2410,7 +2314,7 @@ def student_dashboard():
     if not student.get("phone") or student.get("phone") == "":
         missing_fields.append("Phone Number")
     if not student.get("institutional_email") or student.get("institutional_email") == "":
-        missing_fields.append("Institutional Email")
+        missing_fields.append("Institutional Email (UP mail)")
     if missing_fields:
         required_fields_missing = True
         st.warning(f"⚠️ **Required Information Missing**\n\nPlease complete the following fields in your Profile before accessing your coursework: {', '.join(missing_fields)}")
@@ -2421,7 +2325,7 @@ def student_dashboard():
     
     resid_status, used, max_y = check_residency_alert(student)
     if resid_status == "exceeded":
-        st.markdown(f'<div class="danger-banner">⚠️ RESIDENCY EXCEEDED: {used} years used (max {max_y}). Please consult your adviser.</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="danger-banner">⚠️ RESIDENCY EXCEEDED: {used} years used (max {max_y}). You are no longer eligible to enroll.</div>', unsafe_allow_html=True)
     elif resid_status == "warning":
         st.markdown(f'<div class="warning-banner">⚠️ Residency warning: {used} out of {max_y} years used. Only one year remaining.</div>', unsafe_allow_html=True)
     elif resid_status == "warning_extension":
@@ -2437,6 +2341,21 @@ def student_dashboard():
     semester_count = len(get_student_semesters(student["student_number"]))
     if semester_count >= 2 and is_master_program(student["program"]) and student.get("pos_status","Pending") != "Approved":
         st.markdown('<div class="danger-banner">⚠️ Your Plan of Study (POS) is not yet approved. You will not be able to register for the next semester until it is approved. Please contact your adviser.</div>', unsafe_allow_html=True)
+    
+    # Committee formation reminder
+    if not is_committee_approved(student["student_number"]):
+        if len(existing_sems) >= 2:
+            st.warning("""
+            ⚠️ **Committee Formation Required**  
+            Your Guidance/Advisory Committee should have been nominated during your first semester.  
+            Please contact your temporary adviser immediately to form your committee and submit the Nomination Form to the Graduate School.  
+            You will not be able to proceed to further semesters until this is approved.
+            """)
+        else:
+            st.info("""
+            ℹ️ **Reminder:** Your Guidance/Advisory Committee must be nominated by the end of this (first) semester.  
+            Please consult with your temporary adviser to form your committee and submit the required form to the Graduate School.
+            """)
     
     milestones_df = get_student_milestones(student["student_number"], program_type)
     milestone_list = MILESTONE_DEFS.get(program_type, MILESTONE_DEFS["MS_Thesis"])
@@ -2456,7 +2375,8 @@ def student_dashboard():
                     new_address = st.text_input("Address *", value=student.get("address",""))
                 with col2:
                     new_phone = st.text_input("Phone Number *", value=student.get("phone",""))
-                new_email = st.text_input("Institutional Email *", value=student.get("institutional_email",""))
+                new_email = st.text_input("Institutional Email (UP mail) *", value=student.get("institutional_email",""))
+                st.caption("Your personal email (from NOA) cannot be changed here. Contact staff if needed.")
                 st.markdown("#### Optional Information")
                 col3, col4 = st.columns(2)
                 with col3:
@@ -2524,15 +2444,21 @@ def student_dashboard():
             semesters = semesters.sort_values(["ay_num", "order"]).reset_index(drop=True)
         
         for _, row in semesters.iterrows():
-            render_semester_block_general(student["student_number"], row, is_staff=False, override_edit=False)
+            render_semester_block_general(student["student_number"], row, is_staff=False, is_adviser=False)
         
         if len(semesters) < total_terms:
+            # Check prerequisites
             pos_ok = True
-            if len(semesters) >= 1 and student.get("pos_status") != "Approved":
-                pos_ok = False
-                st.warning("⚠️ Your Plan of Study (POS) must be approved before you can add the next semester. Please work with your adviser.")
+            committee_ok = True
+            if len(semesters) >= 1:
+                if student.get("pos_status") != "Approved":
+                    pos_ok = False
+                    st.warning("⚠️ Your Plan of Study (POS) must be approved before you can add the next semester. Please work with your adviser.")
+                if not is_committee_approved(student["student_number"]):
+                    committee_ok = False
+                    st.warning("⚠️ Your Guidance/Advisory Committee must be approved before you can add the next semester. Please submit the Committee Nomination Form to the Graduate School.")
             
-            if pos_ok:
+            if pos_ok and committee_ok:
                 if st.button("➕ Add Next Semester"):
                     if not semesters.empty:
                         last_sem = semesters.iloc[-1]
@@ -2610,7 +2536,7 @@ def student_dashboard():
                 if status == "Rejected" and remarks:
                     st.error(f"**Rejection reason:** {remarks}")
                 
-                # Committee milestone
+                # Committee milestone (student submits, adviser approves)
                 if milestone_name in ["Guidance Committee Members", "Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
                     committee_members = get_committee_members(student["student_number"])
                     
@@ -2673,6 +2599,24 @@ def student_dashboard():
                     if status == "Not Started":
                         st.warning("⚠️ **Requirement not yet submitted.** Please upload the required document and submit for approval.")
                     
+                    # Revision request for approved committee
+                    if status == "Approved":
+                        if st.button("📝 Request Committee Revision", key=f"req_rev_student_{milestone_name}_{student['student_number']}"):
+                            st.session_state[f"revision_request_{milestone_name}_{student['student_number']}"] = True
+                    
+                    if st.session_state.get(f"revision_request_{milestone_name}_{student['student_number']}", False):
+                        with st.form(key=f"revision_form_{milestone_name}_{student['student_number']}"):
+                            reason = st.text_area("Reason for revision (e.g., change of chair, member resignation)")
+                            new_members_text = st.text_area("Proposed new committee members (Name, Role per line)")
+                            if st.form_submit_button("Submit Revision Request"):
+                                update_milestone(student["student_number"], milestone_name, "Revision Requested", 
+                                                 date.today().strftime("%Y-%m-%d"), "", 
+                                                 f"Revision requested: {reason}\nProposed: {new_members_text}", 
+                                                 st.session_state.display_name)
+                                st.success("Revision request submitted. Your adviser will review.")
+                                st.session_state[f"revision_request_{milestone_name}_{student['student_number']}"] = False
+                                st.rerun()
+                    
                     if status in ["Not Started", "Rejected"]:
                         with st.form(key=f"student_submit_{milestone_name}_{student['student_number']}"):
                             st.markdown("**Required document:** Please upload the official form or certificate for this milestone.")
@@ -2699,9 +2643,10 @@ def student_dashboard():
                                     else:
                                         st.error(msg)
                     elif status == "Pending":
-                        st.info("⏳ Your submission is pending review. No new submission allowed until the current one is approved or rejected.")
+                        st.info("⏳ Your submission is pending review.")
                     else:
-                        st.success("✅ This milestone has been approved.")
+                        if "Revision Requested" not in status and status != "Approved":
+                            st.error("Unexpected status. Contact staff.")
                 
                 # Non‑committee milestones
                 else:
@@ -2730,7 +2675,7 @@ def student_dashboard():
                                     else:
                                         st.error(msg)
                     elif status == "Pending":
-                        st.info("⏳ Your submission is pending review. No new submission allowed until the current one is approved or rejected.")
+                        st.info("⏳ Your submission is pending review.")
                     elif status == "Approved":
                         st.success("✅ This milestone has been approved.")
                         if milestone_name == milestone_list[-1]:
@@ -2786,22 +2731,15 @@ if df is None or df.empty:
 with st.sidebar:
     st.markdown(f"<div style='text-align:center'><h3>👤 {st.session_state.display_name}</h3><div>{st.session_state.role}</div><div>✅ Consent given</div></div>", unsafe_allow_html=True)
     
-    if st.session_state.role == "Faculty Adviser":
-        transfer_df = load_transfer_requests()
-        pending_for_me = transfer_df[transfer_df["requested_advisor"] == st.session_state.display_name]
-        pending_count = len(pending_for_me)
-        if pending_count > 0:
-            st.info(f"📬 **{pending_count} pending transfer request(s)** – see below")
-    
     if st.button("🚪 Logout", use_container_width=True):
         st.session_state.logged_in = False
         st.session_state.consent_given = False
         st.rerun()
     st.markdown("---")
-    st.caption("Version 28.19 | Complete fixes: load_data, filter_dataframe, POS sync")
+    st.caption("Version 31.0 | Strict rule enforcement + extension grants (thesis & residency)")
 
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
-st.caption("Fully compliant with UPLB Graduate School policies. Coursework handled in its own tab; milestones can be submitted anytime.")
+st.caption("Strict rule enforcement: all progression requires approved prerequisites. Extensions can be granted by staff per UPLB GS rules.")
 
 role = st.session_state.role
 
@@ -2850,34 +2788,6 @@ if role == "SESAM Staff":
 elif role == "Faculty Adviser":
     st.subheader(f"👨‍🏫 Faculty Adviser Dashboard – {st.session_state.display_name}")
     
-    transfer_df = load_transfer_requests()
-    pending_for_me = transfer_df[transfer_df["requested_advisor"] == st.session_state.display_name]
-    if not pending_for_me.empty:
-        st.markdown("### 📬 Pending Transfer Requests")
-        for _, req in pending_for_me.iterrows():
-            with st.container(border=True):
-                st.write(f"**Student:** {req['student_number']}")
-                st.write(f"**Current Adviser:** {req['current_advisor']}")
-                st.write(f"**Requested Adviser (You):** {req['requested_advisor']}")
-                st.write(f"**Milestone:** {req['milestone_name']}")
-                st.write(f"**Date:** {req['request_date']}")
-                col_acc, col_rej = st.columns(2)
-                if col_acc.button("✅ Accept", key=f"accept_{req['request_id']}"):
-                    success, msg = accept_transfer_request(req['request_id'])
-                    if success:
-                        st.success(msg)
-                        st.rerun()
-                    else:
-                        st.error(msg)
-                if col_rej.button("❌ Reject", key=f"reject_{req['request_id']}"):
-                    success, msg = reject_transfer_request(req['request_id'])
-                    if success:
-                        st.warning(msg)
-                        st.rerun()
-                    else:
-                        st.error(msg)
-        st.markdown("---")
-    
     advisees = df[df["advisor"] == st.session_state.display_name].copy()
     if advisees.empty:
         st.warning("No students assigned to you.")
@@ -2886,13 +2796,9 @@ elif role == "Faculty Adviser":
         advisee_numbers = advisees["student_number"].tolist()
         pending_sems = all_semesters[(all_semesters["student_number"].isin(advisee_numbers)) & (all_semesters["doc_status"] == "Pending")]
         pending_count = len(pending_sems)
-        profile_count = 0
-        if "profile_pending_status" in advisees.columns:
-            profile_count = len(advisees[advisees["profile_pending_status"] == "Pending"])
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1: st.metric("Total Advisees", len(advisees))
         with col2: st.metric("📄 Pending Documents", pending_count)
-        with col3: st.metric("👤 Pending Profiles", profile_count)
         st.markdown("---")
         search_term = st.text_input("🔍 Search advisees", key="adviser_search")
         if search_term:
@@ -2917,4 +2823,4 @@ elif role == "Student":
     student_dashboard()
 
 st.markdown("---")
-st.caption("SESAM KMIS v28.19 | Complete fixes: load_data, filter_dataframe, POS sync")
+st.caption("SESAM KMIS v31.0 | Strict rule enforcement + extension grants (thesis & residency)")
