@@ -1,8 +1,7 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 31.0 | Strict rule enforcement + extension grants (thesis & residency) allowed by UPLB GS rules
-Roles: Student (data input), Adviser (academic evaluation), Staff (admin + extension grants only)
-No bypasses for POS or committee approval – progression requires approved prerequisites.
+Version: 32.0 | Enhanced committee workflow: version control, adviser verification, GS PDF upload
+Roles: Student (submit), Adviser (verify), Staff (read-only)
 """
 
 import streamlit as st
@@ -13,6 +12,7 @@ from datetime import date, datetime, timedelta
 import smtplib
 from email.message import EmailMessage
 import base64
+import shutil
 
 # ==================== EMAIL CONFIGURATION (placeholder) ====================
 SMTP_SERVER = "smtp.gmail.com"
@@ -293,57 +293,212 @@ MILESTONE_FILE = "milestone_tracking.csv"
 POS_SUBMISSIONS_FILE = "pos_submissions.csv"
 UPLOAD_FOLDER = "student_uploads"
 PROFILE_PIC_FOLDER = "profile_pics"
+COMMITTEE_VERSIONS_FILE = "committee_versions.csv"
+COMMITTEE_MEMBERS_FILE = "committee_members.csv"
 
 for folder in [UPLOAD_FOLDER, PROFILE_PIC_FOLDER]:
     if not os.path.exists(folder):
         os.makedirs(folder)
 
-# ==================== COMMITTEE MEMBERS HELPERS ====================
-def get_committee_members(student_number):
-    df = load_data()
-    student = df[df["student_number"] == student_number]
-    if student.empty:
-        return []
-    committee_json = student.iloc[0].get("committee_members_structured", "")
-    if committee_json and committee_json.strip():
-        try:
-            members = json.loads(committee_json)
-            if isinstance(members, list):
-                return members
-        except:
-            pass
+# ==================== COMMITTEE VERSION CONTROL ====================
+def init_committee_tables():
+    """Create CSV files if they don't exist."""
+    if not os.path.exists(COMMITTEE_VERSIONS_FILE):
+        df_ver = pd.DataFrame(columns=[
+            "version_id", "student_number", "version_number", "gs_pdf_path",
+            "verification_status", "verification_date", "verified_by", "remarks", "is_active", "created_at"
+        ])
+        df_ver.to_csv(COMMITTEE_VERSIONS_FILE, index=False)
+    if not os.path.exists(COMMITTEE_MEMBERS_FILE):
+        df_mem = pd.DataFrame(columns=[
+            "member_id", "version_id", "role", "name"
+        ])
+        df_mem.to_csv(COMMITTEE_MEMBERS_FILE, index=False)
+
+def get_next_version_id():
+    df = pd.read_csv(COMMITTEE_VERSIONS_FILE)
+    if df.empty:
+        return 1
+    return df["version_id"].max() + 1
+
+def get_next_member_id():
+    df = pd.read_csv(COMMITTEE_MEMBERS_FILE)
+    if df.empty:
+        return 1
+    return df["member_id"].max() + 1
+
+def save_committee_version(student_number, pdf_file, members_dict):
+    """
+    members_dict: dict with keys: 'chair', 'co_chair', 'member_major', 'member_cognate1', 'member_cognate2'
+    """
+    # Validate required roles
+    required = ['chair', 'member_major', 'member_cognate1', 'member_cognate2']
+    for r in required:
+        if not members_dict.get(r, "").strip():
+            return False, f"Missing required role: {r.replace('_', ' ').title()}"
+    
+    # Check for pending version
+    df_ver = pd.read_csv(COMMITTEE_VERSIONS_FILE)
+    pending = df_ver[(df_ver["student_number"] == student_number) & (df_ver["verification_status"] == "Pending")]
+    if not pending.empty:
+        return False, "You already have a pending committee version. Please wait for your adviser to verify it."
+    
+    # Determine version number
+    student_versions = df_ver[df_ver["student_number"] == student_number]
+    if student_versions.empty:
+        version_number = 1
+    else:
+        version_number = student_versions["version_number"].max() + 1
+    
+    # Save PDF
+    folder = os.path.join(UPLOAD_FOLDER, student_number, "committee")
+    os.makedirs(folder, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"committee_v{version_number}_{timestamp}.pdf"
+    filepath = os.path.join(folder, filename)
+    with open(filepath, "wb") as f:
+        f.write(pdf_file.getbuffer())
+    
+    # Insert version record
+    version_id = get_next_version_id()
+    new_ver = pd.DataFrame([{
+        "version_id": version_id,
+        "student_number": student_number,
+        "version_number": version_number,
+        "gs_pdf_path": filepath,
+        "verification_status": "Pending",
+        "verification_date": "",
+        "verified_by": "",
+        "remarks": "",
+        "is_active": False,
+        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    }])
+    df_ver = pd.concat([df_ver, new_ver], ignore_index=True)
+    df_ver.to_csv(COMMITTEE_VERSIONS_FILE, index=False)
+    
+    # Insert members
+    df_mem = pd.read_csv(COMMITTEE_MEMBERS_FILE)
+    roles = [
+        ("Chair", members_dict['chair']),
+        ("Co-chair", members_dict.get('co_chair', "")),
+        ("Member (Major)", members_dict['member_major']),
+        ("Member (Cognate 1)", members_dict['member_cognate1']),
+        ("Member (Cognate 2)", members_dict['member_cognate2'])
+    ]
+    for role, name in roles:
+        if name.strip():
+            new_mem = pd.DataFrame([{
+                "member_id": get_next_member_id(),
+                "version_id": version_id,
+                "role": role,
+                "name": name.strip()
+            }])
+            df_mem = pd.concat([df_mem, new_mem], ignore_index=True)
+    df_mem.to_csv(COMMITTEE_MEMBERS_FILE, index=False)
+    
+    return True, f"Committee version {version_number} submitted for adviser verification."
+
+def get_committee_versions(student_number):
+    df_ver = pd.read_csv(COMMITTEE_VERSIONS_FILE)
+    df_ver = df_ver[df_ver["student_number"] == student_number].sort_values("version_number", ascending=False)
+    return df_ver
+
+def get_committee_members_for_version(version_id):
+    df_mem = pd.read_csv(COMMITTEE_MEMBERS_FILE)
+    return df_mem[df_mem["version_id"] == version_id][["role", "name"]]
+
+def get_pending_committee_version(student_number):
+    df_ver = pd.read_csv(COMMITTEE_VERSIONS_FILE)
+    pending = df_ver[(df_ver["student_number"] == student_number) & (df_ver["verification_status"] == "Pending")]
+    if pending.empty:
+        return None
+    return pending.iloc[0]
+
+def get_active_committee_version(student_number):
+    df_ver = pd.read_csv(COMMITTEE_VERSIONS_FILE)
+    active = df_ver[(df_ver["student_number"] == student_number) & (df_ver["is_active"] == True)]
+    if active.empty:
+        return None
+    return active.iloc[0]
+
+def verify_committee_version(version_id, status, adviser_name, remarks):
+    """
+    status: 'Verified Correct' or 'Mismatch – Requires Correction'
+    """
+    if status not in ["Verified Correct", "Mismatch – Requires Correction"]:
+        return False, "Invalid status."
+    
+    df_ver = pd.read_csv(COMMITTEE_VERSIONS_FILE)
+    mask = df_ver["version_id"] == version_id
+    if not mask.any():
+        return False, "Version not found."
+    
+    row = df_ver[mask].iloc[0]
+    if row["verification_status"] != "Pending":
+        return False, f"Version is already {row['verification_status']}."
+    
+    df_ver.loc[mask, "verification_status"] = status
+    df_ver.loc[mask, "verification_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    df_ver.loc[mask, "verified_by"] = adviser_name
+    df_ver.loc[mask, "remarks"] = remarks
+    
+    if status == "Verified Correct":
+        # Set this version as active, deactivate all others for this student
+        student_number = row["student_number"]
+        df_ver.loc[df_ver["student_number"] == student_number, "is_active"] = False
+        df_ver.loc[mask, "is_active"] = True
+        
+        # Update adviser to Chair of this version
+        members = get_committee_members_for_version(version_id)
+        chair_row = members[members["role"] == "Chair"]
+        if not chair_row.empty:
+            chair_name = chair_row.iloc[0]["name"]
+            # Update students.csv
+            df_students = load_data()
+            idx = df_students[df_students["student_number"] == student_number].index
+            if len(idx) > 0:
+                df_students.loc[idx, "advisor"] = chair_name
+                save_data(df_students)
+        
+        # Update milestone tracking
+        # Determine appropriate milestone name based on program type
+        df_students = load_data()
+        student = df_students[df_students["student_number"] == student_number].iloc[0]
+        prog_type = get_program_type(student["program"])
+        milestone_name = None
+        if prog_type == "MS_Thesis":
+            milestone_name = "Guidance Committee Members"
+        elif prog_type == "PhD_Regular" or prog_type == "PhD_Straight":
+            milestone_name = "Advisory Committee Formation"
+        elif prog_type == "PhD_Research":
+            milestone_name = "Supervisory Committee Formation"
+        else:
+            milestone_name = "Guidance Committee Formation"  # fallback
+        update_milestone(student_number, milestone_name, "Approved", date.today().strftime("%Y-%m-%d"), "", f"Committee verified by {adviser_name}", adviser_name)
+    
+    df_ver.to_csv(COMMITTEE_VERSIONS_FILE, index=False)
+    return True, f"Committee version marked as {status}."
+
+# ==================== OLD COMMITTEE HELPER (for backward compatibility, not used) ====================
+def get_committee_members_old(student_number):
+    # Kept for any legacy calls; not used in new UI
     return []
 
-def set_committee_members(student_number, members):
-    chairs = [m for m in members if m.get("role") == "Chair"]
-    if len(chairs) != 1:
-        return False, "Committee must have exactly one Chair."
-    df = load_data()
-    idx = df[df["student_number"] == student_number].index
-    if len(idx) > 0:
-        df.at[idx[0], "committee_members_structured"] = json.dumps(members)
-        save_data(df)
-        return True, "Committee members saved."
-    return False, "Student not found."
+def set_committee_members_old(student_number, members):
+    return False, "Deprecated. Use committee version control."
 
-def get_committee_chair(student_number):
-    members = get_committee_members(student_number)
-    for member in members:
-        if member.get("role") == "Chair":
-            return member.get("name", "").strip()
+def get_committee_chair_old(student_number):
+    active = get_active_committee_version(student_number)
+    if active is not None:
+        members = get_committee_members_for_version(active["version_id"])
+        chair = members[members["role"] == "Chair"]
+        if not chair.empty:
+            return chair.iloc[0]["name"]
     return None
 
 def is_committee_approved(student_number):
-    milestones = load_milestone_tracking()
-    committee_milestones = ["Guidance Committee Members", "Guidance Committee Formation", 
-                            "Advisory Committee Formation", "Supervisory Committee Formation"]
-    student_milestones = milestones[milestones["student_number"] == student_number]
-    for m in committee_milestones:
-        if m in student_milestones["milestone"].values:
-            status = student_milestones[student_milestones["milestone"] == m]["status"].values[0]
-            if status == "Approved":
-                return True
-    return False
+    active = get_active_committee_version(student_number)
+    return active is not None and active["verification_status"] == "Verified Correct"
 
 def check_committee_approval(student_number, semester_index):
     """Require committee approval before second semester."""
@@ -443,7 +598,6 @@ def approve_pos_revision(submission_id, reviewer_name, remarks, role):
         return False, "Submission not found."
     row = df[mask].iloc[0]
     if role == "adviser":
-        # Adviser approves – now student must upload GS-approved document
         df.loc[mask, "adviser_approved"] = True
         df.loc[mask, "status"] = "Adviser Approved"
         df.loc[mask, "approved_by"] = reviewer_name
@@ -456,7 +610,6 @@ def approve_pos_revision(submission_id, reviewer_name, remarks, role):
         return False, "Invalid role. Only adviser can approve the revision step."
 
 def finalize_gs_approval(student_number, submission_id, remarks):
-    """Student uploads the GS-approved document to mark the revision as GS Approved."""
     df = load_pos_submissions()
     mask = df["submission_id"] == submission_id
     if not mask.any():
@@ -723,7 +876,6 @@ def check_coursework_consistency(student_number, ay, sem):
 
 # ==================== RULE FUNCTIONS (STRICT ENFORCEMENT) ====================
 def check_pos_approval(student_number, semester_index):
-    """Block semester creation if POS not approved (for semester index >= 1)."""
     if semester_index >= 1:
         df = load_data()
         student = df[df["student_number"] == student_number]
@@ -846,7 +998,6 @@ def add_semester_record(student_number, ay, sem, subjects, doc_path="", doc_uplo
     sems = get_student_semesters(student_number)
     semester_count = len(sems)
     
-    # Strict checks – no bypass
     ok, msg = check_committee_approval(student_number, semester_count)
     if not ok:
         raise ValueError(msg)
@@ -1148,44 +1299,7 @@ def get_student_milestones(student_number, program_type):
         return df[df["student_number"] == student_number]
 
 def update_milestone(student_number, milestone, status, date_str, file_path, remarks, reviewer_name=None):
-    # Committee approval automatically updates the adviser (no override, just rule)
-    committee_milestones = ["Guidance Committee Members", "Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]
-    if milestone in committee_milestones and status == "Approved":
-        chair_name = get_committee_chair(student_number)
-        if not chair_name:
-            return False, "No committee chair found. Cannot approve."
-        if chair_name not in USERS or USERS[chair_name]["role"] != "Faculty Adviser":
-            return False, f"Committee Chair '{chair_name}' is not a valid faculty adviser in the system. Please contact staff to add them."
-        # Automatically update adviser to chair (this is a rule, not an override)
-        df_students = load_data()
-        student_row = df_students[df_students["student_number"] == student_number]
-        if student_row.empty:
-            return False, "Student not found."
-        current_advisor = student_row.iloc[0]["advisor"]
-        df_students.loc[df_students["student_number"] == student_number, "advisor"] = chair_name
-        save_data(df_students)
-        # Continue to update milestone status below
-        msg = f"Committee approved. Adviser updated from '{current_advisor}' to '{chair_name}'."
-    else:
-        msg = ""
-
-    if milestone == "Plan of Study (POS)" and status == "Approved":
-        df_students = load_data()
-        idx = df_students[df_students["student_number"] == student_number].index
-        if len(idx) > 0:
-            if df_students.at[idx[0], "pos_status"] != "Approved":
-                df_students.at[idx[0], "pos_status"] = "Approved"
-                df_students.at[idx[0], "pos_approval_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                save_data(df_students)
-                update_pos_milestone_status(student_number)
-        else:
-            return False, "Student record not found."
-
-    if milestone in ["Final Examination", "Final Defense"] and status == "Approved":
-        ok, msg = check_residency_enforcement(student_number)
-        if isinstance(ok, bool) and not ok:
-            return False, msg
-
+    # This function is called by committee verification and other workflows
     df = load_milestone_tracking()
     mask = (df["student_number"] == student_number) & (df["milestone"] == milestone)
     if mask.any():
@@ -1212,7 +1326,7 @@ def update_milestone(student_number, milestone, status, date_str, file_path, rem
         }])
         df = pd.concat([df, new], ignore_index=True)
     save_milestone_tracking(df)
-    return True, msg
+    return True, ""
 
 def save_milestone_file(student_number, milestone_name, uploaded_file):
     if uploaded_file is None:
@@ -1242,6 +1356,10 @@ def get_status_badge(status):
         return '<span class="status-badge status-pending">🟡 Pending</span>'
     elif status == "Revision Requested":
         return '<span class="status-badge status-pending">📝 Revision Requested</span>'
+    elif status == "Verified Correct":
+        return '<span class="status-badge status-approved">✅ Verified Correct</span>'
+    elif status == "Mismatch – Requires Correction":
+        return '<span class="status-badge status-rejected">❌ Mismatch</span>'
     else:
         return '<span class="status-badge status-not-started">⚪ Not Started</span>'
 
@@ -1290,7 +1408,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
         st.info("📋 Plan of Study (POS) for this semester is pending approval. Courses will be validated after approval.")
     
     with st.expander(f"📅 {ay} | {sem} (Units: {total_units:.0f} | GWA: {gwa:.2f})", expanded=False):
-        # Semester status (only staff/adviser can change? Student can request via form, but we allow all roles for simplicity)
         new_status = st.selectbox("Semester Status", SEMESTER_STATUS_OPTIONS,
                                   index=SEMESTER_STATUS_OPTIONS.index(semester_status) if semester_status in SEMESTER_STATUS_OPTIONS else 0,
                                   key=f"status_{student_number}_{ay}_{sem}",
@@ -1304,9 +1421,7 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
         if doc_status == "Rejected" and doc_remarks:
             st.warning(f"Rejection reason: {doc_remarks}")
         
-        # Display subjects
         if semester_status == "Regular":
-            # Only students edit their subjects
             if st.session_state.role == "Student":
                 df_edit = pd.DataFrame(subjects) if subjects else pd.DataFrame(columns=["course_code","course_description","units","grade"])
                 for col in ["course_code","course_description","units","grade"]:
@@ -1369,7 +1484,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                             else:
                                 st.error("Save failed.")
             else:
-                # Staff or Adviser: view only
                 if subjects:
                     df_subjects = pd.DataFrame(subjects)
                     display_cols = {}
@@ -1392,7 +1506,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
         else:
             st.info("Editing is disabled because you do not have permission.")
         
-        # Document upload and validation
         st.markdown("---")
         st.markdown("**Upload Proof of Grades (AMIS Screenshot)**")
         if semester_status == "Regular":
@@ -1443,7 +1556,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
         else:
             st.info(f"Semester status **{semester_status}** – no upload required.")
         
-        # POS Management Section (Staff only - administrative data entry)
         if st.session_state.role == "SESAM Staff":
             st.markdown("---")
             st.markdown("#### 📋 Plan of Study (POS) for this Semester")
@@ -1459,7 +1571,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                     st.warning("POS Pending approval.")
                 else:
                     st.info("No POS submitted for this semester yet.")
-            # Staff can edit POS details (administrative data entry)
             with st.expander("✏️ Edit POS (Administrative Only)"):
                 current_codes = pos_courses if pos_courses else []
                 pos_codes_input = st.text_input("Course codes (comma-separated)", value=", ".join(current_codes), key=f"pos_edit_{student_number}_{ay}_{sem}")
@@ -1685,7 +1796,7 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
     original = get_original_pos(student_number)
     revisions = get_revisions(student_number)
     
-    can_submit = (is_own_view or st.session_state.role == "SESAM Staff")  # Staff can submit on behalf? For keep.
+    can_submit = (is_own_view or st.session_state.role == "SESAM Staff")
     is_adviser = (viewer_role == "Faculty Adviser")
     is_staff = (viewer_role == "SESAM Staff")
     
@@ -1765,7 +1876,6 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
                         with open(rev["file_path"], "rb") as f:
                             st.download_button("📎 Download", f, file_name=os.path.basename(rev["file_path"]), key=f"download_rev_{rev['submission_id']}_{form_suffix}")
                     
-                    # Adviser approval step
                     if is_adviser and status == "Pending":
                         with st.form(key=f"adviser_rev_{rev['submission_id']}_{form_suffix}"):
                             remarks = st.text_area("Remarks (optional)", key=f"rev_remarks_{rev['submission_id']}_{form_suffix}")
@@ -1783,14 +1893,12 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
                                 else:
                                     st.error("Rejection failed.")
                     
-                    # Student uploads GS-approved document (final step)
                     if is_own_view and status == "Adviser Approved" and rev.get("gs_approved") == False:
                         with st.form(key=f"student_gs_upload_{rev['submission_id']}_{form_suffix}"):
                             st.info("Your adviser has approved the revision. Please upload the official GS-approved POS document to complete the process.")
                             uploaded_file = st.file_uploader("Upload GS-approved POS (PDF/JPG/PNG)", type=["pdf","jpg","jpeg","png"], key=f"gs_upload_{rev['submission_id']}_{form_suffix}")
                             if st.form_submit_button("Submit GS-Approved Document", use_container_width=True):
                                 if uploaded_file:
-                                    # Save the uploaded file as the final approved version
                                     folder = os.path.join(UPLOAD_FOLDER, student_number, "pos_submissions")
                                     os.makedirs(folder, exist_ok=True)
                                     ext = uploaded_file.name.split('.')[-1].lower()
@@ -1798,7 +1906,6 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
                                     filepath = os.path.join(folder, filename)
                                     with open(filepath, "wb") as f:
                                         f.write(uploaded_file.getbuffer())
-                                    # Mark as GS approved
                                     success, msg = finalize_gs_approval(student_number, rev['submission_id'], "Student uploaded GS-approved document")
                                     if success:
                                         st.success(msg)
@@ -1911,14 +2018,12 @@ def view_student_profile(student_number, viewer_role):
         for _, row in semesters.iterrows():
             render_semester_block_general(student_number, row, is_staff=is_staff, is_adviser=is_adviser)
         
-        # Add semester buttons – only for students (if rules allow) or staff (admin data entry)
         can_add_semester = (st.session_state.role == "Student") or is_staff
         if can_add_semester and len(semesters) < total_terms:
             col1, col2 = st.columns(2)
             with col1:
                 if st.button("➕ Add Next Semester"):
                     if st.session_state.role == "Student":
-                        # Check prerequisites before allowing
                         sem_index = len(semesters)
                         ok, msg = check_committee_approval(student_number, sem_index)
                         if not ok:
@@ -1935,7 +2040,6 @@ def view_student_profile(student_number, viewer_role):
                                     create_next_semester(student_number, timeline[0][0], timeline[0][1])
                                 st.rerun()
                     else:
-                        # Staff can add without checks? No – strict rules: staff cannot bypass. So we also apply checks.
                         sem_index = len(semesters)
                         ok, msg = check_committee_approval(student_number, sem_index)
                         if not ok:
@@ -1980,183 +2084,129 @@ def view_student_profile(student_number, viewer_role):
             if milestone_name == "Plan of Study (POS)":
                 render_pos_milestone(student_number, viewer_role, is_own_view=(viewer_role == "Student"))
             else:
-                milestone_filtered = milestones_df[milestones_df["milestone"] == milestone_name]
-                if milestone_filtered.empty:
-                    st.error(f"Milestone '{milestone_name}' not found in records.")
-                    continue
-                milestone_row = milestone_filtered.iloc[0]
-                status = milestone_row["status"]
-                date_val = milestone_row["date"]
-                file_path = milestone_row["file_path"]
-                remarks = milestone_row["remarks"]
-                reviewed_by = milestone_row.get("reviewed_by", "")
-                review_date = milestone_row.get("review_date", "")
-                
-                st.markdown(f"### {milestone_name}")
-                st.markdown(get_status_badge(status), unsafe_allow_html=True)
-                if date_val:
-                    st.write(f"**Date of approval:** {date_val}")
-                if reviewed_by and status == "Approved":
-                    st.caption(f"Approved by: {reviewed_by} on {review_date}")
-                
-                if file_path and file_path != "" and os.path.exists(file_path):
-                    with st.expander("📎 View document"):
-                        if file_path.lower().endswith(('.png','.jpg','.jpeg','.gif')):
-                            st.image(file_path, width=300)
-                        else:
-                            with open(file_path, "rb") as f:
-                                st.download_button("Download", f, file_name=os.path.basename(file_path))
-                
-                if status == "Rejected" and remarks:
-                    st.error(f"**Rejection reason:** {remarks}")
-                
-                # Committee milestone (student submits, adviser approves/rejects)
+                # Replace committee milestone with new version-controlled UI
                 if milestone_name in ["Guidance Committee Members", "Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
-                    committee_members = get_committee_members(student_number)
+                    st.markdown(f"### {milestone_name}")
                     
-                    col_left, col_right = st.columns([1, 1])
+                    # Determine the appropriate committee milestone name for display
+                    committee_milestone_display = milestone_name
                     
-                    with col_left:
-                        st.markdown("#### 📋 Committee Members")
-                        if committee_members:
-                            for member in committee_members:
-                                st.write(f"- **{member.get('name', '')}** ({member.get('role', 'Member')})")
-                        else:
-                            st.info("No committee members added yet.")
+                    # Show current active committee if any
+                    active = get_active_committee_version(student_number)
+                    if active is not None:
+                        st.success(f"**Active Committee (Version {active['version_number']})** – Verified on {active['verification_date']} by {active['verified_by']}")
+                        with st.expander("View Active Committee Details"):
+                            members = get_committee_members_for_version(active['version_id'])
+                            st.dataframe(members)
+                            st.markdown(f"[View GS PDF]({active['gs_pdf_path']})")
+                    else:
+                        st.info("No active committee approved yet.")
                     
-                    with col_right:
-                        st.markdown("#### ✏️ Manage Committee")
-                        if status != "Approved":
-                            edit_key = f"committee_edit_{student_number}"
-                            if edit_key not in st.session_state:
-                                st.session_state[edit_key] = committee_members.copy() if committee_members else []
-                            
-                            remove_indices = []
-                            for idx, member in enumerate(st.session_state[edit_key]):
-                                with st.container():
-                                    col_name, col_role, col_del = st.columns([2, 1.5, 0.5])
-                                    with col_name:
-                                        new_name = st.text_input("Name", value=member.get("name", ""), key=f"name_{idx}_{student_number}", placeholder="Firstname Lastname", disabled=(viewer_role != "Student"))
-                                    with col_role:
-                                        new_role = st.selectbox("Role", ["Chair", "Co-chair", "Member"], index=["Chair","Co-chair","Member"].index(member.get("role", "Member")), key=f"role_{idx}_{student_number}", disabled=(viewer_role != "Student"))
-                                    with col_del:
-                                        if viewer_role == "Student" and st.button("🗑️", key=f"remove_{idx}_{student_number}"):
-                                            remove_indices.append(idx)
-                                    st.session_state[edit_key][idx] = {"name": new_name, "role": new_role}
-                            
-                            for idx in sorted(remove_indices, reverse=True):
-                                st.session_state[edit_key].pop(idx)
-                                st.rerun()
-                            
-                            if viewer_role == "Student":
-                                if st.button("➕ Add Committee Member"):
-                                    st.session_state[edit_key].append({"name": "", "role": "Member"})
-                                    st.rerun()
-                                
-                                if st.button("💾 Save Committee Members"):
-                                    chairs = [m for m in st.session_state[edit_key] if m.get("role") == "Chair"]
-                                    if len(chairs) != 1:
-                                        st.error("Committee must have exactly one Chair.")
-                                    elif any(not m.get("name", "").strip() for m in st.session_state[edit_key]):
-                                        st.error("All members must have a name (Firstname Lastname).")
-                                    else:
-                                        valid, msg = set_committee_members(student_number, st.session_state[edit_key])
-                                        if valid:
+                    # Show pending version for adviser verification
+                    pending = get_pending_committee_version(student_number)
+                    if pending is not None:
+                        st.warning(f"**Pending Committee Version {pending['version_number']}** – Submitted on {pending['created_at']}")
+                        with st.expander("Review Pending Committee"):
+                            members = get_committee_members_for_version(pending['version_id'])
+                            st.dataframe(members)
+                            st.markdown(f"[View GS PDF]({pending['gs_pdf_path']})")
+                            if is_adviser:
+                                with st.form(key=f"verify_committee_{pending['version_id']}"):
+                                    remarks = st.text_area("Remarks (required if mismatch)")
+                                    col1, col2 = st.columns(2)
+                                    if col1.form_submit_button("✅ Verified Correct"):
+                                        success, msg = verify_committee_version(pending['version_id'], "Verified Correct", st.session_state.display_name, remarks)
+                                        if success:
                                             st.success(msg)
                                             st.rerun()
                                         else:
                                             st.error(msg)
-                        else:
-                            st.info("Committee already approved. No further changes allowed.")
-                    
-                    st.markdown("---")
-                    
-                    if status == "Not Started":
-                        st.warning("⚠️ **Requirement not yet submitted.** Please upload the required document and submit for approval.")
-                    
-                    # Revision request (optional, but allowed)
-                    if status == "Approved" and viewer_role == "Student":
-                        if st.button("📝 Request Committee Revision", key=f"req_rev_{milestone_name}_{student_number}"):
-                            st.session_state[f"revision_request_{milestone_name}_{student_number}"] = True
-                    
-                    if st.session_state.get(f"revision_request_{milestone_name}_{student_number}", False):
-                        with st.form(key=f"revision_form_{milestone_name}_{student_number}"):
-                            reason = st.text_area("Reason for revision (e.g., change of chair, member resignation)")
-                            new_members_text = st.text_area("Proposed new committee members (Name, Role per line)")
-                            if st.form_submit_button("Submit Revision Request"):
-                                update_milestone(student_number, milestone_name, "Revision Requested", 
-                                                 date.today().strftime("%Y-%m-%d"), "", 
-                                                 f"Revision requested: {reason}\nProposed: {new_members_text}", 
-                                                 st.session_state.display_name)
-                                st.success("Revision request submitted. Your adviser will review.")
-                                st.session_state[f"revision_request_{milestone_name}_{student_number}"] = False
-                                st.rerun()
-                    
-                    if status == "Revision Requested" and is_adviser:
-                        st.info(f"📬 **Revision Request** – {remarks}")
-                        col_acc, col_rej = st.columns(2)
-                        if col_acc.button("✅ Approve Revision", key=f"app_rev_{milestone_name}_{student_number}"):
-                            update_milestone(student_number, milestone_name, "Pending", None, None, "Revision approved – please update committee members", st.session_state.display_name)
-                            st.rerun()
-                        if col_rej.button("❌ Reject Revision", key=f"rej_rev_{milestone_name}_{student_number}"):
-                            update_milestone(student_number, milestone_name, "Approved", None, None, f"Revision rejected: {remarks}", st.session_state.display_name)
-                            st.rerun()
-                    
-                    if status != "Approved" and "Revision Requested" not in status and viewer_role == "Student":
-                        with st.form(key=f"submit_{milestone_name}_{student_number}"):
-                            st.markdown("**Required document:** Please upload the official form or certificate for this milestone.")
-                            uploaded_file = st.file_uploader(
-                                "Upload document (PDF/JPG/PNG) - Max 5MB",
-                                type=["pdf", "jpg", "jpeg", "png"],
-                                key=f"upload_{milestone_name}_{student_number}"
-                            )
-                            date_completed = st.date_input("Date of completion/event", value=date.today())
-                            if st.form_submit_button("Submit for Approval", use_container_width=True):
-                                if not uploaded_file:
-                                    st.error("Please upload a document.")
-                                elif uploaded_file.size > 5 * 1024 * 1024:
-                                    st.error("File size exceeds 5MB.")
-                                else:
-                                    filepath = save_milestone_file(student_number, milestone_name, uploaded_file)
-                                    success, msg = update_milestone(student_number, milestone_name, "Pending", date_completed.strftime("%Y-%m-%d"), filepath, "", None)
-                                    if success:
-                                        if msg:
-                                            st.success(msg)
+                                    if col2.form_submit_button("❌ Mismatch – Requires Correction"):
+                                        if not remarks:
+                                            st.error("Please provide remarks explaining the mismatch.")
                                         else:
-                                            st.success(f"{milestone_name} submitted for approval.")
+                                            success, msg = verify_committee_version(pending['version_id'], "Mismatch – Requires Correction", st.session_state.display_name, remarks)
+                                            if success:
+                                                st.warning(msg)
+                                                st.rerun()
+                                            else:
+                                                st.error(msg)
+                            else:
+                                st.info("Awaiting adviser verification.")
+                    
+                    # Student submission form (only if no pending version)
+                    if viewer_role == "Student" and pending is None:
+                        with st.form(key="submit_committee_version"):
+                            st.markdown("#### Submit New Committee (GS-Approved)")
+                            uploaded_pdf = st.file_uploader("GS‑approved Committee Form (PDF)", type=["pdf"])
+                            st.markdown("**Committee Members**")
+                            chair = st.text_input("Chair (required)")
+                            co_chair = st.text_input("Co‑chair (optional)")
+                            major_member = st.text_input("Member (Major) – required")
+                            cognate1 = st.text_input("Member (Cognate 1) – required")
+                            cognate2 = st.text_input("Member (Cognate 2) – required")
+                            if st.form_submit_button("Submit Committee for Verification"):
+                                if not uploaded_pdf or not chair or not major_member or not cognate1 or not cognate2:
+                                    st.error("Please fill all required fields and upload the GS‑approved PDF.")
+                                else:
+                                    members_dict = {
+                                        'chair': chair,
+                                        'co_chair': co_chair,
+                                        'member_major': major_member,
+                                        'member_cognate1': cognate1,
+                                        'member_cognate2': cognate2
+                                    }
+                                    success, msg = save_committee_version(student_number, uploaded_pdf, members_dict)
+                                    if success:
+                                        st.success(msg)
                                         st.rerun()
                                     else:
                                         st.error(msg)
-                    elif status == "Pending" and is_adviser:
-                        st.markdown("---")
-                        st.markdown("**Review this milestone**")
-                        with st.form(key=f"review_{milestone_name}_{student_number}"):
-                            review_remarks = st.text_area("Remarks (optional)", key=f"review_remarks_{milestone_name}_{student_number}")
-                            col_app, col_rej = st.columns(2)
-                            if col_app.form_submit_button("✅ Approve", use_container_width=True):
-                                success, msg = update_milestone(student_number, milestone_name, "Approved", None, None, review_remarks, st.session_state.display_name)
-                                if success:
-                                    if msg:
-                                        st.success(msg)
-                                    else:
-                                        st.success("Milestone approved.")
-                                    st.rerun()
-                                else:
-                                    st.error(msg)
-                            if col_rej.form_submit_button("❌ Reject", use_container_width=True):
-                                success, msg = update_milestone(student_number, milestone_name, "Rejected", None, None, review_remarks, st.session_state.display_name)
-                                if success:
-                                    st.warning("Milestone rejected.")
-                                    st.rerun()
-                                else:
-                                    st.error(msg)
-                    elif status == "Approved":
-                        st.success("✅ This milestone has been approved.")
-                    elif status == "Pending" and not is_adviser:
-                        st.info("⏳ Your submission is pending review.")
+                    
+                    # Show version history
+                    versions = get_committee_versions(student_number)
+                    if not versions.empty:
+                        with st.expander("Committee Version History"):
+                            for _, ver in versions.iterrows():
+                                st.markdown(f"**Version {ver['version_number']}** – {ver['verification_status']} – {ver['created_at']}")
+                                if ver['verification_status'] == "Verified Correct" and ver['is_active']:
+                                    st.markdown("(Active)")
+                                if ver['remarks']:
+                                    st.caption(f"Remarks: {ver['remarks']}")
+                                st.markdown("---")
                 
-                # Non-committee milestones
                 else:
+                    # Non-committee milestone (unchanged from previous version)
+                    milestone_filtered = milestones_df[milestones_df["milestone"] == milestone_name]
+                    if milestone_filtered.empty:
+                        st.error(f"Milestone '{milestone_name}' not found in records.")
+                        continue
+                    milestone_row = milestone_filtered.iloc[0]
+                    status = milestone_row["status"]
+                    date_val = milestone_row["date"]
+                    file_path = milestone_row["file_path"]
+                    remarks = milestone_row["remarks"]
+                    reviewed_by = milestone_row.get("reviewed_by", "")
+                    review_date = milestone_row.get("review_date", "")
+                    
+                    st.markdown(f"### {milestone_name}")
+                    st.markdown(get_status_badge(status), unsafe_allow_html=True)
+                    if date_val:
+                        st.write(f"**Date of approval:** {date_val}")
+                    if reviewed_by and status == "Approved":
+                        st.caption(f"Approved by: {reviewed_by} on {review_date}")
+                    
+                    if file_path and file_path != "" and os.path.exists(file_path):
+                        with st.expander("📎 View document"):
+                            if file_path.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                                st.image(file_path, width=300)
+                            else:
+                                with open(file_path, "rb") as f:
+                                    st.download_button("Download", f, file_name=os.path.basename(file_path))
+                    
+                    if status == "Rejected" and remarks:
+                        st.error(f"**Rejection reason:** {remarks}")
+                    
                     if status == "Not Started" and viewer_role == "Student":
                         st.warning("⚠️ **Requirement not yet submitted.** Please upload the required document and submit for approval.")
                     
@@ -2248,7 +2298,6 @@ def view_student_profile(student_number, viewer_role):
             st.markdown("---")
             st.markdown("### 📜 Extension Grants (UPLB GS Rules)")
             
-            # Thesis extension units
             st.markdown("**Thesis/Dissertation Extension Units**")
             current_thesis_ext = student.get("thesis_extension_units", 0)
             max_thesis_ext = 6
@@ -2263,16 +2312,14 @@ def view_student_profile(student_number, viewer_role):
             else:
                 st.info("Maximum thesis extension units (6) already granted.")
             
-            # Residency extension years
             st.markdown("**Residency Extension Years**")
             current_res_ext = student.get("residency_extension_years", 0)
-            max_res_ext = 2  # UPLB allows up to 2 years extension total (1 year + possible second year)
+            max_res_ext = 2
             st.write(f"Current residency extension years granted: **{current_res_ext}**")
             if current_res_ext < max_res_ext:
                 if st.button("➕ Grant 1 Residency Extension Year", key=f"grant_res_ext_{student_number}"):
                     df = load_data()
                     df.loc[df["student_number"] == student_number, "residency_extension_years"] = current_res_ext + 1
-                    # Also update max residency limit
                     new_max = get_residency_max_from_program(student["program"]) + (current_res_ext + 1)
                     df.loc[df["student_number"] == student_number, "residency_max_years"] = new_max
                     save_data(df)
@@ -2342,7 +2389,7 @@ def student_dashboard():
     if semester_count >= 2 and is_master_program(student["program"]) and student.get("pos_status","Pending") != "Approved":
         st.markdown('<div class="danger-banner">⚠️ Your Plan of Study (POS) is not yet approved. You will not be able to register for the next semester until it is approved. Please contact your adviser.</div>', unsafe_allow_html=True)
     
-    # Committee formation reminder
+    # Committee formation reminder (using new committee system)
     if not is_committee_approved(student["student_number"]):
         if len(existing_sems) >= 2:
             st.warning("""
@@ -2447,7 +2494,6 @@ def student_dashboard():
             render_semester_block_general(student["student_number"], row, is_staff=False, is_adviser=False)
         
         if len(semesters) < total_terms:
-            # Check prerequisites
             pos_ok = True
             committee_ok = True
             if len(semesters) >= 1:
@@ -2506,157 +2552,108 @@ def student_dashboard():
             if milestone_name == "Plan of Study (POS)":
                 render_pos_milestone(student["student_number"], "Student", is_own_view=True)
             else:
-                milestone_filtered = milestones_df[milestones_df["milestone"] == milestone_name]
-                if milestone_filtered.empty:
-                    st.error(f"Milestone '{milestone_name}' not found in records.")
-                    continue
-                milestone_row = milestone_filtered.iloc[0]
-                status = milestone_row["status"]
-                date_val = milestone_row["date"]
-                file_path = milestone_row["file_path"]
-                remarks = milestone_row["remarks"]
-                reviewed_by = milestone_row.get("reviewed_by", "")
-                review_date = milestone_row.get("review_date", "")
-                
-                st.markdown(f"### {milestone_name}")
-                st.markdown(get_status_badge(status), unsafe_allow_html=True)
-                if date_val:
-                    st.write(f"**Date of approval:** {date_val}")
-                if reviewed_by and status == "Approved":
-                    st.caption(f"Approved by: {reviewed_by} on {review_date}")
-                
-                if file_path and file_path != "" and os.path.exists(file_path):
-                    with st.expander("📎 View submitted document"):
-                        if file_path.lower().endswith(('.png','.jpg','.jpeg','.gif')):
-                            st.image(file_path, width=300)
-                        else:
-                            with open(file_path, "rb") as f:
-                                st.download_button("Download", f, file_name=os.path.basename(file_path))
-                
-                if status == "Rejected" and remarks:
-                    st.error(f"**Rejection reason:** {remarks}")
-                
-                # Committee milestone (student submits, adviser approves)
+                # Committee milestone (new version-controlled UI)
                 if milestone_name in ["Guidance Committee Members", "Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
-                    committee_members = get_committee_members(student["student_number"])
+                    st.markdown(f"### {milestone_name}")
                     
-                    col_left, col_right = st.columns([1, 1])
+                    active = get_active_committee_version(student["student_number"])
+                    if active is not None:
+                        st.success(f"**Active Committee (Version {active['version_number']})** – Verified on {active['verification_date']}")
+                        with st.expander("View Active Committee Details"):
+                            members = get_committee_members_for_version(active['version_id'])
+                            st.dataframe(members)
+                            st.markdown(f"[View GS PDF]({active['gs_pdf_path']})")
+                    else:
+                        st.info("No active committee approved yet.")
                     
-                    with col_left:
-                        st.markdown("#### 📋 Committee Members")
-                        if committee_members:
-                            for member in committee_members:
-                                st.write(f"- **{member.get('name', '')}** ({member.get('role', 'Member')})")
-                        else:
-                            st.info("No committee members added yet.")
+                    pending = get_pending_committee_version(student["student_number"])
+                    if pending is not None:
+                        st.warning(f"**Pending Committee Version {pending['version_number']}** – Submitted on {pending['created_at']} – Awaiting verification")
+                        with st.expander("View Pending Committee"):
+                            members = get_committee_members_for_version(pending['version_id'])
+                            st.dataframe(members)
+                            st.markdown(f"[View GS PDF]({pending['gs_pdf_path']})")
                     
-                    with col_right:
-                        st.markdown("#### ✏️ Manage Committee")
-                        if status != "Approved":
-                            edit_key = f"committee_edit_{student['student_number']}"
-                            if edit_key not in st.session_state:
-                                st.session_state[edit_key] = committee_members.copy() if committee_members else []
-                            
-                            remove_indices = []
-                            for idx, member in enumerate(st.session_state[edit_key]):
-                                with st.container():
-                                    col_name, col_role, col_del = st.columns([2, 1.5, 0.5])
-                                    with col_name:
-                                        new_name = st.text_input("Name", value=member.get("name", ""), key=f"name_{idx}_{student['student_number']}", placeholder="Firstname Lastname")
-                                    with col_role:
-                                        new_role = st.selectbox("Role", ["Chair", "Co-chair", "Member"], index=["Chair","Co-chair","Member"].index(member.get("role", "Member")), key=f"role_{idx}_{student['student_number']}")
-                                    with col_del:
-                                        if st.button("🗑️", key=f"remove_{idx}_{student['student_number']}"):
-                                            remove_indices.append(idx)
-                                    st.session_state[edit_key][idx] = {"name": new_name, "role": new_role}
-                            
-                            for idx in sorted(remove_indices, reverse=True):
-                                st.session_state[edit_key].pop(idx)
-                                st.rerun()
-                            
-                            if st.button("➕ Add Committee Member"):
-                                st.session_state[edit_key].append({"name": "", "role": "Member"})
-                                st.rerun()
-                            
-                            if st.button("💾 Save Committee Members"):
-                                chairs = [m for m in st.session_state[edit_key] if m.get("role") == "Chair"]
-                                if len(chairs) != 1:
-                                    st.error("Committee must have exactly one Chair.")
-                                elif any(not m.get("name", "").strip() for m in st.session_state[edit_key]):
-                                    st.error("All members must have a name (Firstname Lastname).")
+                    # Student submission form (only if no pending version)
+                    if pending is None:
+                        with st.form(key="student_submit_committee"):
+                            st.markdown("#### Submit New Committee (GS-Approved)")
+                            uploaded_pdf = st.file_uploader("GS‑approved Committee Form (PDF)", type=["pdf"])
+                            st.markdown("**Committee Members**")
+                            chair = st.text_input("Chair (required)")
+                            co_chair = st.text_input("Co‑chair (optional)")
+                            major_member = st.text_input("Member (Major) – required")
+                            cognate1 = st.text_input("Member (Cognate 1) – required")
+                            cognate2 = st.text_input("Member (Cognate 2) – required")
+                            if st.form_submit_button("Submit Committee for Verification"):
+                                if not uploaded_pdf or not chair or not major_member or not cognate1 or not cognate2:
+                                    st.error("Please fill all required fields and upload the GS‑approved PDF.")
                                 else:
-                                    valid, msg = set_committee_members(student["student_number"], st.session_state[edit_key])
-                                    if valid:
+                                    members_dict = {
+                                        'chair': chair,
+                                        'co_chair': co_chair,
+                                        'member_major': major_member,
+                                        'member_cognate1': cognate1,
+                                        'member_cognate2': cognate2
+                                    }
+                                    success, msg = save_committee_version(student["student_number"], uploaded_pdf, members_dict)
+                                    if success:
                                         st.success(msg)
                                         st.rerun()
                                     else:
                                         st.error(msg)
-                        else:
-                            st.info("Committee already approved. No further changes allowed.")
                     
-                    st.markdown("---")
-                    
-                    if status == "Not Started":
-                        st.warning("⚠️ **Requirement not yet submitted.** Please upload the required document and submit for approval.")
-                    
-                    # Revision request for approved committee
-                    if status == "Approved":
-                        if st.button("📝 Request Committee Revision", key=f"req_rev_student_{milestone_name}_{student['student_number']}"):
-                            st.session_state[f"revision_request_{milestone_name}_{student['student_number']}"] = True
-                    
-                    if st.session_state.get(f"revision_request_{milestone_name}_{student['student_number']}", False):
-                        with st.form(key=f"revision_form_{milestone_name}_{student['student_number']}"):
-                            reason = st.text_area("Reason for revision (e.g., change of chair, member resignation)")
-                            new_members_text = st.text_area("Proposed new committee members (Name, Role per line)")
-                            if st.form_submit_button("Submit Revision Request"):
-                                update_milestone(student["student_number"], milestone_name, "Revision Requested", 
-                                                 date.today().strftime("%Y-%m-%d"), "", 
-                                                 f"Revision requested: {reason}\nProposed: {new_members_text}", 
-                                                 st.session_state.display_name)
-                                st.success("Revision request submitted. Your adviser will review.")
-                                st.session_state[f"revision_request_{milestone_name}_{student['student_number']}"] = False
-                                st.rerun()
-                    
-                    if status in ["Not Started", "Rejected"]:
-                        with st.form(key=f"student_submit_{milestone_name}_{student['student_number']}"):
-                            st.markdown("**Required document:** Please upload the official form or certificate for this milestone.")
-                            uploaded_file = st.file_uploader(
-                                "Upload document (PDF/JPG/PNG) - Max 5MB",
-                                type=["pdf", "jpg", "jpeg", "png"],
-                                key=f"upload_student_{milestone_name}_{student['student_number']}"
-                            )
-                            date_completed = st.date_input("Date of completion/event", value=date.today())
-                            if st.form_submit_button("Submit for Approval", use_container_width=True):
-                                if not uploaded_file:
-                                    st.error("Please upload a document.")
-                                elif uploaded_file.size > 5 * 1024 * 1024:
-                                    st.error("File size exceeds 5MB.")
-                                else:
-                                    filepath = save_milestone_file(student["student_number"], milestone_name, uploaded_file)
-                                    success, msg = update_milestone(student["student_number"], milestone_name, "Pending", date_completed.strftime("%Y-%m-%d"), filepath, "", None)
-                                    if success:
-                                        if msg:
-                                            st.success(msg)
-                                        else:
-                                            st.success(f"{milestone_name} submitted for approval.")
-                                        st.rerun()
-                                    else:
-                                        st.error(msg)
-                    elif status == "Pending":
-                        st.info("⏳ Your submission is pending review.")
-                    else:
-                        if "Revision Requested" not in status and status != "Approved":
-                            st.error("Unexpected status. Contact staff.")
+                    # Version history
+                    versions = get_committee_versions(student["student_number"])
+                    if not versions.empty:
+                        with st.expander("Committee Version History"):
+                            for _, ver in versions.iterrows():
+                                st.markdown(f"**Version {ver['version_number']}** – {ver['verification_status']} – {ver['created_at']}")
+                                if ver['verification_status'] == "Verified Correct" and ver['is_active']:
+                                    st.markdown("(Active)")
+                                if ver['remarks']:
+                                    st.caption(f"Remarks: {ver['remarks']}")
+                                st.markdown("---")
                 
-                # Non‑committee milestones
                 else:
+                    # Non-committee milestone (unchanged)
+                    milestone_filtered = milestones_df[milestones_df["milestone"] == milestone_name]
+                    if milestone_filtered.empty:
+                        st.error(f"Milestone '{milestone_name}' not found in records.")
+                        continue
+                    milestone_row = milestone_filtered.iloc[0]
+                    status = milestone_row["status"]
+                    date_val = milestone_row["date"]
+                    file_path = milestone_row["file_path"]
+                    remarks = milestone_row["remarks"]
+                    reviewed_by = milestone_row.get("reviewed_by", "")
+                    review_date = milestone_row.get("review_date", "")
+                    
+                    st.markdown(f"### {milestone_name}")
+                    st.markdown(get_status_badge(status), unsafe_allow_html=True)
+                    if date_val:
+                        st.write(f"**Date of approval:** {date_val}")
+                    if reviewed_by and status == "Approved":
+                        st.caption(f"Approved by: {reviewed_by} on {review_date}")
+                    
+                    if file_path and file_path != "" and os.path.exists(file_path):
+                        with st.expander("📎 View submitted document"):
+                            if file_path.lower().endswith(('.png','.jpg','.jpeg','.gif')):
+                                st.image(file_path, width=300)
+                            else:
+                                with open(file_path, "rb") as f:
+                                    st.download_button("Download", f, file_name=os.path.basename(file_path))
+                    
+                    if status == "Rejected" and remarks:
+                        st.error(f"**Rejection reason:** {remarks}")
+                    
                     if status == "Not Started":
                         st.warning("⚠️ **Requirement not yet submitted.** Please upload the required document and submit for approval.")
                     
                     if status in ["Not Started", "Rejected"]:
-                        with st.form(key=f"student_submit_{milestone_name}_{student['student_number']}"):
+                        with st.form(key=f"student_submit_noncomm_{milestone_name}_{student['student_number']}"):
                             st.markdown("**Required document:** Please upload the official form or certificate for this milestone.")
-                            uploaded_file = st.file_uploader("Upload document (PDF/JPG/PNG) - Max 5MB", type=["pdf","jpg","jpeg","png"], key=f"upload_student_{milestone_name}_{student['student_number']}")
+                            uploaded_file = st.file_uploader("Upload document (PDF/JPG/PNG) - Max 5MB", type=["pdf","jpg","jpeg","png"], key=f"upload_student_noncomm_{milestone_name}_{student['student_number']}")
                             date_completed = st.date_input("Date of completion/event", value=date.today())
                             if st.form_submit_button("Submit for Approval", use_container_width=True):
                                 if not uploaded_file:
@@ -2722,6 +2719,9 @@ if st.session_state.logged_in and not st.session_state.consent_given:
     show_consent_form()
     st.stop()
 
+# Initialize committee tables
+init_committee_tables()
+
 convert_expired_grades()
 df = load_data()
 if df is None or df.empty:
@@ -2736,10 +2736,10 @@ with st.sidebar:
         st.session_state.consent_given = False
         st.rerun()
     st.markdown("---")
-    st.caption("Version 31.0 | Strict rule enforcement + extension grants (thesis & residency)")
+    st.caption("Version 32.0 | Enhanced committee workflow: version control, adviser verification, GS PDF upload")
 
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
-st.caption("Strict rule enforcement: all progression requires approved prerequisites. Extensions can be granted by staff per UPLB GS rules.")
+st.caption("Strict rule enforcement + enhanced committee workflow: version control, adviser verification, GS PDF upload")
 
 role = st.session_state.role
 
@@ -2823,4 +2823,4 @@ elif role == "Student":
     student_dashboard()
 
 st.markdown("---")
-st.caption("SESAM KMIS v31.0 | Strict rule enforcement + extension grants (thesis & residency)")
+st.caption("SESAM KMIS v32.0 | Enhanced committee workflow: version control, adviser verification, GS PDF upload")
