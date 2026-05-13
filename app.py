@@ -327,30 +327,45 @@ def get_next_member_id():
         return 1
     return df["member_id"].max() + 1
 
-def save_committee_version(student_number, pdf_file, members_dict):
+def save_committee_version(student_number, pdf_file, program_type, chair, co_chair, major_members, cognate_members):
     """
-    members_dict: dict with keys: 'chair', 'co_chair', 'member_major', 'member_cognate1', 'member_cognate2'
+    program_type: 'MS' or 'PhD'
+    major_members: list of strings (1-2)
+    cognate_members: list of strings (1-2 for PhD, exactly 1 for MS)
     """
-    # Validate required roles
-    required = ['chair', 'member_major', 'member_cognate1', 'member_cognate2']
-    for r in required:
-        if not members_dict.get(r, "").strip():
-            return False, f"Missing required role: {r.replace('_', ' ').title()}"
-    
-    # Check for pending version
+    # Basic validation
+    if not chair.strip():
+        return False, "Chair is required."
+    if not major_members or len(major_members) == 0:
+        return False, "At least one major member is required."
+    if program_type == "MS":
+        if len(major_members) > 1:
+            return False, "Master's programs require exactly 1 major member."
+        if len(cognate_members) != 1:
+            return False, "Master's programs require exactly 1 minor/cognate member."
+        total_members = 1 + (1 if co_chair.strip() else 0) + len(major_members) + len(cognate_members)
+        if total_members < 3 or total_members > 4:
+            return False, f"Master's committee must have 3-4 members (currently {total_members})."
+    else:  # PhD
+        if len(major_members) > 2:
+            return False, "PhD programs allow at most 2 major members."
+        if len(cognate_members) < 1 or len(cognate_members) > 2:
+            return False, "PhD programs require 1-2 cognate members."
+        total_members = 1 + (1 if co_chair.strip() else 0) + len(major_members) + len(cognate_members)
+        if total_members < 4 or total_members > 5:
+            return False, f"PhD committee must have 4-5 members (currently {total_members})."
+
+    # Check for pending version (unchanged)
     df_ver = pd.read_csv(COMMITTEE_VERSIONS_FILE)
     pending = df_ver[(df_ver["student_number"] == student_number) & (df_ver["verification_status"] == "Pending")]
     if not pending.empty:
-        return False, "You already have a pending committee version. Please wait for your adviser to verify it."
-    
+        return False, "You already have a pending committee version."
+
     # Determine version number
     student_versions = df_ver[df_ver["student_number"] == student_number]
-    if student_versions.empty:
-        version_number = 1
-    else:
-        version_number = student_versions["version_number"].max() + 1
-    
-    # Save PDF
+    version_number = student_versions["version_number"].max() + 1 if not student_versions.empty else 1
+
+    # Save PDF (unchanged)
     folder = os.path.join(UPLOAD_FOLDER, student_number, "committee")
     os.makedirs(folder, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -358,7 +373,7 @@ def save_committee_version(student_number, pdf_file, members_dict):
     filepath = os.path.join(folder, filename)
     with open(filepath, "wb") as f:
         f.write(pdf_file.getbuffer())
-    
+
     # Insert version record
     version_id = get_next_version_id()
     new_ver = pd.DataFrame([{
@@ -375,27 +390,30 @@ def save_committee_version(student_number, pdf_file, members_dict):
     }])
     df_ver = pd.concat([df_ver, new_ver], ignore_index=True)
     df_ver.to_csv(COMMITTEE_VERSIONS_FILE, index=False)
-    
-    # Insert members
+
+    # Insert members – store each major and cognate separately
     df_mem = pd.read_csv(COMMITTEE_MEMBERS_FILE)
-    roles = [
-        ("Chair", members_dict['chair']),
-        ("Co-chair", members_dict.get('co_chair', "")),
-        ("Member (Major)", members_dict['member_major']),
-        ("Member (Cognate 1)", members_dict['member_cognate1']),
-        ("Member (Cognate 2)", members_dict['member_cognate2'])
-    ]
-    for role, name in roles:
+    # Chair
+    new_mem = pd.DataFrame([{"member_id": get_next_member_id(), "version_id": version_id, "role": "Chair", "name": chair.strip()}])
+    df_mem = pd.concat([df_mem, new_mem], ignore_index=True)
+    # Co-chair (optional)
+    if co_chair.strip():
+        new_mem = pd.DataFrame([{"member_id": get_next_member_id(), "version_id": version_id, "role": "Co-chair", "name": co_chair.strip()}])
+        df_mem = pd.concat([df_mem, new_mem], ignore_index=True)
+    # Major members
+    for i, name in enumerate(major_members):
         if name.strip():
-            new_mem = pd.DataFrame([{
-                "member_id": get_next_member_id(),
-                "version_id": version_id,
-                "role": role,
-                "name": name.strip()
-            }])
+            role = f"Member (Major {i+1})" if len(major_members) > 1 else "Member (Major)"
+            new_mem = pd.DataFrame([{"member_id": get_next_member_id(), "version_id": version_id, "role": role, "name": name.strip()}])
             df_mem = pd.concat([df_mem, new_mem], ignore_index=True)
+    # Cognate members
+    for i, name in enumerate(cognate_members):
+        if name.strip():
+            role = f"Member (Cognate {i+1})" if program_type == "PhD" and len(cognate_members) > 1 else "Member (Cognate)"
+            new_mem = pd.DataFrame([{"member_id": get_next_member_id(), "version_id": version_id, "role": role, "name": name.strip()}])
+            df_mem = pd.concat([df_mem, new_mem], ignore_index=True)
+
     df_mem.to_csv(COMMITTEE_MEMBERS_FILE, index=False)
-    
     return True, f"Committee version {version_number} submitted for adviser verification."
 
 def get_committee_versions(student_number):
@@ -524,8 +542,9 @@ def load_pos_submissions():
                 df[col] = ""
     df["submission_id"] = pd.to_numeric(df["submission_id"], errors='coerce').fillna(0).astype(int)
     df["version"] = pd.to_numeric(df["version"], errors='coerce').fillna(0).astype(int)
-    df["adviser_approved"] = df["adviser_approved"].astype(bool)
-    df["gs_approved"] = df["gs_approved"].astype(bool)
+    for bool_col in ["adviser_approved", "gs_approved"]:
+        if bool_col in df.columns:
+            df[bool_col] = df[bool_col].apply(lambda x: str(x).strip().lower() in ["true", "1", "yes"])
     if "submission_type" not in df.columns:
         df["submission_type"] = ""
     return df
@@ -745,7 +764,7 @@ def load_data():
         if col not in numeric_cols and col != "prior_ms_graduate":
             df[col] = df[col].fillna("").astype(str)
 
-    df["prior_ms_graduate"] = df["prior_ms_graduate"].astype(bool)
+    df["prior_ms_graduate"] = df["prior_ms_graduate"].apply(lambda x: str(x).strip().lower() in ["true", "1", "yes"])
 
     for idx, row in df.iterrows():
         prog = row["program"]
@@ -1838,7 +1857,7 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
             
             if is_adviser and not is_own_view:
                 st.markdown("---")
-                st.markdown("#### 🔍 Adviser Verification")
+                st.markdown("#### Verification")
                 if "original_verified" not in st.session_state:
                     st.session_state.original_verified = False
                 if not st.session_state.original_verified:
@@ -1856,7 +1875,7 @@ def render_pos_milestone(student_number, viewer_role, is_own_view=False):
             st.info("No revised POS submissions yet.")
         else:
             for _, rev in revisions.iterrows():
-                with st.container(border=True):
+                with st.container():
                     st.markdown(f"**Version {rev['version']}** – Uploaded: {rev['upload_date']}")
                     status = rev["status"]
                     if status == "Pending":
@@ -2567,42 +2586,82 @@ def student_dashboard():
                         st.info("No active committee approved yet.")
                     
                     pending = get_pending_committee_version(student["student_number"])
-                    if pending is not None:
-                        st.warning(f"**Pending Committee Version {pending['version_number']}** – Submitted on {pending['created_at']} – Awaiting verification")
-                        with st.expander("View Pending Committee"):
-                            members = get_committee_members_for_version(pending['version_id'])
-                            st.dataframe(members)
-                            st.markdown(f"[View GS PDF]({pending['gs_pdf_path']})")
-                    
-                    # Student submission form (only if no pending version)
+                   # Inside the committee milestone tab, after checking pending/active
                     if pending is None:
-                        with st.form(key="student_submit_committee"):
-                            st.markdown("#### Submit New Committee (GS-Approved)")
-                            uploaded_pdf = st.file_uploader("GS‑approved Committee Form (PDF)", type=["pdf"])
-                            st.markdown("**Committee Members**")
-                            chair = st.text_input("Chair (required)")
-                            co_chair = st.text_input("Co‑chair (optional)")
-                            major_member = st.text_input("Member (Major) – required")
-                            cognate1 = st.text_input("Member (Cognate 1) – required")
-                            cognate2 = st.text_input("Member (Cognate 2) – required")
-                            if st.form_submit_button("Submit Committee for Verification"):
-                                if not uploaded_pdf or not chair or not major_member or not cognate1 or not cognate2:
-                                    st.error("Please fill all required fields and upload the GS‑approved PDF.")
-                                else:
-                                    members_dict = {
-                                        'chair': chair,
-                                        'co_chair': co_chair,
-                                        'member_major': major_member,
-                                        'member_cognate1': cognate1,
-                                        'member_cognate2': cognate2
-                                    }
-                                    success, msg = save_committee_version(student["student_number"], uploaded_pdf, members_dict)
-                                    if success:
-                                        st.success(msg)
-                                        st.rerun()
-                                    else:
-                                        st.error(msg)
-                    
+# Determine program type
+prog_type = get_program_type(student["program"])
+is_phd = prog_type.startswith("PhD")
+
+with st.form(key="student_submit_committee"):
+    st.markdown("#### Submit New Committee (GS-Approved PDF)")
+    uploaded_pdf = st.file_uploader("GS‑approved Committee Form (PDF)", type=["pdf"])
+    
+    chair = st.text_input("Chair (required)")
+    co_chair = st.text_input("Co‑chair (optional)")
+    
+    # Major members
+    if is_phd:
+        num_major = st.number_input("Number of major members (1–2)", min_value=1, max_value=2, value=1, step=1)
+    else:
+        num_major = 1
+        st.markdown("##### Major Member (exactly 1)")
+    
+    major_members = []
+    for i in range(num_major):
+        label = f"Major member {i+1}" if num_major > 1 else "Major member"
+        name = st.text_input(label + " (required)", key=f"major_{i}")
+        if name.strip():
+            major_members.append(name)
+    
+    # Cognate / Minor members
+    if is_phd:
+        num_cognate = st.number_input("Number of cognate members (1–2)", min_value=1, max_value=2, value=1, step=1)
+        cognate_members = []
+        for i in range(num_cognate):
+            name = st.text_input(f"Cognate member {i+1} (required)", key=f"cog_{i}")
+            if name.strip():
+                cognate_members.append(name)
+    else:
+        st.markdown("##### Minor Member (exactly 1)")
+        minor_name = st.text_input("Minor member (required)", key="minor_member")
+        cognate_members = [minor_name] if minor_name.strip() else []
+    
+    if st.form_submit_button("Submit Committee for Verification"):
+        # Validation
+        errors = []
+        if not uploaded_pdf:
+            errors.append("PDF file is required")
+        if not chair.strip():
+            errors.append("Chair is required")
+        if len(major_members) == 0:
+            errors.append("At least one major member is required")
+        if is_phd and len(cognate_members) == 0:
+            errors.append("At least one cognate member is required")
+        if not is_phd and len(cognate_members) != 1:
+            errors.append("Exactly one minor member is required for Master's programs")
+        
+        # Also enforce total member count (optional but helpful)
+        total = 1 + (1 if co_chair.strip() else 0) + len(major_members) + len(cognate_members)
+        if is_phd and (total < 4 or total > 5):
+            errors.append(f"PhD committee must have 4–5 members (currently {total})")
+        if not is_phd and (total < 3 or total > 4):
+            errors.append(f"Master's committee must have 3–4 members (currently {total})")
+        
+        if errors:
+            for err in errors:
+                st.error(err)
+        else:
+            # Call the updated save_committee_version (which expects lists)
+            success, msg = save_committee_version(
+                student["student_number"], uploaded_pdf,
+                "PhD" if is_phd else "MS",
+                chair, co_chair, major_members, cognate_members
+            )
+            if success:
+                st.success(msg)
+                st.rerun()
+            else:
+                st.error(msg)
                     # Version history
                     versions = get_committee_versions(student["student_number"])
                     if not versions.empty:
