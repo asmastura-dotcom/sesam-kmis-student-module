@@ -2116,7 +2116,11 @@ def view_student_profile(student_number, viewer_role):
                         with st.expander("View Active Committee Details"):
                             members = get_committee_members_for_version(active['version_id'])
                             st.dataframe(members)
-                            st.markdown(f"[View GS PDF]({active['gs_pdf_path']})")
+                            if os.path.exists(active['gs_pdf_path']):
+                                with open(active['gs_pdf_path'], "rb") as f:
+                                    st.download_button("📄 Download GS PDF", f, file_name=os.path.basename(active['gs_pdf_path']))
+                    else:
+                        st.warning("PDF file not found.")
                     else:
                         st.info("No active committee approved yet.")
                     
