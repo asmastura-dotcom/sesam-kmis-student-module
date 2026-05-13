@@ -2588,43 +2588,34 @@ def student_dashboard():
                     pending = get_pending_committee_version(student["student_number"])
                    # Inside the committee milestone tab, after checking pending/active
                     if pending is None:
-# Determine program type
-prog_type = get_program_type(student["program"])
-is_phd = prog_type.startswith("PhD")
+# In your committee submission form
+program_type = get_program_type(student["program"])
+is_phd = program_type.startswith("PhD")
 
-with st.form(key="student_submit_committee"):
-    st.markdown("#### Submit New Committee (GS-Approved PDF)")
-    uploaded_pdf = st.file_uploader("GS‑approved Committee Form (PDF)", type=["pdf"])
-    
-    chair = st.text_input("Chair (required)")
-    co_chair = st.text_input("Co‑chair (optional)")
-    
-    # Major members
-    if is_phd:
-        num_major = st.number_input("Number of major members (1–2)", min_value=1, max_value=2, value=1, step=1)
-    else:
-        num_major = 1
-        st.markdown("##### Major Member (exactly 1)")
-    
-    major_members = []
-    for i in range(num_major):
-        label = f"Major member {i+1}" if num_major > 1 else "Major member"
-        name = st.text_input(label + " (required)", key=f"major_{i}")
-        if name.strip():
-            major_members.append(name)
-    
-    # Cognate / Minor members
-    if is_phd:
-        num_cognate = st.number_input("Number of cognate members (1–2)", min_value=1, max_value=2, value=1, step=1)
-        cognate_members = []
-        for i in range(num_cognate):
-            name = st.text_input(f"Cognate member {i+1} (required)", key=f"cog_{i}")
-            if name.strip():
-                cognate_members.append(name)
-    else:
-        st.markdown("##### Minor Member (exactly 1)")
-        minor_name = st.text_input("Minor member (required)", key="minor_member")
-        cognate_members = [minor_name] if minor_name.strip() else []
+# Base required fields (always present)
+chair = st.text_input("Chair (required)")
+co_chair = st.text_input("Co‑chair (optional)")
+
+# Major members: at least 1 required, max 2
+major_members = []
+num_major = 1  # start with 1 required
+major_members.append(st.text_input("Major member 1 (required)"))
+if is_phd:
+    add_major = st.checkbox("Add second major member (optional)")
+    if add_major:
+        major_members.append(st.text_input("Major member 2 (optional)"))
+
+# Cognate members: at least 1 required, max 2 (PhD only)
+cognate_members = []
+if is_phd:
+    cognate_members.append(st.text_input("Cognate member 1 (required)"))
+    add_cognate = st.checkbox("Add second cognate member (optional)")
+    if add_cognate:
+        cognate_members.append(st.text_input("Cognate member 2 (optional)"))
+else:
+    # Master's: exactly 1 minor (required)
+    minor = st.text_input("Minor member (required)")
+    cognate_members = [minor] if minor else []
     
     if st.form_submit_button("Submit Committee for Verification"):
         # Validation
