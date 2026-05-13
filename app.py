@@ -2585,122 +2585,101 @@ def student_dashboard():
                         st.info("No active committee approved yet.")
                     
                     pending = get_pending_committee_version(student["student_number"])
-                   # Student submission form (only if no pending version)
-if pending is None:
-    # Determine program type
-    prog_type = get_program_type(student["program"])
-    is_phd = prog_type.startswith("PhD")
-    
-    # Initialize session state counters for extra fields (unique per student)
-    extra_major_key = f"extra_major_{student['student_number']}"
-    extra_cognate_key = f"extra_cognate_{student['student_number']}"
-    if extra_major_key not in st.session_state:
-        st.session_state[extra_major_key] = 0
-    if extra_cognate_key not in st.session_state:
-        st.session_state[extra_cognate_key] = 0
-    
-    with st.form(key="submit_committee_version"):
-        st.markdown("#### Submit New Committee (GS-Approved)")
-        uploaded_pdf = st.file_uploader("GS‑approved Committee Form (PDF)", type=["pdf"])
-        
-        chair = st.text_input("Chair (required)")
-        co_chair = st.text_input("Co‑chair (optional)")
-        
-        # --- Major members ---
-        major_members = []
-        st.markdown("##### Major Field Members")
-        # Required first major member
-        major1 = st.text_input("Major member 1 (required)")
-        if major1.strip():
-            major_members.append(major1)
-        
-        # Extra major members (only for PhD, max 1 extra → total 2)
-        if is_phd:
-            # Display existing extra major fields
-            for i in range(st.session_state[extra_major_key]):
-                extra = st.text_input(f"Major member {i+2} (optional)", key=f"major_extra_{student['student_number']}_{i}")
-                if extra.strip():
-                    major_members.append(extra)
-            
-            # Button to add another major field (max 1 extra because max total is 2)
-            if st.session_state[extra_major_key] < 1:
-                if st.form_submit_button("➕ Add additional major member"):
-                    st.session_state[extra_major_key] += 1
-                    st.rerun()
-        
-        # --- Cognate / Minor members ---
-        cognate_members = []
-        if is_phd:
-            st.markdown("##### Cognate Field Members")
-            # Required first cognate member
-            cog1 = st.text_input("Cognate member 1 (required)")
-            if cog1.strip():
-                cognate_members.append(cog1)
-            
-            # Extra cognate fields (max 1 extra → total 2)
-            for i in range(st.session_state[extra_cognate_key]):
-                extra = st.text_input(f"Cognate member {i+2} (optional)", key=f"cog_extra_{student['student_number']}_{i}")
-                if extra.strip():
-                    cognate_members.append(extra)
-            
-            if st.session_state[extra_cognate_key] < 1:
-                if st.form_submit_button("➕ Add additional cognate member"):
-                    st.session_state[extra_cognate_key] += 1
-                    st.rerun()
-        else:
-            st.markdown("##### Minor Field Member")
-            minor = st.text_input("Minor member (required)")
-            if minor.strip():
-                cognate_members.append(minor)
-        
-        # Submit button (real submission only when clicked, not for the "add member" buttons)
-        submitted = st.form_submit_button("Submit Committee for Verification")
-        
-        if submitted:
-            # Validation
-            errors = []
-            if not uploaded_pdf:
-                errors.append("PDF file is required")
-            if not chair.strip():
-                errors.append("Chair is required")
-            if len(major_members) == 0:
-                errors.append("At least one major member is required")
-            if is_phd and len(cognate_members) == 0:
-                errors.append("At least one cognate member is required")
-            if not is_phd and len(cognate_members) != 1:
-                errors.append("Exactly one minor member is required for Master's programs")
-            
-            total = 1 + (1 if co_chair.strip() else 0) + len(major_members) + len(cognate_members)
-            if is_phd and (total < 4 or total > 5):
-                errors.append(f"PhD committee must have 4–5 members (currently {total})")
-            if not is_phd and (total < 3 or total > 4):
-                errors.append(f"Master's committee must have 3–4 members (currently {total})")
-            
-            if errors:
-                for err in errors:
-                    st.error(err)
-            else:
-                success, msg = save_committee_version(
-                    student["student_number"], uploaded_pdf,
-                    "PhD" if is_phd else "MS",
-                    chair, co_chair, major_members, cognate_members
-                )
-                if success:
-                    # Reset counters after successful submission
-                    st.session_state[extra_major_key] = 0
-                    st.session_state[extra_cognate_key] = 0
-                    st.success(msg)
-                    st.rerun()
-                else:
-                    st.error(msg)
+                    if pending is None:
+                        # Student submission form (only if no pending version exists)
+                        prog_type = get_program_type(student["program"])
+                        is_phd = prog_type.startswith("PhD")
+                        extra_major_key = f"extra_major_{student['student_number']}"
+                        extra_cognate_key = f"extra_cognate_{student['student_number']}"
+                        if extra_major_key not in st.session_state:
+                            st.session_state[extra_major_key] = 0
+                        if extra_cognate_key not in st.session_state:
+                            st.session_state[extra_cognate_key] = 0
+
+                        with st.form(key="submit_committee_version"):
+                            st.markdown("#### Submit New Committee (GS-Approved)")
+                            uploaded_pdf = st.file_uploader("GS‑approved Committee Form (PDF)", type=["pdf"])
+                            chair = st.text_input("Chair (required)")
+                            co_chair = st.text_input("Co‑chair (optional)")
+
+                            major_members = []
+                            st.markdown("##### Major Field Members")
+                            major1 = st.text_input("Major member 1 (required)")
+                            if major1.strip():
+                                major_members.append(major1)
+
+                            if is_phd:
+                                for i in range(st.session_state[extra_major_key]):
+                                    extra = st.text_input(f"Major member {i+2} (optional)", key=f"major_extra_{student['student_number']}_{i}")
+                                    if extra.strip():
+                                        major_members.append(extra)
+                                if st.session_state[extra_major_key] < 1:
+                                    if st.form_submit_button("➕ Add additional major member"):
+                                        st.session_state[extra_major_key] += 1
+                                        st.rerun()
+
+                            cognate_members = []
+                            if is_phd:
+                                st.markdown("##### Cognate Field Members")
+                                cog1 = st.text_input("Cognate member 1 (required)")
+                                if cog1.strip():
+                                    cognate_members.append(cog1)
+                                for i in range(st.session_state[extra_cognate_key]):
+                                    extra = st.text_input(f"Cognate member {i+2} (optional)", key=f"cog_extra_{student['student_number']}_{i}")
+                                    if extra.strip():
+                                        cognate_members.append(extra)
+                                if st.session_state[extra_cognate_key] < 1:
+                                    if st.form_submit_button("➕ Add additional cognate member"):
+                                        st.session_state[extra_cognate_key] += 1
+                                        st.rerun()
+                            else:
+                                st.markdown("##### Minor Field Member")
+                                minor = st.text_input("Minor member (required)")
+                                if minor.strip():
+                                    cognate_members.append(minor)
+
+                            submitted = st.form_submit_button("Submit Committee for Verification")
+                            if submitted:
+                                errors = []
+                                if not uploaded_pdf:
+                                    errors.append("PDF file is required")
+                                if not chair.strip():
+                                    errors.append("Chair is required")
+                                if len(major_members) == 0:
+                                    errors.append("At least one major member is required")
+                                if is_phd and len(cognate_members) == 0:
+                                    errors.append("At least one cognate member is required")
+                                if not is_phd and len(cognate_members) != 1:
+                                    errors.append("Exactly one minor member is required for Master's programs")
+                                total = 1 + (1 if co_chair.strip() else 0) + len(major_members) + len(cognate_members)
+                                if is_phd and (total < 4 or total > 5):
+                                    errors.append(f"PhD committee must have 4–5 members (currently {total})")
+                                if not is_phd and (total < 3 or total > 4):
+                                    errors.append(f"Master's committee must have 3–4 members (currently {total})")
+
+                                if errors:
+                                    for err in errors:
+                                        st.error(err)
+                                else:
+                                    success, msg = save_committee_version(
+                                        student["student_number"], uploaded_pdf,
+                                        "PhD" if is_phd else "MS",
+                                        chair, co_chair, major_members, cognate_members
+                                    )
+                                    if success:
+                                        st.session_state[extra_major_key] = 0
+                                        st.session_state[extra_cognate_key] = 0
+                                        st.success(msg)
+                                        st.rerun()
+                                    else:
+                                        st.error(msg)
                     else:
                         st.warning(f"**Pending Committee Version {pending['version_number']}** – Submitted on {pending['created_at']} – Awaiting verification")
                         with st.expander("View Pending Committee"):
                             members = get_committee_members_for_version(pending['version_id'])
                             st.dataframe(members)
                             st.markdown(f"[View GS PDF]({pending['gs_pdf_path']})")
-                    
-                    # Version history
+
                     versions = get_committee_versions(student["student_number"])
                     if not versions.empty:
                         with st.expander("Committee Version History"):
@@ -2711,9 +2690,7 @@ if pending is None:
                                 if ver['remarks']:
                                     st.caption(f"Remarks: {ver['remarks']}")
                                 st.markdown("---")
-                
                 else:
-                    # Non-committee milestone (unchanged)
                     milestone_filtered = milestones_df[milestones_df["milestone"] == milestone_name]
                     if milestone_filtered.empty:
                         st.error(f"Milestone '{milestone_name}' not found in records.")
@@ -2725,14 +2702,14 @@ if pending is None:
                     remarks = milestone_row["remarks"]
                     reviewed_by = milestone_row.get("reviewed_by", "")
                     review_date = milestone_row.get("review_date", "")
-                    
+
                     st.markdown(f"### {milestone_name}")
                     st.markdown(get_status_badge(status), unsafe_allow_html=True)
                     if date_val:
                         st.write(f"**Date of approval:** {date_val}")
                     if reviewed_by and status == "Approved":
                         st.caption(f"Approved by: {reviewed_by} on {review_date}")
-                    
+
                     if file_path and file_path != "" and os.path.exists(file_path):
                         with st.expander("📎 View submitted document"):
                             if file_path.lower().endswith(('.png','.jpg','.jpeg','.gif')):
@@ -2740,7 +2717,7 @@ if pending is None:
                             else:
                                 with open(file_path, "rb") as f:
                                     st.download_button("Download", f, file_name=os.path.basename(file_path))
-                    
+
                     if status == "Rejected" and remarks:
                         st.error(f"**Rejection reason:** {remarks}")
                     
