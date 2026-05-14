@@ -159,13 +159,14 @@ PROGRAMS = [
 ]
 
 def get_program_type(program_name):
-    if program_name.startswith("MS") or program_name.startswith("Master") or program_name == "Professional Masters in Tropical Marine Ecosystems Management (PM-TMEM)":
+    if program_name == "MS Environmental Science":
         return "MS_Thesis"
-    elif program_name.startswith("PhD by Research"):
-        return "PhD_Research"
-    elif program_name.startswith("PhD"):
+    elif program_name == "PhD Environmental Science":
         return "PhD_Regular"
+    elif program_name == "PhD Environmental Diplomacy and Negotiations":
+        return "PhD_Research"
     else:
+        # Fallback for any unexpected program
         return "MS_Thesis"
 
 def is_master_program(program): return get_program_type(program).startswith("MS")
@@ -193,55 +194,30 @@ MILESTONE_DEFS = {
     "MS_Thesis": [
         "Guidance Committee Members",
         "Plan of Study (POS)",
-        "General Examination",
-        "Thesis Work",
-        "External Review",
-        "Publishable Article",
-        "Final Examination",
-        "Final Submission",
-        "Graduation Clearance"
-    ],
-    "MS_NonThesis": [
-        "Guidance Committee Formation",
-        "Plan of Study (POS)",
-        "General Examination",
-        "Final Examination",
-        "Graduation Clearance"
+        "General / Comprehensive Examination - Passed",
+        "Thesis Proposal / Outline – Approved",
+        "Thesis Final Examination / Defense" - Passed,
+        "Final Manuscript Submission",
     ],
     "PhD_Regular": [
         "Advisory Committee Formation",
-        "Qualifying Exam",
-        "Plan of Study",
-        "Comprehensive Exam",
-        "Dissertation",
-        "External Review",
-        "Publication",
-        "Final Defense",
-        "Submission",
-        "Graduation"
-    ],
-    "PhD_Straight": [
-        "Advisory Committee Formation",
-        "Qualifying Exam",
-        "Plan of Study",
-        "Comprehensive Exam",
-        "Dissertation",
-        "External Review",
-        "Publication (2 papers)",
-        "Final Defense",
-        "Submission",
-        "Graduation"
+        "Qualifying Examination",
+        "Plan of Study (POS)",
+        "General / Comprehensive Examination - Passed",
+        "Dissertation Proposal / Outline - Approved",
+        "Pre‑dissertation Seminar / Colloquium – Completed",
+        "Dissertation Final Defense – Passed",
+        "Final Manuscript Submission",
     ],
     "PhD_Research": [
         "Supervisory Committee Formation",
         "Plan of Research",
         "Seminar Series (3 seminars)",
         "Research Progress Review",
-        "Thesis Draft",
+        "Thesis Outline",
         "Publication (3 articles)",
         "Final Oral Examination",
-        "Thesis Submission",
-        "Graduation"
+        "Thesis Manuscript Submission",
     ]
 }
 
