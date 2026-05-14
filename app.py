@@ -1,7 +1,7 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 32.0 | Enhanced committee workflow: version control, adviser verification, GS PDF upload
-Roles: Student (submit), Adviser (verify), Staff (read-only)
+Version: 34.0 | Faculty directory dropdown for committee members and adviser selection
+Roles: Student (upload), Adviser (verify), Staff (view-only)
 """
 
 import streamlit as st
@@ -13,6 +13,18 @@ import smtplib
 from email.message import EmailMessage
 import base64
 import shutil
+
+# ==================== PDF EMBEDDING HELPER ====================
+def embed_pdf(pdf_path, height=600):
+    """Generate an HTML iframe to embed a PDF for inline viewing."""
+    if not os.path.exists(pdf_path):
+        return "<p>⚠️ PDF file not found.</p>"
+    try:
+        with open(pdf_path, "rb") as f:
+            base64_pdf = base64.b64encode(f.read()).decode('utf-8')
+        return f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="{height}" type="application/pdf"></iframe>'
+    except Exception as e:
+        return f"<p>Error loading PDF: {e}</p>"
 
 # ==================== EMAIL CONFIGURATION (placeholder) ====================
 SMTP_SERVER = "smtp.gmail.com"
@@ -147,6 +159,30 @@ USERS = {
     "adviser1": {"password": "adv123", "role": "Faculty Adviser", "display_name": "Dr. Eslava"},
     "adviser2": {"password": "adv456", "role": "Faculty Adviser", "display_name": "Dr. Sanchez"},
 }
+
+# ==================== FACULTY DIRECTORY ====================
+FACULTY_FILE = "faculty.csv"
+
+def init_faculty_directory():
+    """Create faculty.csv if not exists with default faculty list."""
+    if not os.path.exists(FACULTY_FILE):
+        default_faculty = pd.DataFrame([
+            {"name": "Dr. Eslava", "email": "eslava@uplb.edu.ph", "up_mail": "eslava@up.edu.ph", "department": "SESAM"},
+            {"name": "Dr. Sanchez", "email": "sanchez@uplb.edu.ph", "up_mail": "sanchez@up.edu.ph", "department": "SESAM"},
+            {"name": "Dr. Uno", "email": "uno@uplb.edu.ph", "up_mail": "uno@up.edu.ph", "department": "SESAM"},
+            {"name": "Dr. Dos", "email": "dos@uplb.edu.ph", "up_mail": "dos@up.edu.ph", "department": "SESAM"},
+        ])
+        default_faculty.to_csv(FACULTY_FILE, index=False)
+
+def load_faculty():
+    """Return a DataFrame of faculty members."""
+    init_faculty_directory()
+    return pd.read_csv(FACULTY_FILE)
+
+def get_faculty_names():
+    """Return a list of faculty names for dropdowns."""
+    df = load_faculty()
+    return df["name"].tolist()
 
 # ==================== PROGRAM & UNIT REQUIREMENTS ====================
 PROGRAMS = [
@@ -302,7 +338,6 @@ for folder in [UPLOAD_FOLDER, PROFILE_PIC_FOLDER]:
 
 # ==================== COMMITTEE VERSION CONTROL ====================
 def init_committee_tables():
-    """Create CSV files if they don't exist."""
     if not os.path.exists(COMMITTEE_VERSIONS_FILE):
         df_ver = pd.DataFrame(columns=[
             "version_id", "student_number", "version_number", "gs_pdf_path",
@@ -327,13 +362,27 @@ def get_next_member_id():
         return 1
     return df["member_id"].max() + 1
 
+def delete_pending_committee_version(student_number):
+    df_ver = pd.read_csv(COMMITTEE_VERSIONS_FILE)
+    pending_mask = (df_ver["student_number"] == student_number) & (df_ver["verification_status"] == "Pending")
+    if not pending_mask.any():
+        return False, "No pending version found."
+    pending_row = df_ver[pending_mask].iloc[0]
+    version_id = pending_row["version_id"]
+    pdf_path = pending_row["gs_pdf_path"]
+    if os.path.exists(pdf_path):
+        try:
+            os.remove(pdf_path)
+        except:
+            pass
+    df_mem = pd.read_csv(COMMITTEE_MEMBERS_FILE)
+    df_mem = df_mem[df_mem["version_id"] != version_id]
+    df_mem.to_csv(COMMITTEE_MEMBERS_FILE, index=False)
+    df_ver = df_ver[~pending_mask]
+    df_ver.to_csv(COMMITTEE_VERSIONS_FILE, index=False)
+    return True, "Pending submission deleted. You can now submit a corrected version."
+
 def save_committee_version(student_number, pdf_file, program_type, chair, co_chair, major_members, cognate_members):
-    """
-    program_type: 'MS' or 'PhD'
-    major_members: list of strings (1-2)
-    cognate_members: list of strings (1-2 for PhD, exactly 1 for MS)
-    """
-    # Basic validation
     if not chair.strip():
         return False, "Chair is required."
     if not major_members or len(major_members) == 0:
@@ -355,17 +404,14 @@ def save_committee_version(student_number, pdf_file, program_type, chair, co_cha
         if total_members < 4 or total_members > 5:
             return False, f"PhD committee must have 4-5 members (currently {total_members})."
 
-    # Check for pending version (unchanged)
     df_ver = pd.read_csv(COMMITTEE_VERSIONS_FILE)
     pending = df_ver[(df_ver["student_number"] == student_number) & (df_ver["verification_status"] == "Pending")]
     if not pending.empty:
-        return False, "You already have a pending committee version."
+        return False, "You already have a pending committee version. Please cancel it first if you want to submit a new one."
 
-    # Determine version number
     student_versions = df_ver[df_ver["student_number"] == student_number]
     version_number = student_versions["version_number"].max() + 1 if not student_versions.empty else 1
 
-    # Save PDF
     folder = os.path.join(UPLOAD_FOLDER, student_number, "committee")
     os.makedirs(folder, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -374,7 +420,6 @@ def save_committee_version(student_number, pdf_file, program_type, chair, co_cha
     with open(filepath, "wb") as f:
         f.write(pdf_file.getbuffer())
 
-    # Insert version record
     version_id = get_next_version_id()
     new_ver = pd.DataFrame([{
         "version_id": version_id,
@@ -391,22 +436,17 @@ def save_committee_version(student_number, pdf_file, program_type, chair, co_cha
     df_ver = pd.concat([df_ver, new_ver], ignore_index=True)
     df_ver.to_csv(COMMITTEE_VERSIONS_FILE, index=False)
 
-    # Insert members
     df_mem = pd.read_csv(COMMITTEE_MEMBERS_FILE)
-    # Chair
     new_mem = pd.DataFrame([{"member_id": get_next_member_id(), "version_id": version_id, "role": "Chair", "name": chair.strip()}])
     df_mem = pd.concat([df_mem, new_mem], ignore_index=True)
-    # Co-chair (optional)
     if co_chair.strip():
         new_mem = pd.DataFrame([{"member_id": get_next_member_id(), "version_id": version_id, "role": "Co-chair", "name": co_chair.strip()}])
         df_mem = pd.concat([df_mem, new_mem], ignore_index=True)
-    # Major members
     for i, name in enumerate(major_members):
         if name.strip():
             role = f"Member (Major {i+1})" if len(major_members) > 1 else "Member (Major)"
             new_mem = pd.DataFrame([{"member_id": get_next_member_id(), "version_id": version_id, "role": role, "name": name.strip()}])
             df_mem = pd.concat([df_mem, new_mem], ignore_index=True)
-    # Cognate members
     for i, name in enumerate(cognate_members):
         if name.strip():
             role = f"Member (Cognate {i+1})" if program_type == "PhD" and len(cognate_members) > 1 else "Member (Cognate)"
@@ -440,45 +480,32 @@ def get_active_committee_version(student_number):
     return active.iloc[0]
 
 def verify_committee_version(version_id, status, adviser_name, remarks):
-    """
-    status: 'Verified Correct' or 'Mismatch – Requires Correction'
-    """
     if status not in ["Verified Correct", "Mismatch – Requires Correction"]:
         return False, "Invalid status."
-    
     df_ver = pd.read_csv(COMMITTEE_VERSIONS_FILE)
     mask = df_ver["version_id"] == version_id
     if not mask.any():
         return False, "Version not found."
-    
     row = df_ver[mask].iloc[0]
     if row["verification_status"] != "Pending":
         return False, f"Version is already {row['verification_status']}."
-    
     df_ver.loc[mask, "verification_status"] = status
     df_ver.loc[mask, "verification_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     df_ver.loc[mask, "verified_by"] = adviser_name
     df_ver.loc[mask, "remarks"] = remarks
-    
     if status == "Verified Correct":
-        # Set this version as active, deactivate all others for this student
         student_number = row["student_number"]
         df_ver.loc[df_ver["student_number"] == student_number, "is_active"] = False
         df_ver.loc[mask, "is_active"] = True
-        
-        # Update adviser to Chair of this version
         members = get_committee_members_for_version(version_id)
         chair_row = members[members["role"] == "Chair"]
         if not chair_row.empty:
             chair_name = chair_row.iloc[0]["name"]
-            # Update students.csv
             df_students = load_data()
             idx = df_students[df_students["student_number"] == student_number].index
             if len(idx) > 0:
                 df_students.loc[idx, "advisor"] = chair_name
                 save_data(df_students)
-        
-        # Update milestone tracking
         df_students = load_data()
         student = df_students[df_students["student_number"] == student_number].iloc[0]
         prog_type = get_program_type(student["program"])
@@ -490,223 +517,165 @@ def verify_committee_version(version_id, status, adviser_name, remarks):
         elif prog_type == "PhD_Research":
             milestone_name = "Supervisory Committee Formation"
         else:
-            milestone_name = "Guidance Committee Formation"  # fallback
+            milestone_name = "Guidance Committee Formation"
         update_milestone(student_number, milestone_name, "Approved", date.today().strftime("%Y-%m-%d"), "", f"Committee verified by {adviser_name}", adviser_name)
-    
     df_ver.to_csv(COMMITTEE_VERSIONS_FILE, index=False)
     return True, f"Committee version marked as {status}."
-
-# ==================== OLD COMMITTEE HELPER (for backward compatibility, not used) ====================
-def get_committee_members_old(student_number):
-    # Kept for any legacy calls; not used in new UI
-    return []
-
-def set_committee_members_old(student_number, members):
-    return False, "Deprecated. Use committee version control."
-
-def get_committee_chair_old(student_number):
-    active = get_active_committee_version(student_number)
-    if active is not None:
-        members = get_committee_members_for_version(active["version_id"])
-        chair = members[members["role"] == "Chair"]
-        if not chair.empty:
-            return chair.iloc[0]["name"]
-    return None
 
 def is_committee_approved(student_number):
     active = get_active_committee_version(student_number)
     return active is not None and active["verification_status"] == "Verified Correct"
 
 def check_committee_approval(student_number, semester_index):
-    """Require committee approval before second semester."""
-    if semester_index >= 1:  # second semester or later
+    if semester_index >= 1:
         if not is_committee_approved(student_number):
             return False, "Your Guidance/Advisory Committee must be approved before you can enroll in the second semester. Please submit the Committee Nomination Form to the Graduate School."
     return True, ""
 
-# ==================== POS SUBMISSIONS FUNCTIONS ====================
-def load_pos_submissions():
-    if not os.path.exists(POS_SUBMISSIONS_FILE) or os.path.getsize(POS_SUBMISSIONS_FILE) == 0:
-        return pd.DataFrame(columns=["submission_id", "student_number", "file_path", "upload_date", "version", 
-                                     "status", "approval_date", "approved_by", "remarks", "submission_type",
-                                     "adviser_approved", "gs_approved"])
-    df = pd.read_csv(POS_SUBMISSIONS_FILE, dtype=str)
-    required_cols = ["submission_id", "student_number", "file_path", "upload_date", "version", "status", 
-                     "approval_date", "approved_by", "remarks", "submission_type", "adviser_approved", "gs_approved"]
-    for col in required_cols:
-        if col not in df.columns:
-            if col in ["adviser_approved", "gs_approved"]:
-                df[col] = False
-            else:
-                df[col] = ""
-    df["submission_id"] = pd.to_numeric(df["submission_id"], errors='coerce').fillna(0).astype(int)
-    df["version"] = pd.to_numeric(df["version"], errors='coerce').fillna(0).astype(int)
-    for bool_col in ["adviser_approved", "gs_approved"]:
-        if bool_col in df.columns:
-            df[bool_col] = df[bool_col].apply(lambda x: str(x).strip().lower() in ["true", "1", "yes"])
-    if "submission_type" not in df.columns:
-        df["submission_type"] = ""
-    return df
+# ==================== POS SUBMISSIONS (DOCUMENT-BASED) ====================
+def init_pos_tables():
+    """Create pos_submissions.csv if it doesn't exist with the new schema."""
+    if not os.path.exists(POS_SUBMISSIONS_FILE):
+        df = pd.DataFrame(columns=[
+            "submission_id", "student_number", "file_path", "upload_date", "version",
+            "status", "verification_date", "verified_by", "remarks", "is_active", "submission_type"
+        ])
+        df.to_csv(POS_SUBMISSIONS_FILE, index=False)
 
-def save_pos_submissions(df):
-    df.to_csv(POS_SUBMISSIONS_FILE, index=False)
+def get_next_pos_submission_id():
+    df = pd.read_csv(POS_SUBMISSIONS_FILE)
+    if df.empty:
+        return 1
+    return df["submission_id"].max() + 1
 
-def get_pos_submissions(student_number):
-    df = load_pos_submissions()
-    return df[df["student_number"] == student_number].sort_values("submission_id", ascending=False)
-
-def get_original_pos(student_number):
-    df = load_pos_submissions()
-    original = df[(df["student_number"] == student_number) & (df["version"] == 1) & (df["status"] == "Approved")]
-    if original.empty:
+def get_active_pos_version(student_number):
+    """Return the active (verified correct) POS version as a dict, or None."""
+    df = pd.read_csv(POS_SUBMISSIONS_FILE)
+    active = df[(df["student_number"] == student_number) & (df["is_active"] == True)]
+    if active.empty:
         return None
-    return original.iloc[0]
+    return active.iloc[0].to_dict()
 
-def get_revisions(student_number):
-    df = load_pos_submissions()
-    revisions = df[(df["student_number"] == student_number) & (df["version"] >= 2)]
-    return revisions.sort_values("version", ascending=False)
+def get_pending_pos_version(student_number):
+    """Return a pending POS version (status = 'Pending') if any, else None."""
+    df = pd.read_csv(POS_SUBMISSIONS_FILE)
+    pending = df[(df["student_number"] == student_number) & (df["status"] == "Pending")]
+    if pending.empty:
+        return None
+    return pending.iloc[0].to_dict()
 
-def submit_pos_document(student_number, uploaded_file, submission_type="revision"):
+def get_pos_versions(student_number):
+    """Return all POS versions for a student, sorted by version descending."""
+    df = pd.read_csv(POS_SUBMISSIONS_FILE)
+    versions = df[df["student_number"] == student_number].sort_values("version", ascending=False)
+    return versions
+
+def submit_pos_document(student_number, uploaded_file, submission_type="original"):
+    """
+    Submit a new POS document (GS-approved PDF).
+    - For original: version = 1, status = "Pending", is_active = False.
+    - For revision: new version = max_version+1, status = "Pending", previous active remains active until verification.
+    """
     if uploaded_file is None:
         return False, "No file provided"
-    df = load_pos_submissions()
-    student_submissions = df[df["student_number"] == student_number]
-    if student_submissions.empty:
-        new_id = 1
+    if not uploaded_file.name.lower().endswith('.pdf'):
+        return False, "Only PDF files are allowed for POS submission."
+    df = pd.read_csv(POS_SUBMISSIONS_FILE)
+    student_versions = df[df["student_number"] == student_number]
+    if student_versions.empty:
         version = 1
         submission_type = "original"
     else:
-        new_id = student_submissions["submission_id"].max() + 1
-        version = len(student_submissions) + 1
+        version = student_versions["version"].max() + 1
+        submission_type = "revision"
+    pending = student_versions[student_versions["status"] == "Pending"]
+    if not pending.empty:
+        return False, "You already have a pending POS version awaiting verification. Please wait for the adviser to review it before submitting another."
     folder = os.path.join(UPLOAD_FOLDER, student_number, "pos_submissions")
     os.makedirs(folder, exist_ok=True)
-    ext = uploaded_file.name.split('.')[-1].lower()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"POS_v{version}_{timestamp}.{ext}"
+    filename = f"POS_v{version}_{timestamp}.pdf"
     filepath = os.path.join(folder, filename)
     try:
         with open(filepath, "wb") as f:
             f.write(uploaded_file.getbuffer())
     except Exception as e:
         return False, f"Error saving file: {e}"
+    submission_id = get_next_pos_submission_id()
     new_row = pd.DataFrame([{
-        "submission_id": new_id,
+        "submission_id": submission_id,
         "student_number": student_number,
         "file_path": filepath,
         "upload_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "version": version,
         "status": "Pending",
-        "approval_date": "",
-        "approved_by": "",
+        "verification_date": "",
+        "verified_by": "",
         "remarks": "",
-        "submission_type": submission_type,
-        "adviser_approved": False,
-        "gs_approved": False
+        "is_active": False,
+        "submission_type": submission_type
     }])
     df = pd.concat([df, new_row], ignore_index=True)
-    save_pos_submissions(df)
+    df.to_csv(POS_SUBMISSIONS_FILE, index=False)
     update_pos_milestone_status(student_number)
-    return True, "Success"
+    return True, f"POS version {version} submitted for adviser verification."
 
-def approve_pos_revision(submission_id, reviewer_name, remarks, role):
-    df = load_pos_submissions()
+def verify_pos_version(submission_id, status, adviser_name, remarks):
+    """
+    Verify a POS version. Status can be 'Verified Correct' or 'Mismatch – Requires Correction'.
+    If 'Verified Correct', set this version as active and deactivate all others.
+    """
+    if status not in ["Verified Correct", "Mismatch – Requires Correction"]:
+        return False, "Invalid status."
+    df = pd.read_csv(POS_SUBMISSIONS_FILE)
     mask = df["submission_id"] == submission_id
     if not mask.any():
         return False, "Submission not found."
     row = df[mask].iloc[0]
-    if role == "adviser":
-        df.loc[mask, "adviser_approved"] = True
-        df.loc[mask, "status"] = "Adviser Approved"
-        df.loc[mask, "approved_by"] = reviewer_name
-        df.loc[mask, "approval_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        if remarks:
-            df.loc[mask, "remarks"] = remarks
-        save_pos_submissions(df)
-        return True, "Revision approved by adviser. The student must now upload the GS-approved document to complete the process."
+    if row["status"] != "Pending":
+        return False, f"Version is already {row['status']}."
+    df.loc[mask, "status"] = status
+    df.loc[mask, "verification_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    df.loc[mask, "verified_by"] = adviser_name
+    df.loc[mask, "remarks"] = remarks
+    if status == "Verified Correct":
+        student_number = row["student_number"]
+        df.loc[df["student_number"] == student_number, "is_active"] = False
+        df.loc[mask, "is_active"] = True
+        update_pos_milestone_status(student_number)
     else:
-        return False, "Invalid role. Only adviser can approve the revision step."
-
-def finalize_gs_approval(student_number, submission_id, remarks):
-    df = load_pos_submissions()
-    mask = df["submission_id"] == submission_id
-    if not mask.any():
-        return False, "Submission not found."
-    if df.loc[mask, "adviser_approved"].iloc[0] != True:
-        return False, "This revision has not been approved by the adviser yet."
-    if df.loc[mask, "gs_approved"].iloc[0] == True:
-        return False, "This revision is already GS approved."
-    df.loc[mask, "gs_approved"] = True
-    df.loc[mask, "status"] = "GS Approved"
-    if remarks:
-        df.loc[mask, "remarks"] = remarks
-    save_pos_submissions(df)
-    update_pos_milestone_status(student_number)
-    return True, "GS approval recorded."
-
-def reject_pos_submission(submission_id, reviewer_name, remarks):
-    df = load_pos_submissions()
-    mask = df["submission_id"] == submission_id
-    if not mask.any():
-        return False
-    df.loc[mask, "status"] = "Rejected"
-    df.loc[mask, "approval_date"] = ""
-    df.loc[mask, "approved_by"] = reviewer_name
-    if remarks:
-        df.loc[mask, "remarks"] = remarks
-    save_pos_submissions(df)
-    student_number = df.loc[mask, "student_number"].iloc[0]
-    update_pos_milestone_status(student_number)
-    return True
+        pass
+    df.to_csv(POS_SUBMISSIONS_FILE, index=False)
+    return True, f"POS version marked as {status}."
 
 def update_pos_milestone_status(student_number):
-    submissions = get_pos_submissions(student_number)
-    if submissions.empty:
-        update_milestone_status_from_pos(student_number, "Not Started", "")
-        return
-    approved = submissions[submissions["status"] == "GS Approved"]
-    if not approved.empty:
-        latest_approved = approved.sort_values("submission_id", ascending=False).iloc[0]
-        approval_date = latest_approved.get("approval_date", "")
-        update_milestone_status_from_pos(student_number, "Approved", approval_date)
+    """Update the Plan of Study milestone status based on active POS version."""
+    active = get_active_pos_version(student_number)
+    if active:
+        update_milestone(student_number, "Plan of Study (POS)", "Approved", active["verification_date"].split()[0] if active["verification_date"] else "", active["file_path"], "", active["verified_by"])
         df_students = load_data()
         idx = df_students[df_students["student_number"] == student_number].index
         if len(idx) > 0:
             df_students.at[idx[0], "pos_status"] = "Approved"
-            df_students.at[idx[0], "pos_approval_date"] = approval_date
-            save_data(df_students)
-    elif any(submissions["status"] == "Pending"):
-        update_milestone_status_from_pos(student_number, "Pending", "")
-        df_students = load_data()
-        idx = df_students[df_students["student_number"] == student_number].index
-        if len(idx) > 0 and df_students.at[idx[0], "pos_status"] == "Approved":
-            df_students.at[idx[0], "pos_status"] = "Pending"
+            df_students.at[idx[0], "pos_approval_date"] = active["verification_date"]
             save_data(df_students)
     else:
-        update_milestone_status_from_pos(student_number, "Not Started", "")
-
-def update_milestone_status_from_pos(student_number, status, approval_date):
-    df_milestone = load_milestone_tracking()
-    mask = (df_milestone["student_number"] == student_number) & (df_milestone["milestone"] == "Plan of Study (POS)")
-    if mask.any():
-        idx = df_milestone[mask].index[0]
-        df_milestone.loc[idx, "status"] = status
-        if status == "Approved" and approval_date:
-            df_milestone.loc[idx, "date"] = approval_date.split()[0] if approval_date else ""
-        save_milestone_tracking(df_milestone)
-    else:
-        new_row = pd.DataFrame([{
-            "student_number": student_number,
-            "milestone": "Plan of Study (POS)",
-            "status": status,
-            "date": approval_date.split()[0] if approval_date else "",
-            "file_path": "",
-            "remarks": "",
-            "reviewed_by": "",
-            "review_date": ""
-        }])
-        df_milestone = pd.concat([df_milestone, new_row], ignore_index=True)
-        save_milestone_tracking(df_milestone)
+        pending = get_pending_pos_version(student_number)
+        if pending:
+            update_milestone(student_number, "Plan of Study (POS)", "Pending", "", pending["file_path"], "", None)
+            df_students = load_data()
+            idx = df_students[df_students["student_number"] == student_number].index
+            if len(idx) > 0 and df_students.at[idx[0], "pos_status"] == "Approved":
+                df_students.at[idx[0], "pos_status"] = "Pending"
+                df_students.at[idx[0], "pos_approval_date"] = ""
+                save_data(df_students)
+        else:
+            update_milestone(student_number, "Plan of Study (POS)", "Not Started", "", "", "", None)
+            df_students = load_data()
+            idx = df_students[df_students["student_number"] == student_number].index
+            if len(idx) > 0:
+                df_students.at[idx[0], "pos_status"] = "Not Started"
+                save_data(df_students)
 
 # ==================== CORE DATA FUNCTIONS ====================
 def load_data():
@@ -832,8 +801,8 @@ def compute_gwa_from_subjects(subjects_list):
             pass
     return total_grade/total_units if total_units>0 else 0.0
 
-# ==================== POS CONSISTENCY FUNCTIONS ====================
 def get_pos_for_semester(student_number, ay, sem):
+    # Legacy function for semester-level POS (kept for compatibility, not used in new document-based POS)
     sems = load_semester_records()
     mask = (sems["student_number"] == student_number) & (sems["academic_year"] == ay) & (sems["semester"] == sem)
     if mask.any():
@@ -847,6 +816,7 @@ def get_pos_for_semester(student_number, ay, sem):
     return []
 
 def set_pos_for_semester(student_number, ay, sem, course_codes_list, status, approver_name):
+    # Legacy function – kept for staff use if needed
     sems = load_semester_records()
     mask = (sems["student_number"] == student_number) & (sems["academic_year"] == ay) & (sems["semester"] == sem)
     pos_json = json.dumps(course_codes_list) if course_codes_list else ""
@@ -876,32 +846,15 @@ def set_pos_for_semester(student_number, ay, sem, course_codes_list, status, app
     save_semester_records(sems)
 
 def check_coursework_consistency(student_number, ay, sem):
-    enrolled = []
-    sems = load_semester_records()
-    mask = (sems["student_number"] == student_number) & (sems["academic_year"] == ay) & (sems["semester"] == sem)
-    if mask.any():
-        row = sems[mask].iloc[0]
-        try:
-            subjects = json.loads(row["subjects_json"]) if row["subjects_json"] else []
-            enrolled = [s.get("course_code", "").strip() for s in subjects if s.get("course_code")]
-        except:
-            enrolled = []
-    approved = get_pos_for_semester(student_number, ay, sem)
-    if not approved:
-        return True, []
-    mismatches = [code for code in enrolled if code not in approved]
-    return len(mismatches) == 0, mismatches
+    # Legacy function – kept for backward compatibility (not used in new POS)
+    return True, []
 
 # ==================== RULE FUNCTIONS (STRICT ENFORCEMENT) ====================
 def check_pos_approval(student_number, semester_index):
     if semester_index >= 1:
-        df = load_data()
-        student = df[df["student_number"] == student_number]
-        if student.empty:
-            return False, "Student not found."
-        pos_status = student.iloc[0].get("pos_status", "Pending")
-        if pos_status != "Approved":
-            return False, "Your Plan of Study (POS) must be approved before you can enroll in the second semester. Please work with your adviser to complete and approve your POS."
+        active = get_active_pos_version(student_number)
+        if active is None:
+            return False, "Your Plan of Study (POS) must be approved before you can enroll in the second semester. Please upload your GS-approved POS document and have your adviser verify it."
     return True, ""
 
 def get_semester_index(student_number, ay, sem):
@@ -1317,7 +1270,6 @@ def get_student_milestones(student_number, program_type):
         return df[df["student_number"] == student_number]
 
 def update_milestone(student_number, milestone, status, date_str, file_path, remarks, reviewer_name=None):
-    # This function is called by committee verification and other workflows
     df = load_milestone_tracking()
     mask = (df["student_number"] == student_number) & (df["milestone"] == milestone)
     if mask.any():
@@ -1576,7 +1528,7 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
         
         if st.session_state.role == "SESAM Staff":
             st.markdown("---")
-            st.markdown("#### 📋 Plan of Study (POS) for this Semester")
+            st.markdown("#### 📋 Plan of Study (POS) for this Semester (View Only)")
             pos_status = semester_row.get("pos_approved_status", "")
             if pos_status == "Approved":
                 st.success("✅ This semester's POS is approved.")
@@ -1589,15 +1541,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                     st.warning("POS Pending approval.")
                 else:
                     st.info("No POS submitted for this semester yet.")
-            with st.expander("✏️ Edit POS (Administrative Only)"):
-                current_codes = pos_courses if pos_courses else []
-                pos_codes_input = st.text_input("Course codes (comma-separated)", value=", ".join(current_codes), key=f"pos_edit_{student_number}_{ay}_{sem}")
-                new_approval_status = st.selectbox("Approval Status", ["Pending", "Approved", "Rejected"], index=["Pending","Approved","Rejected"].index(pos_status) if pos_status in ["Pending","Approved","Rejected"] else 0, key=f"pos_status_{student_number}_{ay}_{sem}")
-                if st.button("Save POS Changes", key=f"save_pos_{student_number}_{ay}_{sem}"):
-                    new_codes = [c.strip() for c in pos_codes_input.split(",") if c.strip()]
-                    set_pos_for_semester(student_number, ay, sem, new_codes, new_approval_status, st.session_state.display_name)
-                    st.success("POS updated.")
-                    st.rerun()
 
 # ==================== REGISTRATION FORM ====================
 def register_new_student_form():
@@ -1605,6 +1548,9 @@ def register_new_student_form():
         st.success("✅ Student successfully registered!")
         st.session_state.reg_success = False
 
+    # Program selector outside the form so it's reactive
+    program = st.selectbox("Program *", PROGRAMS, key="reg_program")
+    
     with st.form("register_student_form"):
         st.subheader("➕ Enroll an Admitted Student")
         st.info("ℹ️ **For Staff Use Only:** This function is used to create a record for an officially admitted student. Please verify the student's Notice of Admission (NOA) and complete the details below.")
@@ -1617,12 +1563,15 @@ def register_new_student_form():
             middle_name = st.text_input("Middle Name (optional)")
             personal_email = st.text_input("Personal Email Address (from NOA) *")
         with col2:
-            program = st.selectbox("Program *", PROGRAMS)
             ay_sel = st.selectbox("Admission Academic Year *", ACADEMIC_YEARS)
             ay_start = int(ay_sel.split("-")[0])
             semester = st.selectbox("Starting Semester *", SEMESTERS)
             student_status = st.selectbox("Student Status", ["Regular", "Probationary", "Conditional"])
-        advisor = st.selectbox("Temporary Adviser", ["Dr. Uno", "Dr. Dos", "Dr. Eslava", "Dr. Sanchez"])
+        
+        # Temporary Adviser dropdown from faculty list
+        faculty_names = get_faculty_names()
+        advisor = st.selectbox("Temporary Adviser", faculty_names)
+        
         prior_ms = False
         if program == "PhD Environmental Science":
             prior_ms = st.checkbox("Student is an MS Environmental Science graduate")
@@ -1638,6 +1587,7 @@ def register_new_student_form():
             if not ay_sel: errors.append("Academic Year")
             if not semester: errors.append("Semester")
             if not personal_email: errors.append("Personal Email Address")
+            if not advisor: errors.append("Temporary Adviser")
             df = load_data()
             if student_number in df["student_number"].values: errors.append("Student number already exists")
             if errors:
@@ -1705,6 +1655,7 @@ def register_new_student_form():
                     st.rerun()
                 except Exception as e:
                     st.error(f"Could not create initial semester: {e}")
+                    
 
 # ==================== GET INC/4.0 ALERTS ====================
 def get_inc_alert(student_number):
@@ -1804,156 +1755,91 @@ def render_compact_profile(student, is_own_profile=True):
     with col_e2:
         st.markdown(f"**Phone:** {student['emergency_country_code'] or ''} {student['emergency_phone'] or ''}")
 
-# ==================== POS MILESTONE RENDERER ====================
+# ==================== POS MILESTONE RENDERER (DOCUMENT-BASED) ====================
 def render_pos_milestone(student_number, viewer_role, is_own_view=False):
-    if "_pos_form_counter" not in st.session_state:
-        st.session_state._pos_form_counter = 0
-    st.session_state._pos_form_counter += 1
-    form_suffix = st.session_state._pos_form_counter
-
-    original = get_original_pos(student_number)
-    revisions = get_revisions(student_number)
-    
-    can_submit = (is_own_view or st.session_state.role == "SESAM Staff")
     is_adviser = (viewer_role == "Faculty Adviser")
     is_staff = (viewer_role == "SESAM Staff")
+    is_student = (viewer_role == "Student")
     
-    st.markdown("## Plan of Study (POS) – Version Control")
+    st.markdown("## Plan of Study (POS) – Document Workflow")
+    st.caption("Upload the official GS-approved POS PDF. Adviser will verify the document.")
     
-    col_left, col_right = st.columns(2, gap="large")
-    
-    with col_left:
-        st.markdown("### 🏛️ Original Approved POS (Graduate School Baseline)")
-        st.caption("Official GS‑approved document – read only for adviser")
-        
-        if original is None:
-            if can_submit:
-                st.warning("No original POS has been submitted yet. Please upload the initial POS for GS approval.")
-                with st.form(key=f"submit_original_{student_number}_{form_suffix}"):
-                    uploaded_file = st.file_uploader("Upload initial POS (PDF/JPG/PNG) - Max 5MB", type=["pdf","jpg","jpeg","png"], key=f"original_pos_{student_number}_{form_suffix}")
-                    if st.form_submit_button("Submit Initial POS for GS Approval", use_container_width=True):
-                        if uploaded_file:
-                            if uploaded_file.size > 5 * 1024 * 1024:
-                                st.error("File size exceeds 5MB.")
-                            else:
-                                success, msg = submit_pos_document(student_number, uploaded_file, submission_type="original")
-                                if success:
-                                    st.success(msg)
-                                    st.rerun()
-                                else:
-                                    st.error(msg)
-                        else:
-                            st.error("Please select a file.")
-            else:
-                st.info("No original POS document has been approved by the Graduate School yet.")
+    active = get_active_pos_version(student_number)
+    if active:
+        st.success(f"**Active POS (Version {active['version']})** – Verified on {active['verification_date']} by {active['verified_by']}")
+        if active.get("remarks"):
+            st.info(f"Remarks: {active['remarks']}")
+        if os.path.exists(active['file_path']):
+            st.markdown("**📄 Current Approved POS**")
+            st.markdown(embed_pdf(active['file_path']), unsafe_allow_html=True)
         else:
-            st.success(f"✅ GS Approved on: {original['approval_date']}")
-            if original["file_path"] and os.path.exists(original["file_path"]):
-                with open(original["file_path"], "rb") as f:
-                    st.download_button("📎 Download Original POS", f, file_name=os.path.basename(original["file_path"]))
-            else:
-                st.info("Document file not available.")
-            
-            if is_adviser and not is_own_view:
-                st.markdown("---")
-                st.markdown("#### Verification")
-                if "original_verified" not in st.session_state:
-                    st.session_state.original_verified = False
-                if not st.session_state.original_verified:
-                    if st.button("✅ Mark as Verified (I have reviewed the original POS)"):
-                        st.session_state.original_verified = True
-                        st.success("You have verified the original POS. Thank you.")
+            st.warning("PDF file not found.")
+    else:
+        st.info("No active POS has been approved yet.")
+    
+    pending = get_pending_pos_version(student_number)
+    if pending:
+        st.warning(f"**Pending POS Version {pending['version']}** – Submitted on {pending['upload_date']}")
+        if os.path.exists(pending['file_path']):
+            st.markdown("**📄 Submitted POS Document**")
+            st.markdown(embed_pdf(pending['file_path']), unsafe_allow_html=True)
+        else:
+            st.warning("PDF file not found.")
+        
+        if is_adviser:
+            with st.form(key=f"verify_pos_{pending['submission_id']}"):
+                remarks = st.text_area("Remarks (required if mismatch)")
+                col1, col2 = st.columns(2)
+                if col1.form_submit_button("✅ Verified Correct"):
+                    success, msg = verify_pos_version(pending['submission_id'], "Verified Correct", st.session_state.display_name, remarks)
+                    if success:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+                if col2.form_submit_button("❌ Mismatch – Requires Correction"):
+                    if not remarks:
+                        st.error("Please provide remarks explaining the mismatch.")
+                    else:
+                        success, msg = verify_pos_version(pending['submission_id'], "Mismatch – Requires Correction", st.session_state.display_name, remarks)
+                        if success:
+                            st.warning(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+        elif is_student:
+            st.info("Your POS submission is pending adviser verification. Please wait.")
+        elif is_staff:
+            st.info("This POS version is pending adviser verification. Staff cannot approve.")
+    
+    if (is_student or is_staff) and pending is None:
+        with st.form(key="submit_pos_document"):
+            st.markdown("#### Upload GS-Approved POS Document")
+            uploaded_file = st.file_uploader("Select POS PDF (GS-approved)", type=["pdf"])
+            if st.form_submit_button("Submit POS for Verification"):
+                if not uploaded_file:
+                    st.error("Please select a PDF file.")
                 else:
-                    st.info("You have already verified this original POS.")
-    
-    with col_right:
-        st.markdown("### 📝 Revised POS (Updated Versions)")
-        st.caption("Student proposes changes → Adviser approves → Student uploads GS-approved document")
-        
-        if revisions.empty:
-            st.info("No revised POS submissions yet.")
-        else:
-            for _, rev in revisions.iterrows():
-                with st.container():
-                    st.markdown(f"**Version {rev['version']}** – Uploaded: {rev['upload_date']}")
-                    status = rev["status"]
-                    if status == "Pending":
-                        st.warning("🟡 Status: Pending (Awaiting Adviser Review)")
-                    elif status == "Adviser Approved":
-                        st.info("🔵 Status: Adviser Approved – Student must upload the GS-approved document")
-                    elif status == "GS Approved":
-                        st.success("✅ Status: GS Approved")
-                    elif status == "Rejected":
-                        st.error("❌ Status: Rejected")
+                    success, msg = submit_pos_document(student_number, uploaded_file, "original" if active is None else "revision")
+                    if success:
+                        st.success(msg)
+                        st.rerun()
                     else:
-                        st.write(f"Status: {status}")
-                    
-                    if rev["remarks"]:
-                        st.caption(f"Remarks: {rev['remarks']}")
-                    if rev["file_path"] and os.path.exists(rev["file_path"]):
-                        with open(rev["file_path"], "rb") as f:
-                            st.download_button("📎 Download", f, file_name=os.path.basename(rev["file_path"]), key=f"download_rev_{rev['submission_id']}_{form_suffix}")
-                    
-                    if is_adviser and status == "Pending":
-                        with st.form(key=f"adviser_rev_{rev['submission_id']}_{form_suffix}"):
-                            remarks = st.text_area("Remarks (optional)", key=f"rev_remarks_{rev['submission_id']}_{form_suffix}")
-                            if st.form_submit_button("✅ Approve Revision", use_container_width=True):
-                                success, msg = approve_pos_revision(rev['submission_id'], st.session_state.display_name, remarks, "adviser")
-                                if success:
-                                    st.success(msg)
-                                    st.rerun()
-                                else:
-                                    st.error(msg)
-                            if st.form_submit_button("❌ Reject", use_container_width=True):
-                                if reject_pos_submission(rev['submission_id'], st.session_state.display_name, remarks):
-                                    st.warning("Revision rejected.")
-                                    st.rerun()
-                                else:
-                                    st.error("Rejection failed.")
-                    
-                    if is_own_view and status == "Adviser Approved" and rev.get("gs_approved") == False:
-                        with st.form(key=f"student_gs_upload_{rev['submission_id']}_{form_suffix}"):
-                            st.info("Your adviser has approved the revision. Please upload the official GS-approved POS document to complete the process.")
-                            uploaded_file = st.file_uploader("Upload GS-approved POS (PDF/JPG/PNG)", type=["pdf","jpg","jpeg","png"], key=f"gs_upload_{rev['submission_id']}_{form_suffix}")
-                            if st.form_submit_button("Submit GS-Approved Document", use_container_width=True):
-                                if uploaded_file:
-                                    folder = os.path.join(UPLOAD_FOLDER, student_number, "pos_submissions")
-                                    os.makedirs(folder, exist_ok=True)
-                                    ext = uploaded_file.name.split('.')[-1].lower()
-                                    filename = f"POS_v{rev['version']}_GSApproved_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{ext}"
-                                    filepath = os.path.join(folder, filename)
-                                    with open(filepath, "wb") as f:
-                                        f.write(uploaded_file.getbuffer())
-                                    success, msg = finalize_gs_approval(student_number, rev['submission_id'], "Student uploaded GS-approved document")
-                                    if success:
-                                        st.success(msg)
-                                        st.rerun()
-                                    else:
-                                        st.error(msg)
-                                else:
-                                    st.error("Please select a file.")
-        
-        if can_submit:
-            st.markdown("---")
-            st.markdown("### 📤 Submit Revised POS")
-            with st.form(key=f"submit_revision_{student_number}_{form_suffix}"):
-                uploaded_file = st.file_uploader("Upload proposed revised POS (PDF/JPG/PNG) - Max 5MB", type=["pdf","jpg","jpeg","png"], key=f"revised_pos_{student_number}_{form_suffix}")
-                if st.form_submit_button("Submit Revised Version for Adviser Approval", use_container_width=True):
-                    if uploaded_file:
-                        if uploaded_file.size > 5 * 1024 * 1024:
-                            st.error("File size exceeds 5MB.")
-                        else:
-                            success, msg = submit_pos_document(student_number, uploaded_file, submission_type="revision")
-                            if success:
-                                st.success(msg)
-                                st.rerun()
-                            else:
-                                st.error(msg)
-                    else:
-                        st.error("Please select a file.")
+                        st.error(msg)
     
-    st.markdown("---")
-    st.caption("Note: The original POS is the first version approved by GS. Revisions go through Adviser approval, then student uploads the GS-approved document.")
+    versions = get_pos_versions(student_number)
+    if not versions.empty:
+        with st.expander("POS Version History"):
+            for _, ver in versions.iterrows():
+                status_badge = "✅ Active" if ver["is_active"] else (f"🟡 {ver['status']}" if ver["status"] == "Pending" else f"🔵 {ver['status']}")
+                st.markdown(f"**Version {ver['version']}** – Uploaded: {ver['upload_date']} – {status_badge}")
+                if ver["verified_by"]:
+                    st.caption(f"Verified by: {ver['verified_by']} on {ver['verification_date']}")
+                if ver["remarks"]:
+                    st.caption(f"Remarks: {ver['remarks']}")
+                if os.path.exists(ver["file_path"]):
+                    st.markdown(f"[📎 Download POS v{ver['version']}]({ver['file_path']})")
+                st.markdown("---")
 
 # ==================== UNIFIED STUDENT PROFILE VIEW ====================
 def view_student_profile(student_number, viewer_role):
@@ -2095,21 +1981,15 @@ def view_student_profile(student_number, viewer_role):
         gwa_val = student["gwa"] if pd.notna(student["gwa"]) else None
         cold.metric("Cumulative GWA", f"{gwa_val:.2f}" if gwa_val is not None else "—")
     
-    # Milestone Tabs
     milestones_df = get_student_milestones(student_number, program_type)
     for i, milestone_name in enumerate(milestone_list):
         with tabs[2 + i]:
             if milestone_name == "Plan of Study (POS)":
                 render_pos_milestone(student_number, viewer_role, is_own_view=(viewer_role == "Student"))
             else:
-                # Replace committee milestone with new version-controlled UI
                 if milestone_name in ["Guidance Committee Members", "Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
                     st.markdown(f"### {milestone_name}")
                     
-                    # Determine the appropriate committee milestone name for display
-                    committee_milestone_display = milestone_name
-                    
-                    # Show current active committee if any
                     active = get_active_committee_version(student_number)
                     if active is not None:
                         st.success(f"**Active Committee (Version {active['version_number']})** – Verified on {active['verification_date']} by {active['verified_by']}")
@@ -2117,21 +1997,24 @@ def view_student_profile(student_number, viewer_role):
                             members = get_committee_members_for_version(active['version_id'])
                             st.dataframe(members)
                             if os.path.exists(active['gs_pdf_path']):
-                                with open(active['gs_pdf_path'], "rb") as f:
-                                    st.download_button("📄 Download GS PDF", f, file_name=os.path.basename(active['gs_pdf_path']))
-                    else:
-                        st.warning("PDF file not found.")
+                                st.markdown("**📄 Committee Form (GS‑approved)**")
+                                st.markdown(embed_pdf(active['gs_pdf_path']), unsafe_allow_html=True)
+                            else:
+                                st.warning("PDF file not found.")
                     else:
                         st.info("No active committee approved yet.")
                     
-                    # Show pending version for adviser verification
                     pending = get_pending_committee_version(student_number)
                     if pending is not None:
                         st.warning(f"**Pending Committee Version {pending['version_number']}** – Submitted on {pending['created_at']}")
                         with st.expander("Review Pending Committee"):
                             members = get_committee_members_for_version(pending['version_id'])
                             st.dataframe(members)
-                            st.markdown(f"[View GS PDF]({pending['gs_pdf_path']})")
+                            if os.path.exists(pending['gs_pdf_path']):
+                                st.markdown("**📄 Committee Form (GS‑approved)**")
+                                st.markdown(embed_pdf(pending['gs_pdf_path']), unsafe_allow_html=True)
+                            else:
+                                st.warning("PDF file not found.")
                             if is_adviser:
                                 with st.form(key=f"verify_committee_{pending['version_id']}"):
                                     remarks = st.text_area("Remarks (required if mismatch)")
@@ -2156,36 +2039,94 @@ def view_student_profile(student_number, viewer_role):
                             else:
                                 st.info("Awaiting adviser verification.")
                     
-                    # Student submission form (only if no pending version)
                     if viewer_role == "Student" and pending is None:
+                        prog_type = get_program_type(student["program"])
+                        is_phd = prog_type.startswith("PhD")
+                        faculty_names = get_faculty_names()
+                        extra_major_key = f"extra_major_{student_number}"
+                        extra_cognate_key = f"extra_cognate_{student_number}"
+                        if extra_major_key not in st.session_state:
+                            st.session_state[extra_major_key] = 0
+                        if extra_cognate_key not in st.session_state:
+                            st.session_state[extra_cognate_key] = 0
+                        
                         with st.form(key="submit_committee_version"):
-                            st.markdown("#### Submit New Committee (GS-Approved)")
+                            st.markdown("#### Submit New Committee (GS-Approved PDF)")
                             uploaded_pdf = st.file_uploader("GS‑approved Committee Form (PDF)", type=["pdf"])
-                            st.markdown("**Committee Members**")
-                            chair = st.text_input("Chair (required)")
-                            co_chair = st.text_input("Co‑chair (optional)")
-                            major_member = st.text_input("Member (Major) – required")
-                            cognate1 = st.text_input("Member (Cognate 1) – required")
-                            cognate2 = st.text_input("Member (Cognate 2) – required")
-                            if st.form_submit_button("Submit Committee for Verification"):
-                                if not uploaded_pdf or not chair or not major_member or not cognate1 or not cognate2:
-                                    st.error("Please fill all required fields and upload the GS‑approved PDF.")
+                            
+                            chair = st.selectbox("Chair (required)", options=faculty_names)
+                            co_chair = st.selectbox("Co‑chair (optional)", options=[""] + faculty_names)
+                            
+                            major_members = []
+                            st.markdown("##### Major Field Members")
+                            major1 = st.selectbox("Major member 1 (required)", options=faculty_names)
+                            if major1:
+                                major_members.append(major1)
+                            if is_phd:
+                                for i in range(st.session_state[extra_major_key]):
+                                    extra = st.selectbox(f"Major member {i+2} (optional)", options=[""] + faculty_names, key=f"major_extra_{student_number}_{i}")
+                                    if extra:
+                                        major_members.append(extra)
+                                if st.session_state[extra_major_key] < 1:
+                                    if st.form_submit_button("➕ Add additional major member"):
+                                        st.session_state[extra_major_key] += 1
+                                        st.rerun()
+                            
+                            cognate_members = []
+                            if is_phd:
+                                st.markdown("##### Cognate Field Members")
+                                cog1 = st.selectbox("Cognate member 1 (required)", options=faculty_names)
+                                if cog1:
+                                    cognate_members.append(cog1)
+                                for i in range(st.session_state[extra_cognate_key]):
+                                    extra = st.selectbox(f"Cognate member {i+2} (optional)", options=[""] + faculty_names, key=f"cog_extra_{student_number}_{i}")
+                                    if extra:
+                                        cognate_members.append(extra)
+                                if st.session_state[extra_cognate_key] < 1:
+                                    if st.form_submit_button("➕ Add additional cognate member"):
+                                        st.session_state[extra_cognate_key] += 1
+                                        st.rerun()
+                            else:
+                                st.markdown("##### Minor Field Member")
+                                minor = st.selectbox("Minor member (required)", options=faculty_names)
+                                if minor:
+                                    cognate_members.append(minor)
+                            
+                            submitted = st.form_submit_button("Submit Committee for Verification")
+                            if submitted:
+                                errors = []
+                                if not uploaded_pdf:
+                                    errors.append("PDF file is required")
+                                if not chair:
+                                    errors.append("Chair is required")
+                                if len(major_members) == 0:
+                                    errors.append("At least one major member is required")
+                                if is_phd and len(cognate_members) == 0:
+                                    errors.append("At least one cognate member is required")
+                                if not is_phd and len(cognate_members) != 1:
+                                    errors.append("Exactly one minor member is required for Master's programs")
+                                total = 1 + (1 if co_chair else 0) + len(major_members) + len(cognate_members)
+                                if is_phd and (total < 4 or total > 5):
+                                    errors.append(f"PhD committee must have 4–5 members (currently {total})")
+                                if not is_phd and (total < 3 or total > 4):
+                                    errors.append(f"Master's committee must have 3–4 members (currently {total})")
+                                if errors:
+                                    for err in errors:
+                                        st.error(err)
                                 else:
-                                    members_dict = {
-                                        'chair': chair,
-                                        'co_chair': co_chair,
-                                        'member_major': major_member,
-                                        'member_cognate1': cognate1,
-                                        'member_cognate2': cognate2
-                                    }
-                                    success, msg = save_committee_version(student_number, uploaded_pdf, members_dict)
+                                    success, msg = save_committee_version(
+                                        student_number, uploaded_pdf,
+                                        "PhD" if is_phd else "MS",
+                                        chair, co_chair, major_members, cognate_members
+                                    )
                                     if success:
+                                        st.session_state[extra_major_key] = 0
+                                        st.session_state[extra_cognate_key] = 0
                                         st.success(msg)
                                         st.rerun()
                                     else:
                                         st.error(msg)
                     
-                    # Show version history
                     versions = get_committee_versions(student_number)
                     if not versions.empty:
                         with st.expander("Committee Version History"):
@@ -2198,7 +2139,6 @@ def view_student_profile(student_number, viewer_role):
                                 st.markdown("---")
                 
                 else:
-                    # Non-committee milestone (unchanged from previous version)
                     milestone_filtered = milestones_df[milestones_df["milestone"] == milestone_name]
                     if milestone_filtered.empty:
                         st.error(f"Milestone '{milestone_name}' not found in records.")
@@ -2288,7 +2228,6 @@ def view_student_profile(student_number, viewer_role):
                             </div>
                             """, unsafe_allow_html=True)
     
-    # Admin & Extensions Tab (Staff only)
     if is_staff:
         with tabs[-1]:
             st.subheader("Administrative Data Entry & Extensions")
@@ -2390,7 +2329,7 @@ def student_dashboard():
     
     existing_sems = get_student_semesters(student["student_number"])
     if len(existing_sems) == 1 and student.get("pos_status", "Pending") != "Approved":
-        st.warning("⚠️ **Action Required:** You are in your first semester. Your Plan of Study (POS) must be approved by your adviser before the end of this semester to allow enrollment in the second semester. Please work with your adviser to complete and approve your POS.")
+        st.warning("⚠️ **Action Required:** You are in your first semester. Your Plan of Study (POS) must be approved by your adviser before the end of this semester to allow enrollment in the second semester. Please upload your GS-approved POS document and request verification from your adviser.")
     
     resid_status, used, max_y = check_residency_alert(student)
     if resid_status == "exceeded":
@@ -2409,9 +2348,8 @@ def student_dashboard():
     
     semester_count = len(get_student_semesters(student["student_number"]))
     if semester_count >= 2 and is_master_program(student["program"]) and student.get("pos_status","Pending") != "Approved":
-        st.markdown('<div class="danger-banner">⚠️ Your Plan of Study (POS) is not yet approved. You will not be able to register for the next semester until it is approved. Please contact your adviser.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="danger-banner">⚠️ Your Plan of Study (POS) is not yet approved. You will not be able to register for the next semester until it is approved. Please upload your GS-approved POS and have your adviser verify it.</div>', unsafe_allow_html=True)
     
-    # Committee formation reminder (using new committee system)
     if not is_committee_approved(student["student_number"]):
         if len(existing_sems) >= 2:
             st.warning("""
@@ -2432,7 +2370,6 @@ def student_dashboard():
     tab_names = ["👤 My Profile", "📚 Coursework"] + milestone_list
     main_tabs = st.tabs(tab_names)
     
-    # Profile Tab
     with main_tabs[0]:
         render_compact_profile(student, is_own_profile=True)
         st.markdown("---")
@@ -2494,7 +2431,6 @@ def student_dashboard():
                         else:
                             st.error("Student record not found.")
     
-    # Coursework Tab
     with main_tabs[1]:
         if required_fields_missing:
             st.error("❌ **Cannot access Coursework**\n\nPlease complete your profile information (Address, Phone Number, and Institutional Email) before proceeding to your coursework.")
@@ -2519,9 +2455,10 @@ def student_dashboard():
             pos_ok = True
             committee_ok = True
             if len(semesters) >= 1:
-                if student.get("pos_status") != "Approved":
+                active_pos = get_active_pos_version(student["student_number"])
+                if active_pos is None:
                     pos_ok = False
-                    st.warning("⚠️ Your Plan of Study (POS) must be approved before you can add the next semester. Please work with your adviser.")
+                    st.warning("⚠️ Your Plan of Study (POS) must be approved before you can add the next semester. Please upload your GS-approved POS document and have your adviser verify it.")
                 if not is_committee_approved(student["student_number"]):
                     committee_ok = False
                     st.warning("⚠️ Your Guidance/Advisory Committee must be approved before you can add the next semester. Please submit the Committee Nomination Form to the Graduate School.")
@@ -2568,13 +2505,11 @@ def student_dashboard():
         with col_btn2:
             st.caption("⚠️ Only **saved subjects** are included. Use 'Save Subjects' before refreshing.")
     
-    # Milestone Tabs (student view)
     for i, milestone_name in enumerate(milestone_list):
         with main_tabs[2 + i]:
             if milestone_name == "Plan of Study (POS)":
                 render_pos_milestone(student["student_number"], "Student", is_own_view=True)
             else:
-                # Committee milestone (new version-controlled UI)
                 if milestone_name in ["Guidance Committee Members", "Guidance Committee Formation", "Advisory Committee Formation", "Supervisory Committee Formation"]:
                     st.markdown(f"### {milestone_name}")
                     
@@ -2584,53 +2519,72 @@ def student_dashboard():
                         with st.expander("View Active Committee Details"):
                             members = get_committee_members_for_version(active['version_id'])
                             st.dataframe(members)
-                            st.markdown(f"[View GS PDF]({active['gs_pdf_path']})")
+                            if os.path.exists(active['gs_pdf_path']):
+                                st.markdown("**📄 Committee Form (GS‑approved)**")
+                                st.markdown(embed_pdf(active['gs_pdf_path']), unsafe_allow_html=True)
+                            else:
+                                st.warning("PDF file not found.")
                     else:
                         st.info("No active committee approved yet.")
                     
                     pending = get_pending_committee_version(student["student_number"])
+                    if pending is not None:
+                        st.warning(f"**Pending Committee Version {pending['version_number']}** – Submitted on {pending['created_at']} – Awaiting verification")
+                        with st.expander("View Pending Committee"):
+                            members = get_committee_members_for_version(pending['version_id'])
+                            st.dataframe(members)
+                            if os.path.exists(pending['gs_pdf_path']):
+                                st.markdown("**📄 Committee Form (GS‑approved)**")
+                                st.markdown(embed_pdf(pending['gs_pdf_path']), unsafe_allow_html=True)
+                            else:
+                                st.warning("PDF file not found.")
+                            if st.button("✏️ Cancel & Edit Pending Submission", key=f"cancel_pending_{student['student_number']}"):
+                                success, msg = delete_pending_committee_version(student["student_number"])
+                                if success:
+                                    st.success(msg)
+                                    st.rerun()
+                                else:
+                                    st.error(msg)
+                    
                     if pending is None:
-                        # Student submission form (only if no pending version exists)
                         prog_type = get_program_type(student["program"])
                         is_phd = prog_type.startswith("PhD")
+                        faculty_names = get_faculty_names()
                         extra_major_key = f"extra_major_{student['student_number']}"
                         extra_cognate_key = f"extra_cognate_{student['student_number']}"
                         if extra_major_key not in st.session_state:
                             st.session_state[extra_major_key] = 0
                         if extra_cognate_key not in st.session_state:
                             st.session_state[extra_cognate_key] = 0
-
+                        
                         with st.form(key="submit_committee_version"):
                             st.markdown("#### Submit New Committee (GS-Approved)")
                             uploaded_pdf = st.file_uploader("GS‑approved Committee Form (PDF)", type=["pdf"])
-                            chair = st.text_input("Chair (required)")
-                            co_chair = st.text_input("Co‑chair (optional)")
-
+                            chair = st.selectbox("Chair (required)", options=faculty_names)
+                            co_chair = st.selectbox("Co‑chair (optional)", options=[""] + faculty_names)
                             major_members = []
                             st.markdown("##### Major Field Members")
-                            major1 = st.text_input("Major member 1 (required)")
-                            if major1.strip():
+                            major1 = st.selectbox("Major member 1 (required)", options=faculty_names)
+                            if major1:
                                 major_members.append(major1)
-
                             if is_phd:
                                 for i in range(st.session_state[extra_major_key]):
-                                    extra = st.text_input(f"Major member {i+2} (optional)", key=f"major_extra_{student['student_number']}_{i}")
-                                    if extra.strip():
+                                    extra = st.selectbox(f"Major member {i+2} (optional)", options=[""] + faculty_names, key=f"major_extra_{student['student_number']}_{i}")
+                                    if extra:
                                         major_members.append(extra)
                                 if st.session_state[extra_major_key] < 1:
                                     if st.form_submit_button("➕ Add additional major member"):
                                         st.session_state[extra_major_key] += 1
                                         st.rerun()
-
                             cognate_members = []
                             if is_phd:
                                 st.markdown("##### Cognate Field Members")
-                                cog1 = st.text_input("Cognate member 1 (required)")
-                                if cog1.strip():
+                                cog1 = st.selectbox("Cognate member 1 (required)", options=faculty_names)
+                                if cog1:
                                     cognate_members.append(cog1)
                                 for i in range(st.session_state[extra_cognate_key]):
-                                    extra = st.text_input(f"Cognate member {i+2} (optional)", key=f"cog_extra_{student['student_number']}_{i}")
-                                    if extra.strip():
+                                    extra = st.selectbox(f"Cognate member {i+2} (optional)", options=[""] + faculty_names, key=f"cog_extra_{student['student_number']}_{i}")
+                                    if extra:
                                         cognate_members.append(extra)
                                 if st.session_state[extra_cognate_key] < 1:
                                     if st.form_submit_button("➕ Add additional cognate member"):
@@ -2638,16 +2592,16 @@ def student_dashboard():
                                         st.rerun()
                             else:
                                 st.markdown("##### Minor Field Member")
-                                minor = st.text_input("Minor member (required)")
-                                if minor.strip():
+                                minor = st.selectbox("Minor member (required)", options=faculty_names)
+                                if minor:
                                     cognate_members.append(minor)
-
+                            
                             submitted = st.form_submit_button("Submit Committee for Verification")
                             if submitted:
                                 errors = []
                                 if not uploaded_pdf:
                                     errors.append("PDF file is required")
-                                if not chair.strip():
+                                if not chair:
                                     errors.append("Chair is required")
                                 if len(major_members) == 0:
                                     errors.append("At least one major member is required")
@@ -2655,12 +2609,11 @@ def student_dashboard():
                                     errors.append("At least one cognate member is required")
                                 if not is_phd and len(cognate_members) != 1:
                                     errors.append("Exactly one minor member is required for Master's programs")
-                                total = 1 + (1 if co_chair.strip() else 0) + len(major_members) + len(cognate_members)
+                                total = 1 + (1 if co_chair else 0) + len(major_members) + len(cognate_members)
                                 if is_phd and (total < 4 or total > 5):
                                     errors.append(f"PhD committee must have 4–5 members (currently {total})")
                                 if not is_phd and (total < 3 or total > 4):
                                     errors.append(f"Master's committee must have 3–4 members (currently {total})")
-
                                 if errors:
                                     for err in errors:
                                         st.error(err)
@@ -2677,13 +2630,7 @@ def student_dashboard():
                                         st.rerun()
                                     else:
                                         st.error(msg)
-                    else:
-                        st.warning(f"**Pending Committee Version {pending['version_number']}** – Submitted on {pending['created_at']} – Awaiting verification")
-                        with st.expander("View Pending Committee"):
-                            members = get_committee_members_for_version(pending['version_id'])
-                            st.dataframe(members)
-                            st.markdown(f"[View GS PDF]({pending['gs_pdf_path']})")
-
+                    
                     versions = get_committee_versions(student["student_number"])
                     if not versions.empty:
                         with st.expander("Committee Version History"):
@@ -2694,6 +2641,7 @@ def student_dashboard():
                                 if ver['remarks']:
                                     st.caption(f"Remarks: {ver['remarks']}")
                                 st.markdown("---")
+                
                 else:
                     milestone_filtered = milestones_df[milestones_df["milestone"] == milestone_name]
                     if milestone_filtered.empty:
@@ -2706,14 +2654,14 @@ def student_dashboard():
                     remarks = milestone_row["remarks"]
                     reviewed_by = milestone_row.get("reviewed_by", "")
                     review_date = milestone_row.get("review_date", "")
-
+                    
                     st.markdown(f"### {milestone_name}")
                     st.markdown(get_status_badge(status), unsafe_allow_html=True)
                     if date_val:
                         st.write(f"**Date of approval:** {date_val}")
                     if reviewed_by and status == "Approved":
                         st.caption(f"Approved by: {reviewed_by} on {review_date}")
-
+                    
                     if file_path and file_path != "" and os.path.exists(file_path):
                         with st.expander("📎 View submitted document"):
                             if file_path.lower().endswith(('.png','.jpg','.jpeg','.gif')):
@@ -2721,7 +2669,7 @@ def student_dashboard():
                             else:
                                 with open(file_path, "rb") as f:
                                     st.download_button("Download", f, file_name=os.path.basename(file_path))
-
+                    
                     if status == "Rejected" and remarks:
                         st.error(f"**Rejection reason:** {remarks}")
                     
@@ -2797,12 +2745,13 @@ if st.session_state.logged_in and not st.session_state.consent_given:
     show_consent_form()
     st.stop()
 
-# Initialize committee tables
+init_faculty_directory()
 init_committee_tables()
+init_pos_tables()
 
 convert_expired_grades()
 df = load_data()
-if df is None or df.empty:
+if df is None:
     st.error("❌ Could not load student data. Please check the data file.")
     st.stop()
 
@@ -2814,15 +2763,17 @@ with st.sidebar:
         st.session_state.consent_given = False
         st.rerun()
     st.markdown("---")
-    st.caption("Version 32.0 | Enhanced committee workflow: version control, adviser verification, GS PDF upload")
+    st.caption("Version 34.0 | Faculty dropdown for committee & adviser")
 
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
-st.caption("Strict rule enforcement + enhanced committee workflow: version control, adviser verification, GS PDF upload")
+st.caption("Faculty directory dropdown | Document-based POS | Strict role separation")
 
 role = st.session_state.role
 
 if role == "SESAM Staff":
-    st.subheader("📋 Student Directory")
+    st.subheader("📋 Student Directory (Administrative View)")
+    if df.empty:
+        st.info("ℹ️ No student records found yet. Use the button below to register the first student.")
     col1, col2 = st.columns(2)
     with col1:
         if st.button("➕ Register New Student", use_container_width=True):
@@ -2901,4 +2852,4 @@ elif role == "Student":
     student_dashboard()
 
 st.markdown("---")
-st.caption("SESAM KMIS v32.0 | Enhanced committee workflow: version control, adviser verification, GS PDF upload")
+st.caption("SESAM KMIS v34.0 | Faculty dropdown for committee | Document-based POS workflow")
