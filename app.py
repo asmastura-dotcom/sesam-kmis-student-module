@@ -1004,6 +1004,7 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
 
     expander_label = f"📅 {ay} | {sem}     📊 Units: {total_units:.0f}     🏅 GWA: {gwa:.2f}"
     with st.expander(expander_label, expanded=st.session_state[expander_key]):
+        # Semester details header
         st.markdown(f"""
         <div style="background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%); padding: 0.5rem 0.75rem; border-radius: 12px; margin-bottom: 0.75rem;">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
@@ -1013,26 +1014,69 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
         </div>
         """, unsafe_allow_html=True)
 
-        col_status, _ = st.columns([2, 1])
-        with col_status:
-            st.markdown('<div class="info-card" style="padding: 0.75rem;"><h4>🎓 Academic Standing (This Term)</h4>', unsafe_allow_html=True)
-            new_status = st.selectbox(
-                "Status",
-                SEMESTER_STATUS_OPTIONS,
-                index=SEMESTER_STATUS_OPTIONS.index(semester_status) if semester_status in SEMESTER_STATUS_OPTIONS else 0,
-                key=f"status_{student_number}_{ay}_{sem}",
-                disabled=not (is_staff or is_adviser),
-                label_visibility="collapsed"
-            )
-            if new_status != semester_status:
-                if update_semester_status(student_number, ay, sem, new_status):
-                    st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
-
         if semester_status == "Regular":
-            # ---------- STUDENT ROLE: Document upload first, then editable table ----------
+            # ---------- STUDENT ROLE ----------
             if st.session_state.role == "Student":
-                # 1) Document upload section
+                # 1) Editable subjects table (MOVED TO TOP)
+                st.markdown('<div class="info-card" style="padding: 0.75rem;"><h4>📚 Course Enrollment</h4>', unsafe_allow_html=True)
+
+                df_key = f"df_edit_{student_number}_{ay}_{sem}"
+                if df_key not in st.session_state:
+                    if subjects:
+                        df_init = pd.DataFrame(subjects)
+                    else:
+                        df_init = pd.DataFrame(columns=["course_code", "course_description", "units", "grade"])
+                    for col in ["course_code", "course_description", "units", "grade"]:
+                        if col not in df_init.columns:
+                            if col == "units":
+                                df_init[col] = 0
+                            else:
+                                df_init[col] = ""
+                    df_init = df_init[["course_code", "course_description", "units", "grade"]]
+                    df_init["units"] = pd.to_numeric(df_init["units"], errors='coerce').fillna(0).astype(int)
+                    df_init["course_code"] = df_init["course_code"].astype(str)
+                    df_init["course_description"] = df_init["course_description"].astype(str)
+                    st.session_state[df_key] = df_init
+
+                edited_df = st.data_editor(
+                    st.session_state[df_key],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "course_code": st.column_config.TextColumn("Course Code"),
+                        "course_description": st.column_config.TextColumn("Course Description"),
+                        "units": st.column_config.NumberColumn("Units", step=1, min_value=0),
+                        "grade": st.column_config.SelectboxColumn("Grade", options=GRADE_OPTIONS)
+                    },
+                    key=f"editor_{student_number}_{ay}_{sem}"
+                )
+                st.session_state[df_key] = edited_df
+
+                col_add, col_save = st.columns([1, 4])
+                with col_add:
+                    if st.button("➕ Add Row", key=f"add_{student_number}_{ay}_{sem}", use_container_width=True):
+                        new_row = pd.DataFrame([{"course_code": "", "course_description": "", "units": 0, "grade": "1.00"}])
+                        st.session_state[df_key] = pd.concat([st.session_state[df_key], new_row], ignore_index=True)
+                        st.session_state[expander_key] = True
+                        st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+
+                # 2) Academic standing (MOVED TO MIDDLE)
+                st.markdown('<div class="info-card" style="padding: 0.75rem;"><h4>🎓 Academic Standing (This Term)</h4>', unsafe_allow_html=True)
+                new_status = st.selectbox(
+                    "Status",
+                    SEMESTER_STATUS_OPTIONS,
+                    index=SEMESTER_STATUS_OPTIONS.index(semester_status) if semester_status in SEMESTER_STATUS_OPTIONS else 0,
+                    key=f"status_{student_number}_{ay}_{sem}",
+                    disabled=not (is_staff or is_adviser),
+                    label_visibility="collapsed"
+                )
+                if new_status != semester_status:
+                    if update_semester_status(student_number, ay, sem, new_status):
+                        st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+
+                # 3) Document upload / validation (MOVED TO BOTTOM)
                 st.markdown('<div class="info-card" style="padding: 0.75rem;"><h4>📄 Proof of Grades (AMIS Screenshot)</h4>', unsafe_allow_html=True)
                 st.markdown("**You must upload a valid screenshot of your AMIS grades before you can save your subjects.**")
 
@@ -1068,93 +1112,61 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                             st.error("Please select a file.")
                 st.markdown('</div>', unsafe_allow_html=True)
 
-                # 2) Editable subjects table (with session state persistence)
-                st.markdown('<div class="info-card" style="padding: 0.75rem;"><h4>📚 Course Enrollment</h4>', unsafe_allow_html=True)
-
-                # Create a session state key for this semester's editable dataframe
-                df_key = f"df_edit_{student_number}_{ay}_{sem}"
-                if df_key not in st.session_state:
-                    # Initialize from existing subjects
-                    if subjects:
-                        df_init = pd.DataFrame(subjects)
-                    else:
-                        df_init = pd.DataFrame(columns=["course_code", "course_description", "units", "grade"])
-                    for col in ["course_code", "course_description", "units", "grade"]:
-                        if col not in df_init.columns:
-                            if col == "units":
-                                df_init[col] = 0
-                            else:
-                                df_init[col] = ""
-                    df_init = df_init[["course_code", "course_description", "units", "grade"]]
-                    df_init["units"] = pd.to_numeric(df_init["units"], errors='coerce').fillna(0).astype(int)
-                    df_init["course_code"] = df_init["course_code"].astype(str)
-                    df_init["course_description"] = df_init["course_description"].astype(str)
-                    st.session_state[df_key] = df_init
-
-                # Data editor bound to session state
-                edited_df = st.data_editor(
-                    st.session_state[df_key],
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "course_code": st.column_config.TextColumn("Course Code"),
-                        "course_description": st.column_config.TextColumn("Course Description"),
-                        "units": st.column_config.NumberColumn("Units", step=1, min_value=0),
-                        "grade": st.column_config.SelectboxColumn("Grade", options=GRADE_OPTIONS)
-                    },
-                    key=f"editor_{student_number}_{ay}_{sem}"
-                )
-                # Update session state with any direct edits (important for save button)
-                st.session_state[df_key] = edited_df
-
-                col_add, col_save = st.columns([1, 4])
-                with col_add:
-                    if st.button("➕ Add Row", key=f"add_{student_number}_{ay}_{sem}", use_container_width=True):
-                        new_row = pd.DataFrame([{"course_code": "", "course_description": "", "units": 0, "grade": "1.00"}])
-                        st.session_state[df_key] = pd.concat([st.session_state[df_key], new_row], ignore_index=True)
+                # 4) Save button (placed after document section)
+                save_disabled = not doc_uploaded
+                if save_disabled:
+                    st.info("📎 Please upload a proof of grades document above before saving subjects.")
+                if st.button("💾 Save Subjects", key=f"save_{student_number}_{ay}_{sem}", use_container_width=True, disabled=save_disabled):
+                    sem_idx = get_semester_index(student_number, ay, sem)
+                    if sem_idx >= 1:
+                        ok, msg = check_committee_approval(student_number, sem_idx)
+                        if not ok:
+                            st.error(msg)
+                            st.stop()
+                        ok, msg = check_pos_approval(student_number, sem_idx)
+                        if not ok:
+                            st.error(msg)
+                            st.stop()
+                    new_subjects = st.session_state[df_key].to_dict("records")
+                    for s in new_subjects:
+                        s["units"] = int(s["units"]) if s["units"] else 0
+                        s["course_code"] = str(s.get("course_code", ""))
+                        s["course_description"] = str(s.get("course_description", ""))
+                        s["grade"] = str(s.get("grade", "1.00"))
+                    if update_semester_subjects(student_number, ay, sem, new_subjects):
+                        st.success("Subjects saved! Refreshing totals...")
+                        if df_key in st.session_state:
+                            del st.session_state[df_key]
                         st.session_state[expander_key] = True
                         st.rerun()
+                    else:
+                        st.error("Save failed.")
+                        st.session_state[expander_key] = True
 
-                with col_save:
-                    save_disabled = not doc_uploaded
-                    if save_disabled:
-                        st.info("📎 Please upload a proof of grades document above before saving subjects.")
-                    if st.button("💾 Save Subjects", key=f"save_{student_number}_{ay}_{sem}", use_container_width=True, disabled=save_disabled):
-                        sem_idx = get_semester_index(student_number, ay, sem)
-                        if sem_idx >= 1:
-                            ok, msg = check_committee_approval(student_number, sem_idx)
-                            if not ok:
-                                st.error(msg)
-                                st.stop()
-                            ok, msg = check_pos_approval(student_number, sem_idx)
-                            if not ok:
-                                st.error(msg)
-                                st.stop()
-                        new_subjects = st.session_state[df_key].to_dict("records")
-                        for s in new_subjects:
-                            s["units"] = int(s["units"]) if s["units"] else 0
-                            s["course_code"] = str(s.get("course_code", ""))
-                            s["course_description"] = str(s.get("course_description", ""))
-                            s["grade"] = str(s.get("grade", "1.00"))
-                        if update_semester_subjects(student_number, ay, sem, new_subjects):
-                            st.success("Subjects saved! Refreshing totals...")
-                            # Clear the temporary session state for this semester
-                            if df_key in st.session_state:
-                                del st.session_state[df_key]
-                            st.session_state[expander_key] = True
-                            st.rerun()
-                        else:
-                            st.error("Save failed.")
-                            st.session_state[expander_key] = True
-                st.markdown('</div>', unsafe_allow_html=True)
-
-            # ---------- STAFF / ADVISER ROLE: Read‑only subjects + validation ----------
+            # ---------- STAFF / ADVISER ROLE ----------
             else:
+                # Table at top
                 if subjects:
                     st.dataframe(pd.DataFrame(subjects), use_container_width=True, hide_index=True)
                 else:
                     st.info("No subjects entered.")
 
+                # Academic standing
+                st.markdown('<div class="info-card" style="padding: 0.75rem;"><h4>🎓 Academic Standing (This Term)</h4>', unsafe_allow_html=True)
+                new_status = st.selectbox(
+                    "Status",
+                    SEMESTER_STATUS_OPTIONS,
+                    index=SEMESTER_STATUS_OPTIONS.index(semester_status) if semester_status in SEMESTER_STATUS_OPTIONS else 0,
+                    key=f"status_{student_number}_{ay}_{sem}",
+                    disabled=not (is_staff or is_adviser),
+                    label_visibility="collapsed"
+                )
+                if new_status != semester_status:
+                    if update_semester_status(student_number, ay, sem, new_status):
+                        st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+
+                # Document validation
                 st.markdown('<div class="info-card" style="padding: 0.75rem;"><h4>📄 Proof of Grades (AMIS Screenshot)</h4>', unsafe_allow_html=True)
                 st.markdown(f"**Validation Status:** {get_status_badge(doc_status)}", unsafe_allow_html=True)
                 if doc_status == "Rejected" and doc_remarks:
@@ -1187,7 +1199,7 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                 st.markdown('</div>', unsafe_allow_html=True)
 
         else:
-            # Non-Regular semester status – no editing
+            # Non-Regular semester – show only read-only info and document if any
             st.info(f"ℹ️ Semester marked as **{semester_status}**. Subject entry is disabled.")
             if subjects:
                 st.dataframe(pd.DataFrame(subjects), use_container_width=True, hide_index=True)
@@ -1211,15 +1223,22 @@ def register_new_student_form():
             middle_name = st.text_input("Middle Name")
             personal_email = st.text_input("Personal Email *")
         with col2:
-            program = st.selectbox("Program", PROGRAMS)
+            program = st.selectbox("Program", PROGRAMS)   # <-- when this changes, the checkbox below will appear/disappear
             specialization = st.selectbox("Specialization (if any)", SPECIALIZATIONS)
             ay_sel = st.selectbox("Admission AY", ACADEMIC_YEARS)
             ay_start = int(ay_sel.split("-")[0])
             semester = st.selectbox("Starting Semester", SEMESTERS)
             student_status = st.selectbox("Student Status", ["Active","On Leave","Inactive","Graduated","Shifted","Transferred"])
         advisor = st.selectbox("Temporary Adviser", FACULTY_NAMES)
-        prior_ms = st.checkbox("MS graduate (for PhD)") if program=="PhD Environmental Science" else False
+        
+            # Conditional checkbox – only appears when PhD Environmental Science is selected
+            if program == "PhD Environmental Science":
+                prior_ms = st.checkbox("Student is an MS Environmental Science graduate")
+            else:
+                prior_ms = False
+        
         submitted = st.form_submit_button("Register")
+        
         if submitted:
             errors = []
             if not student_number: errors.append("Student Number")
@@ -1234,55 +1253,36 @@ def register_new_student_form():
             else:
                 full_name = f"{last_name}, {first_name} {middle_name}".strip()
                 req_units = get_required_units(program, prior_ms)
-                new_row = {"student_number":student_number, "password":student_number, "name":full_name,
-                           "last_name":last_name, "first_name":first_name, "middle_name":middle_name,
-                           "program":program, "specialization":specialization, "advisor":advisor, "ay_start":ay_start, "semester":semester,
-                           "gwa":None, "total_units_taken":0, "total_units_required":req_units,
-                           "thesis_units_taken":0, "thesis_units_limit":get_thesis_limit_from_program(program),
-                           "thesis_extension_units":0, "residency_years_used":0, "residency_extension_years":0,
-                           "residency_max_years":get_residency_max_from_program(program), "pos_status":"Not Started",
-                           "pos_approval_date":"", "qualifying_exam_status":"N/A", "written_comprehensive_status":"N/A",
-                           "oral_comprehensive_status":"N/A", "general_exam_status":"Not Taken", "final_exam_status":"Not Taken",
-                           "final_exam_attempts":0, "profile_pic":"", "committee_members_structured":"",
-                           "committee_approval_date":"", "thesis_outline_approved":"No", "thesis_status":"Not Started",
-                           "prior_ms_graduate":prior_ms, "student_status":student_status, "address":"", "phone":"",
-                           "institutional_email":"", "personal_email":personal_email, "gender":"", "civil_status":"",
-                           "citizenship":"", "birthdate":"", "religion":"", "emergency_name":"", "emergency_relationship":"",
-                           "emergency_country_code":"", "emergency_phone":"", "special_status":"Regular"}
+                new_row = {
+                    "student_number": student_number, "password": student_number, "name": full_name,
+                    "last_name": last_name, "first_name": first_name, "middle_name": middle_name,
+                    "program": program, "specialization": specialization, "advisor": advisor,
+                    "ay_start": ay_start, "semester": semester,
+                    "gwa": None, "total_units_taken": 0, "total_units_required": req_units,
+                    "thesis_units_taken": 0, "thesis_units_limit": get_thesis_limit_from_program(program),
+                    "thesis_extension_units": 0, "residency_years_used": 0, "residency_extension_years": 0,
+                    "residency_max_years": get_residency_max_from_program(program), "pos_status": "Not Started",
+                    "pos_approval_date": "", "qualifying_exam_status": "N/A", "written_comprehensive_status": "N/A",
+                    "oral_comprehensive_status": "N/A", "general_exam_status": "Not Taken", "final_exam_status": "Not Taken",
+                    "final_exam_attempts": 0, "profile_pic": "", "committee_members_structured": "",
+                    "committee_approval_date": "", "thesis_outline_approved": "No", "thesis_status": "Not Started",
+                    "prior_ms_graduate": prior_ms, "student_status": student_status, "address": "", "phone": "",
+                    "institutional_email": "", "personal_email": personal_email, "gender": "", "civil_status": "",
+                    "citizenship": "", "birthdate": "", "religion": "", "emergency_name": "", "emergency_relationship": "",
+                    "emergency_country_code": "", "emergency_phone": "", "special_status": "Regular"
+                }
                 df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                 save_data(df)
                 get_student_milestones(student_number, get_program_type(program))
                 try:
-                    timeline = generate_timeline(ay_start, semester, program)
-                    for ay, sem in timeline:
-                        add_semester_record(student_number, ay, sem, [], semester_status="Regular")
+                    first_ay = f"{ay_start}-{ay_start+1}"
+                    add_semester_record(student_number, first_ay, semester, [], semester_status="Regular")
                     send_welcome_email(student_number, personal_email, full_name)
                     st.session_state.reg_success = True
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Could not create semesters: {e}")
-
-def get_inc_alert(student_number):
-    alerts = []
-    for _, row in load_semester_records().iterrows():
-        if row["student_number"]!=student_number: continue
-        try:
-            subjects = json.loads(row["subjects_json"])
-        except:
-            continue
-        sem_date = row.get("doc_upload_time","")
-        if sem_date:
-            try: sem_end = datetime.strptime(sem_date, "%Y-%m-%d %H:%M:%S")
-            except: sem_end = datetime.now()
-        else: sem_end = datetime.now()
-        deadline = sem_end + timedelta(days=365)
-        for subj in subjects:
-            if subj.get("grade") in ["INC","4.00"]:
-                days_left = (deadline - datetime.now()).days
-                alerts.append({"course":subj.get("course_code","Unknown"), "semester":f"{row['academic_year']} {row['semester']}",
-                               "deadline":deadline.strftime("%Y-%m-%d"), "days_left":days_left,
-                               "status":"expired" if days_left<0 else ("warning" if days_left<60 else "ok")})
-    return alerts
+                    st.error(f"Could not create semester: {e}")
+                    
 
 # ==================== PROFILE RENDERER ====================
 def render_compact_profile(student, is_own_profile=True):
@@ -1477,21 +1477,35 @@ def staff_dashboard():
     
     with tabs[2]:
         st.subheader("🔄 Update Student Enrollment Status")
-        student_to_update = st.selectbox("Select Student", options=df_students["student_number"].tolist(), 
-                                         format_func=lambda x: f"{x} - {df_students[df_students['student_number']==x]['name'].values[0]}",
-                                         key="select_student_status")
-        current_status = df_students[df_students["student_number"]==student_to_update]["student_status"].values[0]
-        new_status = st.selectbox("New Status", options=["Active","On Leave","Inactive","Graduated","Shifted","Transferred"], 
-                                  index=["Active","On Leave","Inactive","Graduated","Shifted","Transferred"].index(current_status) if current_status in ["Active","On Leave","Inactive","Graduated","Shifted","Transferred"] else 0,
-                                  key="status_select")
-        if st.button("Update Status", key="update_status_btn"):
-            df_update = load_data()
-            idx = df_update[df_update["student_number"]==student_to_update].index
-            if len(idx)>0:
-                df_update.at[idx[0], "student_status"] = new_status
-                save_data(df_update)
-                st.success(f"Status for {student_to_update} updated to {new_status}")
-                st.rerun()
+        # Guard: if no students, show message
+        if df_students.empty:
+            st.info("No students found. Please register students first using the '➕ Registration' tab.")
+        else:
+            student_to_update = st.selectbox("Select Student", options=df_students["student_number"].tolist(), 
+                                             format_func=lambda x: f"{x} - {df_students[df_students['student_number']==x]['name'].values[0]}",
+                                             key="select_student_status")
+            if student_to_update:
+                # Ensure the student exists in the DataFrame
+                student_data = df_students[df_students["student_number"] == student_to_update]
+                if not student_data.empty:
+                    current_status = student_data["student_status"].values[0]
+                    new_status = st.selectbox("New Status", options=["Active","On Leave","Inactive","Graduated","Shifted","Transferred"], 
+                                              index=["Active","On Leave","Inactive","Graduated","Shifted","Transferred"].index(current_status) if current_status in ["Active","On Leave","Inactive","Graduated","Shifted","Transferred"] else 0,
+                                              key="status_select")
+                    if st.button("Update Status", key="update_status_btn"):
+                        df_update = load_data()
+                        idx = df_update[df_update["student_number"] == student_to_update].index
+                        if len(idx) > 0:
+                            df_update.at[idx[0], "student_status"] = new_status
+                            save_data(df_update)
+                            st.success(f"Status for {student_to_update} updated to {new_status}")
+                            st.rerun()
+                        else:
+                            st.error("Student record not found. Please refresh and try again.")
+                else:
+                    st.error("Selected student not found. Please refresh the page.")
+            else:
+                st.warning("No student selected.")
     
     with tabs[3]:
         st.subheader("📊 Analytics Dashboard")
@@ -1517,6 +1531,7 @@ def staff_dashboard():
         status_counts.columns = ["Status", "Count"]
         fig4 = px.pie(status_counts, values="Count", names="Status", title="Student Status")
         st.plotly_chart(fig4, use_container_width=True)
+        
 
 # ==================== ADVISER DASHBOARD (NEW) ====================
 def adviser_dashboard():
