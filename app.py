@@ -1213,6 +1213,19 @@ def register_new_student_form():
     if st.session_state.get("reg_success"):
         st.success("✅ Student registered!")
         st.session_state.reg_success = False
+    
+    # Store the selected program in session state to trigger reruns
+    if "selected_program" not in st.session_state:
+        st.session_state.selected_program = PROGRAMS[0]
+    
+    # Program selection outside the form (so it can rerun)
+    selected_program = st.selectbox("Program", PROGRAMS, key="reg_program", index=PROGRAMS.index(st.session_state.selected_program) if st.session_state.selected_program in PROGRAMS else 0)
+    
+    # Update session state and rerun if changed
+    if selected_program != st.session_state.selected_program:
+        st.session_state.selected_program = selected_program
+        st.rerun()
+    
     with st.form("register_student_form"):
         st.subheader("Enroll Admitted Student")
         col1, col2 = st.columns(2)
@@ -1223,7 +1236,6 @@ def register_new_student_form():
             middle_name = st.text_input("Middle Name")
             personal_email = st.text_input("Personal Email *")
         with col2:
-            program = st.selectbox("Program", PROGRAMS)   # <-- when this changes, the checkbox below will appear/disappear
             specialization = st.selectbox("Specialization (if any)", SPECIALIZATIONS)
             ay_sel = st.selectbox("Admission AY", ACADEMIC_YEARS)
             ay_start = int(ay_sel.split("-")[0])
@@ -1231,11 +1243,11 @@ def register_new_student_form():
             student_status = st.selectbox("Student Status", ["Active","On Leave","Inactive","Graduated","Shifted","Transferred"])
         advisor = st.selectbox("Temporary Adviser", FACULTY_NAMES)
         
-            # Conditional checkbox – only appears when PhD Environmental Science is selected
-            if program == "PhD Environmental Science":
-                prior_ms = st.checkbox("Student is an MS Environmental Science graduate")
-            else:
-                prior_ms = False
+        # Conditional checkbox – now uses the session state program, which updates on rerun
+        if st.session_state.selected_program == "PhD Environmental Science":
+            prior_ms = st.checkbox("Student is an MS Environmental Science graduate")
+        else:
+            prior_ms = False
         
         submitted = st.form_submit_button("Register")
         
@@ -1244,7 +1256,7 @@ def register_new_student_form():
             if not student_number: errors.append("Student Number")
             if not last_name: errors.append("Last Name")
             if not first_name: errors.append("First Name")
-            if not program: errors.append("Program")
+            if not selected_program: errors.append("Program")
             if not personal_email: errors.append("Email")
             df = load_data()
             if student_number in df["student_number"].values: errors.append("Duplicate student number")
@@ -1252,16 +1264,16 @@ def register_new_student_form():
                 st.error(f"Missing: {', '.join(errors)}")
             else:
                 full_name = f"{last_name}, {first_name} {middle_name}".strip()
-                req_units = get_required_units(program, prior_ms)
+                req_units = get_required_units(selected_program, prior_ms)
                 new_row = {
                     "student_number": student_number, "password": student_number, "name": full_name,
                     "last_name": last_name, "first_name": first_name, "middle_name": middle_name,
-                    "program": program, "specialization": specialization, "advisor": advisor,
+                    "program": selected_program, "specialization": specialization, "advisor": advisor,
                     "ay_start": ay_start, "semester": semester,
                     "gwa": None, "total_units_taken": 0, "total_units_required": req_units,
-                    "thesis_units_taken": 0, "thesis_units_limit": get_thesis_limit_from_program(program),
+                    "thesis_units_taken": 0, "thesis_units_limit": get_thesis_limit_from_program(selected_program),
                     "thesis_extension_units": 0, "residency_years_used": 0, "residency_extension_years": 0,
-                    "residency_max_years": get_residency_max_from_program(program), "pos_status": "Not Started",
+                    "residency_max_years": get_residency_max_from_program(selected_program), "pos_status": "Not Started",
                     "pos_approval_date": "", "qualifying_exam_status": "N/A", "written_comprehensive_status": "N/A",
                     "oral_comprehensive_status": "N/A", "general_exam_status": "Not Taken", "final_exam_status": "Not Taken",
                     "final_exam_attempts": 0, "profile_pic": "", "committee_members_structured": "",
@@ -1273,7 +1285,7 @@ def register_new_student_form():
                 }
                 df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                 save_data(df)
-                get_student_milestones(student_number, get_program_type(program))
+                get_student_milestones(student_number, get_program_type(selected_program))
                 try:
                     first_ay = f"{ay_start}-{ay_start+1}"
                     add_semester_record(student_number, first_ay, semester, [], semester_status="Regular")
