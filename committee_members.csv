@@ -1,0 +1,8 @@
+member_id,version_id,role,name
+1,1,Chair,Dr. John Doe
+1,1,Member Major,Dr. Maria Santos
+1,1,Member Cognate1,Dr. Jane Smith
+2,2,Chair,Dr. John Doe
+2,2,Member Major,Dr. Carlos Reyes
+2,2,Member Cognate1,Dr. Jane Smith
+2,2,Member Major2,Dr. Maria Santos

@@ -1,6 +1,6 @@
 """
 SESAM KMIS - Graduate Student Lifecycle Management System
-Version: 40.0 | Enhanced Faculty Adviser Dashboard (analytics, filtering, milestone tracking)
+Version: 43.0 | Fixed missing get_inc_alert function
 Roles: Student (submit), Adviser (verify), Staff (admin & view-only)
 """
 
@@ -13,7 +13,6 @@ import smtplib
 from email.message import EmailMessage
 import base64
 import plotly.express as px
-import plotly.graph_objects as go
 
 # ==================== EMAIL CONFIGURATION ====================
 SMTP_SERVER = "smtp.gmail.com"
@@ -59,23 +58,6 @@ st.markdown("""
     .committee-subtitle { color: #5b6e8c; font-size: 0.9rem; margin-bottom: 1.5rem; border-left: 3px solid #2c5a6e; padding-left: 0.75rem; }
     .stButton > button { border-radius: 30px !important; font-weight: 500 !important; transition: all 0.2s ease; }
     .stButton > button:first-child { background-color: #2c5a6e !important; color: white !important; border: none !important; }
-    .kpi-card {
-        background: white;
-        border-radius: 20px;
-        padding: 1rem;
-        text-align: center;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-        border-left: 4px solid #2c5a6e;
-    }
-    .kpi-number {
-        font-size: 2rem;
-        font-weight: 700;
-        color: #1f3b4c;
-    }
-    .kpi-label {
-        font-size: 0.8rem;
-        color: #5b6e8c;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -83,9 +65,14 @@ st.markdown("""
 for key in ["logged_in", "username", "role", "display_name", "consent_given",
             "staff_selected_student", "adviser_selected_student", "staff_show_update",
             "show_registration", "reg_success", "profile_update_success",
-            "staff_dashboard_tab", "student_list_page"]:
+            "selected_program", "student_list_page"]:
     if key not in st.session_state:
-        st.session_state[key] = 0 if key == "student_list_page" else (False if "logged_in" not in key else None if "selected" in key else False)
+        if key == "student_list_page":
+            st.session_state[key] = 0
+        elif key == "selected_program":
+            st.session_state[key] = "MS Environmental Science"
+        else:
+            st.session_state[key] = False if "logged_in" not in key else None if "selected" in key else False
 
 # ==================== DATA PRIVACY CONSENT ====================
 CONSENT_LOG_FILE = "consent_log.csv"
@@ -184,18 +171,11 @@ def load_faculty_list():
         return df["name"].dropna().tolist()
     else:
         default = [
-            "Dr. Jane Smith",
-            "Dr. Maria Santos",
-            "Dr. Decibel V. Faustino-Eslava",
-            "Dr. Jessica D. Villanueva-Peyraube",
-            "Dr. Patricia Ann J. Sanchez",
-            "For. Sofia A. Alaira",
-            "Dr. Yusuf A. Sucol",
-            "Dr. Rico C. Ancog",
-            "Dr. Eduardo C. Calzeta",
-            "Dr. Janice B. Sevilla Nastor",
-            "Dr. Maria Theresa M. Rodriguez",
-            "Dr. Roberto G. Reyes"
+            "Dr. Jane Smith", "Dr. Maria Santos", "Dr. Decibel V. Faustino-Eslava",
+            "Dr. Jessica D. Villanueva-Peyraube", "Dr. Patricia Ann J. Sanchez",
+            "For. Sofia A. Alaira", "Dr. Yusuf A. Sucol", "Dr. Rico C. Ancog",
+            "Dr. Eduardo C. Calzeta", "Dr. Janice B. Sevilla Nastor",
+            "Dr. Maria Theresa M. Rodriguez", "Dr. Roberto G. Reyes"
         ]
         df = pd.DataFrame(default, columns=["name"])
         df.to_csv(FACULTY_CSV, index=False)
@@ -1004,7 +984,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
 
     expander_label = f"📅 {ay} | {sem}     📊 Units: {total_units:.0f}     🏅 GWA: {gwa:.2f}"
     with st.expander(expander_label, expanded=st.session_state[expander_key]):
-        # Semester details header
         st.markdown(f"""
         <div style="background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%); padding: 0.5rem 0.75rem; border-radius: 12px; margin-bottom: 0.75rem;">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
@@ -1015,7 +994,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
         """, unsafe_allow_html=True)
 
         if semester_status == "Regular":
-            # ---------- STUDENT ROLE ----------
             if st.session_state.role == "Student":
                 # 1) Editable subjects table (MOVED TO TOP)
                 st.markdown('<div class="info-card" style="padding: 0.75rem;"><h4>📚 Course Enrollment</h4>', unsafe_allow_html=True)
@@ -1052,7 +1030,7 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                 )
                 st.session_state[df_key] = edited_df
 
-                col_add, col_save = st.columns([1, 4])
+                col_add, _ = st.columns([1, 4])
                 with col_add:
                     if st.button("➕ Add Row", key=f"add_{student_number}_{ay}_{sem}", use_container_width=True):
                         new_row = pd.DataFrame([{"course_code": "", "course_description": "", "units": 0, "grade": "1.00"}])
@@ -1061,7 +1039,7 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                         st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
 
-                # 2) Academic standing (MOVED TO MIDDLE)
+                # 2) Academic standing
                 st.markdown('<div class="info-card" style="padding: 0.75rem;"><h4>🎓 Academic Standing (This Term)</h4>', unsafe_allow_html=True)
                 new_status = st.selectbox(
                     "Status",
@@ -1076,7 +1054,7 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                         st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
 
-                # 3) Document upload / validation (MOVED TO BOTTOM)
+                # 3) Document upload / validation
                 st.markdown('<div class="info-card" style="padding: 0.75rem;"><h4>📄 Proof of Grades (AMIS Screenshot)</h4>', unsafe_allow_html=True)
                 st.markdown("**You must upload a valid screenshot of your AMIS grades before you can save your subjects.**")
 
@@ -1112,7 +1090,7 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                             st.error("Please select a file.")
                 st.markdown('</div>', unsafe_allow_html=True)
 
-                # 4) Save button (placed after document section)
+                # 4) Save button
                 save_disabled = not doc_uploaded
                 if save_disabled:
                     st.info("📎 Please upload a proof of grades document above before saving subjects.")
@@ -1143,14 +1121,12 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                         st.error("Save failed.")
                         st.session_state[expander_key] = True
 
-            # ---------- STAFF / ADVISER ROLE ----------
             else:
-                # Table at top
+                # STAFF/ADVISER: readonly table + validation
                 if subjects:
                     st.dataframe(pd.DataFrame(subjects), use_container_width=True, hide_index=True)
                 else:
                     st.info("No subjects entered.")
-
                 # Academic standing
                 st.markdown('<div class="info-card" style="padding: 0.75rem;"><h4>🎓 Academic Standing (This Term)</h4>', unsafe_allow_html=True)
                 new_status = st.selectbox(
@@ -1165,7 +1141,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                     if update_semester_status(student_number, ay, sem, new_status):
                         st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
-
                 # Document validation
                 st.markdown('<div class="info-card" style="padding: 0.75rem;"><h4>📄 Proof of Grades (AMIS Screenshot)</h4>', unsafe_allow_html=True)
                 st.markdown(f"**Validation Status:** {get_status_badge(doc_status)}", unsafe_allow_html=True)
@@ -1185,7 +1160,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                         st.warning("Preview not available.")
                         with open(doc_path, "rb") as f:
                             st.download_button("Download", f, file_name=os.path.basename(doc_path))
-
                 if is_adviser and doc_status == "Pending":
                     with st.form(key=f"validate_{student_number}_{ay}_{sem}"):
                         remarks_val = st.text_area("Remarks")
@@ -1199,7 +1173,6 @@ def render_semester_block_general(student_number, semester_row, is_staff=False, 
                 st.markdown('</div>', unsafe_allow_html=True)
 
         else:
-            # Non-Regular semester – show only read-only info and document if any
             st.info(f"ℹ️ Semester marked as **{semester_status}**. Subject entry is disabled.")
             if subjects:
                 st.dataframe(pd.DataFrame(subjects), use_container_width=True, hide_index=True)
@@ -1214,14 +1187,8 @@ def register_new_student_form():
         st.success("✅ Student registered!")
         st.session_state.reg_success = False
     
-    # Store the selected program in session state to trigger reruns
-    if "selected_program" not in st.session_state:
-        st.session_state.selected_program = PROGRAMS[0]
-    
-    # Program selection outside the form (so it can rerun)
-    selected_program = st.selectbox("Program", PROGRAMS, key="reg_program", index=PROGRAMS.index(st.session_state.selected_program) if st.session_state.selected_program in PROGRAMS else 0)
-    
-    # Update session state and rerun if changed
+    selected_program = st.selectbox("Program", PROGRAMS, key="reg_program", 
+                                    index=PROGRAMS.index(st.session_state.selected_program) if st.session_state.selected_program in PROGRAMS else 0)
     if selected_program != st.session_state.selected_program:
         st.session_state.selected_program = selected_program
         st.rerun()
@@ -1243,14 +1210,12 @@ def register_new_student_form():
             student_status = st.selectbox("Student Status", ["Active","On Leave","Inactive","Graduated","Shifted","Transferred"])
         advisor = st.selectbox("Temporary Adviser", FACULTY_NAMES)
         
-        # Conditional checkbox – now uses the session state program, which updates on rerun
         if st.session_state.selected_program == "PhD Environmental Science":
             prior_ms = st.checkbox("Student is an MS Environmental Science graduate")
         else:
             prior_ms = False
         
         submitted = st.form_submit_button("Register")
-        
         if submitted:
             errors = []
             if not student_number: errors.append("Student Number")
@@ -1294,7 +1259,38 @@ def register_new_student_form():
                     st.rerun()
                 except Exception as e:
                     st.error(f"Could not create semester: {e}")
-                    
+
+# ==================== GET INC ALERT (FIXED) ====================
+def get_inc_alert(student_number):
+    """Get alerts for INC and 4.00 grades that are about to expire."""
+    alerts = []
+    for _, row in load_semester_records().iterrows():
+        if row["student_number"] != student_number:
+            continue
+        try:
+            subjects = json.loads(row["subjects_json"])
+        except:
+            continue
+        sem_date = row.get("doc_upload_time", "")
+        if sem_date:
+            try:
+                sem_end = datetime.strptime(sem_date, "%Y-%m-%d %H:%M:%S")
+            except:
+                sem_end = datetime.now()
+        else:
+            sem_end = datetime.now()
+        deadline = sem_end + timedelta(days=365)
+        for subj in subjects:
+            if subj.get("grade") in ["INC", "4.00"]:
+                days_left = (deadline - datetime.now()).days
+                alerts.append({
+                    "course": subj.get("course_code", "Unknown"),
+                    "semester": f"{row['academic_year']} {row['semester']}",
+                    "deadline": deadline.strftime("%Y-%m-%d"),
+                    "days_left": days_left,
+                    "status": "expired" if days_left < 0 else "warning" if days_left < 60 else "ok"
+                })
+    return alerts
 
 # ==================== PROFILE RENDERER ====================
 def render_compact_profile(student, is_own_profile=True):
@@ -1305,7 +1301,6 @@ def render_compact_profile(student, is_own_profile=True):
     </div>
     """, unsafe_allow_html=True)
     col_left, col_right = st.columns([1, 2])
-    
     with col_left:
         st.markdown("""
         <div style="background: white; border-radius: 20px; padding: 1rem; margin-bottom: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #e9ecef; text-align: center;">
@@ -1317,32 +1312,26 @@ def render_compact_profile(student, is_own_profile=True):
             st.image(pic_path, width=180)
         else:
             st.info("No profile picture")
-        
         if is_own_profile:
-            # Picture upload form
             with st.form(key=f"pic_form_{student['student_number']}"):
-                uploaded_pic = st.file_uploader("Update picture", type=["jpg", "jpeg", "png"])
-                submit_pic = st.form_submit_button("Upload Picture", use_container_width=True)
-                if submit_pic and uploaded_pic is not None:
+                uploaded_pic = st.file_uploader("Update picture", type=["jpg","jpeg","png"])
+                if st.form_submit_button("Upload Picture", use_container_width=True) and uploaded_pic:
                     fn = save_profile_picture(student["student_number"], uploaded_pic)
                     if fn:
                         df = load_data()
-                        df.loc[df["student_number"] == student["student_number"], "profile_pic"] = fn
+                        df.loc[df["student_number"]==student["student_number"], "profile_pic"] = fn
                         save_data(df)
                         st.success("Picture updated!")
                         st.rerun()
                     else:
                         st.error("Invalid file type. Please upload JPG, JPEG, or PNG.")
-            
-            # Delete picture button
             if st.button("Delete picture", key=f"del_pic_{student['student_number']}"):
                 if delete_profile_picture(student["student_number"]):
                     df = load_data()
-                    df.loc[df["student_number"] == student["student_number"], "profile_pic"] = ""
+                    df.loc[df["student_number"]==student["student_number"], "profile_pic"] = ""
                     save_data(df)
                     st.success("Picture deleted.")
                     st.rerun()
-    
     with col_right:
         st.markdown("""
         <div style="background: white; border-radius: 20px; padding: 1rem; margin-bottom: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #e9ecef;">
@@ -1359,10 +1348,8 @@ def render_compact_profile(student, is_own_profile=True):
             st.markdown(f"**📅 Admitted**  \n{format_ay(student['ay_start'], student['semester'])}")
             st.markdown(f"**📊 Required Units**  \n{student['total_units_required']}")
             st.markdown(f"**📌 Status**  \n{student.get('student_status','Active')}")
-        
         if student.get("pos_status") == "Approved" and student.get("pos_approval_date"):
             st.caption(f"✅ POS approved on: {student['pos_approval_date']}")
-        
         st.markdown("""
         <div style="background: white; border-radius: 20px; padding: 1rem; margin-bottom: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #e9ecef;">
             <h3 style="margin-top: 0; color: #1f3b4c;">👤 Personal Information</h3>
@@ -1377,7 +1364,6 @@ def render_compact_profile(student, is_own_profile=True):
             st.markdown(f"**🏛️ Institutional Email**  \n{student.get('institutional_email','—')}")
             st.markdown(f"**⚧ Gender**  \n{student.get('gender','—')}")
             st.markdown(f"**💍 Civil Status**  \n{student.get('civil_status','—')}")
-        
         st.markdown("""
         <div style="background: white; border-radius: 20px; padding: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #e9ecef;">
             <h3 style="margin-top: 0; color: #1f3b4c;">🚨 Emergency Contact</h3>
@@ -1389,7 +1375,6 @@ def render_compact_profile(student, is_own_profile=True):
             st.markdown(f"**Relationship**  \n{student.get('emergency_relationship','—')}")
         with col_e2:
             st.markdown(f"**Phone**  \n{student.get('emergency_country_code','')} {student.get('emergency_phone','—')}")
-                 
 
 # ==================== STAFF DASHBOARD ====================
 def staff_dashboard():
@@ -1413,20 +1398,13 @@ def staff_dashboard():
     with tabs[0]:
         st.subheader("📌 Student Master List")
         col_f1, col_f2, col_f3, col_f4 = st.columns(4)
-        with col_f1:
-            program_filter = st.multiselect("Program", options=sorted(df_students["program"].unique()), default=[], key="filter_program")
-        with col_f2:
-            adviser_filter = st.multiselect("Adviser", options=sorted(df_students["advisor"].unique()), default=[], key="filter_adviser")
-        with col_f3:
-            status_filter = st.multiselect("Student Status", options=sorted(df_students["student_status"].unique()), default=[], key="filter_status")
-        with col_f4:
-            ay_filter = st.multiselect("Admission Year", options=sorted(df_students["ay_start"].unique()), default=[], key="filter_ay")
-        
+        with col_f1: program_filter = st.multiselect("Program", options=sorted(df_students["program"].unique()), default=[])
+        with col_f2: adviser_filter = st.multiselect("Adviser", options=sorted(df_students["advisor"].unique()), default=[])
+        with col_f3: status_filter = st.multiselect("Student Status", options=sorted(df_students["student_status"].unique()), default=[])
+        with col_f4: ay_filter = st.multiselect("Admission Year", options=sorted(df_students["ay_start"].unique()), default=[])
         col_f5, col_f6 = st.columns(2)
-        with col_f5:
-            milestone_min = st.slider("Min Milestone Completion (%)", 0, 100, 0, key="slider_milestone")
-        with col_f6:
-            keyword = st.text_input("Keyword Search (Name/Student No.)", key="keyword_search")
+        with col_f5: milestone_min = st.slider("Min Milestone Completion (%)", 0, 100, 0, key="slider_milestone")
+        with col_f6: keyword = st.text_input("Keyword Search (Name/Student No.)")
         
         filtered = df_students.copy()
         if program_filter: filtered = filtered[filtered["program"].isin(program_filter)]
@@ -1438,58 +1416,46 @@ def staff_dashboard():
                                    filtered["student_number"].str.contains(keyword, case=False, na=False)]
         
         st.markdown(f"**Showing {len(filtered)} of {len(df_students)} students**")
-        
-        display_cols = ["student_number", "name", "program", "specialization", "advisor", "ay_start", "student_status", "total_units_taken", "gwa", "milestone_completion"]
+        display_cols = ["student_number","name","program","specialization","advisor","ay_start","student_status","total_units_taken","gwa","milestone_completion"]
         display_df = filtered[display_cols].copy()
         display_df["milestone_completion"] = display_df["milestone_completion"].round(1).astype(str) + "%"
         display_df.rename(columns={
-            "student_number": "Student No.", "name": "Name", "program": "Program", "specialization": "Specialization",
-            "advisor": "Adviser", "ay_start": "Admission Year", "student_status": "Status",
-            "total_units_taken": "Units Taken", "gwa": "GWA"
+            "student_number":"Student No.", "name":"Name", "program":"Program", "specialization":"Specialization",
+            "advisor":"Adviser", "ay_start":"Admission Year", "student_status":"Status",
+            "total_units_taken":"Units Taken", "gwa":"GWA"
         }, inplace=True)
         
         page_size = 20
-        total_pages = max(1, (len(display_df) + page_size - 1) // page_size)
-        if "student_list_page" not in st.session_state:
-            st.session_state.student_list_page = 0
+        total_pages = max(1, (len(display_df)+page_size-1)//page_size)
+        if "student_list_page" not in st.session_state: st.session_state.student_list_page = 0
         page = st.session_state.student_list_page
-        start = page * page_size
-        end = start + page_size
+        start = page*page_size
+        end = start+page_size
         paginated_df = display_df.iloc[start:end]
         
-        col_prev, col_page_info, col_next = st.columns([1, 2, 1])
+        col_prev, col_page_info, col_next = st.columns([1,2,1])
         with col_prev:
-            if st.button("◀ Previous", disabled=page==0, key="prev_page"):
-                st.session_state.student_list_page -= 1
-                st.rerun()
-        with col_page_info:
-            st.markdown(f"Page {page+1} of {total_pages}")
+            if st.button("◀ Previous", disabled=page==0): st.session_state.student_list_page -= 1; st.rerun()
+        with col_page_info: st.markdown(f"Page {page+1} of {total_pages}")
         with col_next:
-            if st.button("Next ▶", disabled=page>=total_pages-1, key="next_page"):
-                st.session_state.student_list_page += 1
-                st.rerun()
-        
+            if st.button("Next ▶", disabled=page>=total_pages-1): st.session_state.student_list_page += 1; st.rerun()
         st.dataframe(paginated_df, use_container_width=True, height=500)
-        
         csv = display_df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Export Filtered List (CSV)", data=csv, file_name=f"students_export_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv", key="export_csv")
-        
+        st.download_button("📥 Export Filtered List (CSV)", data=csv, file_name=f"students_export_{datetime.now().strftime('%Y%m%d')}.csv", mime="text/csv")
         st.markdown("---")
         st.markdown("#### 👤 View/Edit Individual Student")
-        selected_student = st.selectbox("Select Student", options=filtered["student_number"].tolist(), 
-                                        format_func=lambda x: f"{x} - {filtered[filtered['student_number']==x]['name'].values[0]}",
-                                        key="select_student_master")
-        if st.button("Open Student Profile", key="open_profile_master"):
-            st.session_state.staff_selected_student = selected_student
-            st.session_state.staff_show_update = True
-            st.rerun()
-    
+        if not filtered.empty:
+            selected_student = st.selectbox("Select Student", options=filtered["student_number"].tolist(), 
+                                            format_func=lambda x: f"{x} - {filtered[filtered['student_number']==x]['name'].values[0]}",
+                                            key="select_student_master")
+            if st.button("Open Student Profile", key="open_profile_master"):
+                st.session_state.staff_selected_student = selected_student
+                st.rerun()
+        else: st.info("No students match the filters.")
     with tabs[1]:
         register_new_student_form()
-    
     with tabs[2]:
         st.subheader("🔄 Update Student Enrollment Status")
-        # Guard: if no students, show message
         if df_students.empty:
             st.info("No students found. Please register students first using the '➕ Registration' tab.")
         else:
@@ -1497,8 +1463,7 @@ def staff_dashboard():
                                              format_func=lambda x: f"{x} - {df_students[df_students['student_number']==x]['name'].values[0]}",
                                              key="select_student_status")
             if student_to_update:
-                # Ensure the student exists in the DataFrame
-                student_data = df_students[df_students["student_number"] == student_to_update]
+                student_data = df_students[df_students["student_number"]==student_to_update]
                 if not student_data.empty:
                     current_status = student_data["student_status"].values[0]
                     new_status = st.selectbox("New Status", options=["Active","On Leave","Inactive","Graduated","Shifted","Transferred"], 
@@ -1506,19 +1471,15 @@ def staff_dashboard():
                                               key="status_select")
                     if st.button("Update Status", key="update_status_btn"):
                         df_update = load_data()
-                        idx = df_update[df_update["student_number"] == student_to_update].index
-                        if len(idx) > 0:
+                        idx = df_update[df_update["student_number"]==student_to_update].index
+                        if len(idx)>0:
                             df_update.at[idx[0], "student_status"] = new_status
                             save_data(df_update)
                             st.success(f"Status for {student_to_update} updated to {new_status}")
                             st.rerun()
-                        else:
-                            st.error("Student record not found. Please refresh and try again.")
-                else:
-                    st.error("Selected student not found. Please refresh the page.")
-            else:
-                st.warning("No student selected.")
-    
+                        else: st.error("Student record not found.")
+                else: st.error("Selected student not found.")
+            else: st.warning("No student selected.")
     with tabs[3]:
         st.subheader("📊 Analytics Dashboard")
         col_a1, col_a2, col_a3 = st.columns(3)
@@ -1529,153 +1490,94 @@ def staff_dashboard():
         col_ch1, col_ch2 = st.columns(2)
         with col_ch1:
             prog_counts = df_students["program"].value_counts().reset_index()
-            prog_counts.columns = ["Program", "Count"]
+            prog_counts.columns = ["Program","Count"]
             fig1 = px.bar(prog_counts, x="Program", y="Count", title="Students per Program", color="Program")
             st.plotly_chart(fig1, use_container_width=True)
         with col_ch2:
             adviser_counts = df_students["advisor"].value_counts().head(10).reset_index()
-            adviser_counts.columns = ["Adviser", "Count"]
+            adviser_counts.columns = ["Adviser","Count"]
             fig2 = px.bar(adviser_counts, x="Adviser", y="Count", title="Top 10 Advisers by Student Count", color="Adviser")
             st.plotly_chart(fig2, use_container_width=True)
         fig3 = px.histogram(df_students, x="milestone_completion", nbins=20, title="Distribution of Milestone Completion (%)")
         st.plotly_chart(fig3, use_container_width=True)
         status_counts = df_students["student_status"].value_counts().reset_index()
-        status_counts.columns = ["Status", "Count"]
+        status_counts.columns = ["Status","Count"]
         fig4 = px.pie(status_counts, values="Count", names="Status", title="Student Status")
         st.plotly_chart(fig4, use_container_width=True)
-        
 
-# ==================== ADVISER DASHBOARD (NEW) ====================
+# ==================== ADVISER DASHBOARD ====================
 def adviser_dashboard():
     st.markdown("## 👨‍🏫 Faculty Adviser Dashboard")
     st.caption(f"Welcome, {st.session_state.display_name}. You can only view and verify your assigned advisees.")
-    
     df = load_data()
     advisees = df[df["advisor"] == st.session_state.display_name].copy()
     if advisees.empty:
         st.warning("You have no assigned advisees yet.")
         return
-    
-    # Helper to get milestone counts
-    def get_milestone_status_counts(student_number, prog_type):
+    def get_milestone_counts(student_number, prog_type):
         milestones = get_student_milestones(student_number, prog_type)
-        if milestones.empty:
-            return {"Not Started": 0, "Pending": 0, "Approved": 0, "Rejected": 0}
+        if milestones.empty: return {"Not Started":0,"Pending":0,"Approved":0,"Rejected":0}
         return milestones["status"].value_counts().to_dict()
-    
-    advisees["milestone_counts"] = advisees.apply(
-        lambda row: get_milestone_status_counts(row["student_number"], get_program_type(row["program"])), axis=1
-    )
-    advisees["pending_milestones"] = advisees["milestone_counts"].apply(lambda x: x.get("Pending", 0))
-    advisees["completed_milestones"] = advisees["milestone_counts"].apply(lambda x: x.get("Approved", 0))
-    advisees["total_milestones"] = advisees.apply(
-        lambda row: len(MILESTONE_DEFS.get(get_program_type(row["program"]), [])), axis=1
-    )
-    
-    # Create tabs
-    tab_overview, tab_advisees, tab_analytics = st.tabs(["📊 Overview", "👥 My Advisees", "📈 Analytics"])
-    
+    advisees["milestone_counts"] = advisees.apply(lambda row: get_milestone_counts(row["student_number"], get_program_type(row["program"])), axis=1)
+    advisees["pending_milestones"] = advisees["milestone_counts"].apply(lambda x: x.get("Pending",0))
+    advisees["completed_milestones"] = advisees["milestone_counts"].apply(lambda x: x.get("Approved",0))
+    advisees["total_milestones"] = advisees.apply(lambda row: len(MILESTONE_DEFS.get(get_program_type(row["program"]),[])), axis=1)
+    tab_overview, tab_advisees, tab_analytics = st.tabs(["📊 Overview","👥 My Advisees","📈 Analytics"])
     with tab_overview:
         col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown(f"""
-            <div style="background: white; border-radius: 20px; padding: 1rem; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.05); border-left: 4px solid #2c5a6e;">
-                <div style="font-size: 2rem; font-weight: 700; color: #1f3b4c;">{len(advisees)}</div>
-                <div style="font-size: 0.8rem; color: #5b6e8c;">Total Advisees</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with col2:
-            active_count = advisees[advisees["student_status"] == "Active"].shape[0]
-            st.markdown(f"""
-            <div style="background: white; border-radius: 20px; padding: 1rem; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.05); border-left: 4px solid #2c5a6e;">
-                <div style="font-size: 2rem; font-weight: 700; color: #1f3b4c;">{active_count}</div>
-                <div style="font-size: 0.8rem; color: #5b6e8c;">Active Students</div>
-            </div>
-            """, unsafe_allow_html=True)
-        with col3:
-            pending_total = advisees["pending_milestones"].sum()
-            st.markdown(f"""
-            <div style="background: white; border-radius: 20px; padding: 1rem; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.05); border-left: 4px solid #2c5a6e;">
-                <div style="font-size: 2rem; font-weight: 700; color: #1f3b4c;">{pending_total}</div>
-                <div style="font-size: 0.8rem; color: #5b6e8c;">Pending Verifications</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
+        with col1: st.markdown(f'<div style="background:white; border-radius:20px; padding:1rem; text-align:center; border-left:4px solid #2c5a6e;"><div style="font-size:2rem; font-weight:700;">{len(advisees)}</div><div>Total Advisees</div></div>', unsafe_allow_html=True)
+        with col2: st.markdown(f'<div style="background:white; border-radius:20px; padding:1rem; text-align:center; border-left:4px solid #2c5a6e;"><div style="font-size:2rem; font-weight:700;">{advisees[advisees["student_status"]=="Active"].shape[0]}</div><div>Active Students</div></div>', unsafe_allow_html=True)
+        with col3: st.markdown(f'<div style="background:white; border-radius:20px; padding:1rem; text-align:center; border-left:4px solid #2c5a6e;"><div style="font-size:2rem; font-weight:700;">{advisees["pending_milestones"].sum()}</div><div>Pending Verifications</div></div>', unsafe_allow_html=True)
         st.markdown("---")
         st.markdown("#### 📋 Recent Activity")
-        # Show a simple list of advisees with pending milestones
-        pending_advisees = advisees[advisees["pending_milestones"] > 0].sort_values("pending_milestones", ascending=False).head(5)
+        pending_advisees = advisees[advisees["pending_milestones"]>0].sort_values("pending_milestones", ascending=False).head(5)
         if not pending_advisees.empty:
             for _, row in pending_advisees.iterrows():
-                st.markdown(f"""
-                <div style="background: #f8fafc; border-radius: 16px; padding: 0.5rem 1rem; margin-bottom: 0.5rem; border: 1px solid #e9ecef;">
-                    <span style="font-weight: 600;">{row['name']}</span> ({row['student_number']}) – 
-                    <span style="color: #856404;">{row['pending_milestones']} pending milestone(s)</span>
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.info("No pending verifications for your advisees.")
-    
+                st.markdown(f'<div style="background:#f8fafc; border-radius:16px; padding:0.5rem 1rem; margin-bottom:0.5rem;"><span style="font-weight:600;">{row["name"]}</span> ({row["student_number"]}) – <span style="color:#856404;">{row["pending_milestones"]} pending</span></div>', unsafe_allow_html=True)
+        else: st.info("No pending verifications.")
     with tab_advisees:
         st.subheader("📋 Your Advisees")
-        # Filters
         col_f1, col_f2, col_f3 = st.columns(3)
-        with col_f1:
-            prog_filter = st.multiselect("Filter by Program", options=sorted(advisees["program"].unique()), default=[], key="adv_prog_filter")
-        with col_f2:
-            status_filter = st.multiselect("Filter by Student Status", options=sorted(advisees["student_status"].unique()), default=[], key="adv_status_filter")
-        with col_f3:
-            pending_filter = st.selectbox("Show only with pending milestones", ["All", "Yes", "No"], key="adv_pending_filter")
-        
-        keyword = st.text_input("🔍 Search (Name / Student No.)", key="adv_search")
-        
+        with col_f1: prog_filter = st.multiselect("Program", options=sorted(advisees["program"].unique()), default=[])
+        with col_f2: status_filter = st.multiselect("Student Status", options=sorted(advisees["student_status"].unique()), default=[])
+        with col_f3: pending_filter = st.selectbox("Show only with pending milestones", ["All","Yes","No"])
+        keyword = st.text_input("🔍 Search (Name / Student No.)")
         filtered = advisees.copy()
         if prog_filter: filtered = filtered[filtered["program"].isin(prog_filter)]
         if status_filter: filtered = filtered[filtered["student_status"].isin(status_filter)]
-        if pending_filter == "Yes": filtered = filtered[filtered["pending_milestones"] > 0]
-        elif pending_filter == "No": filtered = filtered[filtered["pending_milestones"] == 0]
-        if keyword: filtered = filtered[filtered["name"].str.contains(keyword, case=False, na=False) | 
-                                       filtered["student_number"].str.contains(keyword, case=False, na=False)]
-        
+        if pending_filter=="Yes": filtered = filtered[filtered["pending_milestones"]>0]
+        elif pending_filter=="No": filtered = filtered[filtered["pending_milestones"]==0]
+        if keyword: filtered = filtered[filtered["name"].str.contains(keyword, case=False, na=False) | filtered["student_number"].str.contains(keyword, case=False, na=False)]
         st.markdown(f"**Showing {len(filtered)} of {len(advisees)} advisees**")
-        
-        # Prepare display table
-        display_df = filtered[["student_number", "name", "program", "student_status", "pending_milestones", "completed_milestones", "total_milestones"]].copy()
-        display_df.columns = ["Student No.", "Name", "Program", "Status", "Pending", "Completed", "Total"]
-        display_df["Progress"] = (display_df["Completed"] / display_df["Total"] * 100).round(1).astype(str) + "%"
-        
+        display_df = filtered[["student_number","name","program","student_status","pending_milestones","completed_milestones","total_milestones"]].copy()
+        display_df.columns = ["Student No.","Name","Program","Status","Pending","Completed","Total"]
+        display_df["Progress"] = (display_df["Completed"]/display_df["Total"]*100).round(1).astype(str)+"%"
         st.dataframe(display_df, use_container_width=True, height=400)
-        
         st.markdown("---")
         st.markdown("#### 🔍 Select Student for Verification")
-        selected_student = st.selectbox("Choose student", options=filtered["student_number"].tolist(),
-                                        format_func=lambda x: f"{x} - {filtered[filtered['student_number']==x]['name'].values[0]}",
-                                        key="adv_select_student")
-        if st.button("Open Student Profile for Verification", key="adv_open_profile"):
-            st.session_state.adviser_selected_student = selected_student
-            st.rerun()
-    
+        if not filtered.empty:
+            selected_student = st.selectbox("Choose student", options=filtered["student_number"].tolist(),
+                                            format_func=lambda x: f"{x} - {filtered[filtered['student_number']==x]['name'].values[0]}",
+                                            key="adv_select_student")
+            if st.button("Open Student Profile for Verification", key="adv_open_profile"):
+                st.session_state.adviser_selected_student = selected_student
+                st.rerun()
+        else: st.info("No advisees match the filters.")
     with tab_analytics:
         st.subheader("📊 Advisee Analytics")
         col_a1, col_a2 = st.columns(2)
         with col_a1:
             prog_counts = advisees["program"].value_counts().reset_index()
-            prog_counts.columns = ["Program", "Count"]
-            fig = px.bar(prog_counts, x="Program", y="Count", title="Advisees by Program", color="Program")
-            st.plotly_chart(fig, use_container_width=True)
+            prog_counts.columns = ["Program","Count"]
+            st.plotly_chart(px.bar(prog_counts, x="Program", y="Count", title="Advisees by Program", color="Program"), use_container_width=True)
         with col_a2:
             status_counts = advisees["student_status"].value_counts().reset_index()
-            status_counts.columns = ["Status", "Count"]
-            fig2 = px.pie(status_counts, values="Count", names="Status", title="Student Status Distribution")
-            st.plotly_chart(fig2, use_container_width=True)
-        
+            status_counts.columns = ["Status","Count"]
+            st.plotly_chart(px.pie(status_counts, values="Count", names="Status", title="Student Status Distribution"), use_container_width=True)
         st.markdown("---")
         st.markdown("#### 🏆 Milestone Completion Overview")
-        # Histogram of milestone completion percentages
         completion_pct = (advisees["completed_milestones"] / advisees["total_milestones"] * 100).fillna(0)
-        fig3 = px.histogram(x=completion_pct, nbins=20, title="Milestone Completion Distribution (%)",
-                            labels={"x": "Completion %", "y": "Number of Advisees"})
-        st.plotly_chart(fig3, use_container_width=True)
+        st.plotly_chart(px.histogram(x=completion_pct, nbins=20, title="Milestone Completion Distribution (%)", labels={"x":"Completion %","y":"Number of Advisees"}), use_container_width=True)
 
 # ==================== UNIFIED STUDENT PROFILE VIEW ====================
 def view_student_profile(student_number, viewer_role):
@@ -1704,8 +1606,7 @@ def view_student_profile(student_number, viewer_role):
         st.rerun()
     milestone_list = MILESTONE_DEFS.get(program_type, MILESTONE_DEFS["MS_Thesis"])
     tab_names = ["👤 Profile", "📚 Coursework"] + milestone_list
-    if is_staff:
-        tab_names.append("⚙️ Admin")
+    if is_staff: tab_names.append("⚙️ Admin")
     tabs = st.tabs(tab_names)
     with tabs[0]:
         render_compact_profile(student, is_own_profile=(viewer_role=="Student"))
@@ -1766,7 +1667,6 @@ def view_student_profile(student_number, viewer_role):
     for i, milestone_name in enumerate(milestone_list):
         with tabs[2+i]:
             if is_staff:
-                # Staff: read-only
                 st.markdown(f"### {milestone_name}")
                 row = milestones_df[milestones_df["milestone"]==milestone_name].iloc[0]
                 st.markdown(get_status_badge(row["status"]), unsafe_allow_html=True)
@@ -1775,7 +1675,6 @@ def view_student_profile(student_number, viewer_role):
                     with open(row["file_path"], "rb") as f: st.download_button("Download", f, file_name=os.path.basename(row["file_path"]))
                 if row["remarks"]: st.info(f"Remarks: {row['remarks']}")
                 continue
-            # For student and adviser: full workflow
             if milestone_name == "Plan of Study (POS)":
                 st.markdown("## Plan of Study (POS)")
                 st.info("📌 **Reminder:** Your Plan of Study (POS) must be approved before the second semester.")
@@ -1783,8 +1682,7 @@ def view_student_profile(student_number, viewer_role):
                 if active:
                     st.success(f"Active POS v{active['version_number']} verified on {active['verification_date']}")
                     embed_pdf(active['pdf_path'])
-                else:
-                    st.info("No active POS yet.")
+                else: st.info("No active POS yet.")
                 pending = get_pending_pos_version(student_number)
                 if pending:
                     st.warning(f"Pending POS v{pending['version_number']} awaiting verification.")
@@ -1798,15 +1696,13 @@ def view_student_profile(student_number, viewer_role):
                             if st.form_submit_button("❌ Mismatch"):
                                 if not remarks: st.error("Remarks required")
                                 else: verify_pos_version(pending['version_id'], "Mismatch – Requires Correction", st.session_state.display_name, remarks); st.rerun()
-                    else:
-                        st.info("Awaiting adviser verification.")
+                    else: st.info("Awaiting adviser verification.")
                 elif viewer_role=="Student":
                     with st.form("upload_pos"):
                         pdf = st.file_uploader("Upload GS-approved POS PDF", type=["pdf"])
-                        if st.form_submit_button("Submit for Verification"):
-                            if pdf:
-                                success, msg = save_pos_version(student_number, pdf)
-                                st.success(msg) if success else st.error(msg)
+                        if st.form_submit_button("Submit for Verification") and pdf:
+                            success, msg = save_pos_version(student_number, pdf)
+                            st.success(msg) if success else st.error(msg)
             elif milestone_name in ["Guidance Committee Members","Advisory Committee Formation","Supervisory Committee Formation"]:
                 st.markdown(f"""
                 <div class="committee-card">
@@ -1816,7 +1712,6 @@ def view_student_profile(student_number, viewer_role):
                     PhD: Chair + 1‑2 Major + 1‑2 Cognate (Co‑chair optional).</div>
                 </div>
                 """, unsafe_allow_html=True)
-
                 active = get_active_committee_version(student_number)
                 if active:
                     st.success(f"✅ Active Committee (Version {active['version_number']}) – verified on {active['verification_date']}")
@@ -1835,15 +1730,15 @@ def view_student_profile(student_number, viewer_role):
                     else:
                         is_phd = is_phd_program(student["program"])
                         with st.form("submit_comm_student_modern", clear_on_submit=False):
-                            st.markdown('<div class="committee-card" style="padding: 1rem;">', unsafe_allow_html=True)
+                            st.markdown('<div class="committee-card" style="padding:1rem;">', unsafe_allow_html=True)
                             st.markdown("### 👥 Committee Members")
                             chair = st.selectbox("Chair *", options=FACULTY_NAMES, key="chair_select_vsp")
-                            co_chair = st.selectbox("Co‑chair (optional)", options=[""] + FACULTY_NAMES, key="cochair_select_vsp")
+                            co_chair = st.selectbox("Co‑chair (optional)", options=[""]+FACULTY_NAMES, key="cochair_select_vsp")
                             if is_phd:
                                 major1 = st.selectbox("Major Member 1 *", options=FACULTY_NAMES, key="major1_select_vsp")
-                                major2 = st.selectbox("Major Member 2 (optional)", options=[""] + FACULTY_NAMES, key="major2_select_vsp")
+                                major2 = st.selectbox("Major Member 2 (optional)", options=[""]+FACULTY_NAMES, key="major2_select_vsp")
                                 cognate1 = st.selectbox("Cognate Member 1 *", options=FACULTY_NAMES, key="cog1_select_vsp")
-                                cognate2 = st.selectbox("Cognate Member 2 (optional)", options=[""] + FACULTY_NAMES, key="cog2_select_vsp")
+                                cognate2 = st.selectbox("Cognate Member 2 (optional)", options=[""]+FACULTY_NAMES, key="cog2_select_vsp")
                             else:
                                 major1 = st.selectbox("Major Member *", options=FACULTY_NAMES, key="major1_select_vsp")
                                 major2 = ""
@@ -1860,24 +1755,14 @@ def view_student_profile(student_number, viewer_role):
                                 if not chair: errors.append("Chair")
                                 if not major1: errors.append("Major Member")
                                 if not cognate1: errors.append("Cognate Member")
-                                if errors: st.error(f"Missing required fields: {', '.join(errors)}")
+                                if errors: st.error(f"Missing: {', '.join(errors)}")
                                 else:
-                                    members_dict = {
-                                        'chair': chair,
-                                        'co_chair': co_chair,
-                                        'member_major': major1,
-                                        'member_cognate1': cognate1,
-                                        'member_cognate2': cognate2 if cognate2 else ""
-                                    }
+                                    members_dict = {'chair':chair,'co_chair':co_chair,'member_major':major1,'member_cognate1':cognate1,'member_cognate2':cognate2}
                                     if is_phd and major2: members_dict['member_major2'] = major2
                                     if is_phd and cognate2: members_dict['member_cognate2'] = cognate2
                                     success, msg = save_committee_version_enhanced(student_number, pdf_file, members_dict, is_phd)
-                                    if success:
-                                        st.success(msg)
-                                        st.balloons()
-                                        st.rerun()
-                                    else:
-                                        st.error(msg)
+                                    if success: st.success(msg); st.balloons(); st.rerun()
+                                    else: st.error(msg)
                             st.markdown('</div>', unsafe_allow_html=True)
                 versions = get_committee_versions(student_number)
                 if not versions.empty:
@@ -1950,7 +1835,6 @@ def view_student_profile(student_number, viewer_role):
 
 # ==================== STUDENT DASHBOARD ====================
 def student_dashboard():
-    # Load data and define student
     df = load_data()
     student_records = df[df["student_number"] == st.session_state.username]
     if student_records.empty:
@@ -1959,56 +1843,48 @@ def student_dashboard():
     student = student_records.iloc[0].copy()
     program_type = get_program_type(student["program"])
     
-    # Show success message if profile was updated
     if st.session_state.get("profile_update_success", False):
         st.success("✅ Profile successfully updated!")
         st.session_state.profile_update_success = False
     
     st.subheader(f"📘 Your Dashboard – {student['name']}")
-    st.info("📢 **Gentle Reminder:** Please ensure your contact details (Address, Phone Number, and Institutional Email) are always up‑to‑date. This helps us send you important announcements and updates promptly. You can edit your profile in the '👤 Profile' tab.")
+    st.info("📢 **Gentle Reminder:** Please ensure your contact details (Address, Phone Number, and Institutional Email) are always up‑to‑date. You can edit your profile in the '👤 Profile' tab.")
     
-    # Check missing required fields
     missing = [f for f in ["address","phone","institutional_email"] if not student.get(f)]
     if missing:
         st.warning(f"Please complete your profile: {', '.join(missing)}")
     
-    # Load milestones
     milestones_df = get_student_milestones(student["student_number"], program_type)
     milestone_list = MILESTONE_DEFS.get(program_type, MILESTONE_DEFS["MS_Thesis"])
     tab_names = ["👤 Profile", "📚 Coursework"] + milestone_list
     tabs = st.tabs(tab_names)
     
-    # --- Profile Tab ---
+    # Profile Tab
     with tabs[0]:
         render_compact_profile(student, is_own_profile=True)
         st.markdown("---")
         with st.expander("✏️ Edit Profile", expanded=False):
             with st.form(key="edit_profile_form"):
-                addr = st.text_input("Address", value=student.get("address", ""))
-                phone = st.text_input("Phone Number", value=student.get("phone", ""))
-                email = st.text_input("Institutional Email (UP mail)", value=student.get("institutional_email", ""))
-                submitted = st.form_submit_button("Save Changes", width='stretch')
-                if submitted:
+                addr = st.text_input("Address", value=student.get("address",""))
+                phone = st.text_input("Phone Number", value=student.get("phone",""))
+                email = st.text_input("Institutional Email (UP mail)", value=student.get("institutional_email",""))
+                if st.form_submit_button("Save Changes", use_container_width=True):
                     if not addr or not phone or not email:
                         st.error("All fields are required.")
                     else:
-                        # Load fresh data and update
                         df2 = load_data()
-                        idx = df2[df2["student_number"] == student["student_number"]].index
-                        if len(idx) > 0:
+                        idx = df2[df2["student_number"]==student["student_number"]].index
+                        if len(idx)>0:
                             df2.at[idx[0], "address"] = addr
                             df2.at[idx[0], "phone"] = phone
                             df2.at[idx[0], "institutional_email"] = email
                             save_data(df2)
                             st.session_state.profile_update_success = True
-                            st.success("Profile updated! Refreshing...")
-                            import time
-                            time.sleep(0.5)
                             st.rerun()
                         else:
                             st.error("Student record not found.")
     
-    # --- Coursework Tab ---
+    # Coursework Tab
     with tabs[1]:
         st.subheader("Your Coursework")
         existing_sems = get_student_semesters(student["student_number"])
@@ -2026,8 +1902,7 @@ def student_dashboard():
                             add_semester_record(student["student_number"], ay, sem, [], semester_status="Regular")
                             st.success(f"Created {ay} {sem}.")
                             st.rerun()
-                        except Exception as e:
-                            st.error(str(e))
+                        except Exception as e: st.error(str(e))
         st.markdown("---")
         st.subheader("➕ Extra Semesters (Beyond Standard Duration)")
         if st.button("＋ Add Extra Semester", key=f"extra_sem_{student['student_number']}"):
@@ -2037,15 +1912,14 @@ def student_dashboard():
                 add_semester_record(student["student_number"], next_ay, next_sem, [], semester_status="Regular")
                 st.success(f"Extra semester {next_ay} {next_sem} created.")
                 st.rerun()
-            except Exception as e:
-                st.error(str(e))
+            except Exception as e: st.error(str(e))
         cola, colb, colc, cold = st.columns(4)
         cola.metric("Units Taken", student["total_units_taken"])
         colb.metric("Required", student["total_units_required"])
         colc.metric("Remaining", max(0, student["total_units_required"] - student["total_units_taken"]))
         cold.metric("GWA", f"{student['gwa']:.2f}" if pd.notna(student['gwa']) else "—")
     
-    # --- Milestone Tabs ---
+    # Milestone Tabs
     for i, milestone_name in enumerate(milestone_list):
         with tabs[2 + i]:
             if milestone_name == "Plan of Study (POS)":
@@ -2064,10 +1938,9 @@ def student_dashboard():
                 else:
                     with st.form("upload_pos_student"):
                         pdf = st.file_uploader("Upload GS-approved POS PDF", type=["pdf"])
-                        if st.form_submit_button("Submit for Verification"):
-                            if pdf:
-                                success, msg = save_pos_version(student["student_number"], pdf)
-                                st.success(msg) if success else st.error(msg)
+                        if st.form_submit_button("Submit for Verification") and pdf:
+                            success, msg = save_pos_version(student["student_number"], pdf)
+                            st.success(msg) if success else st.error(msg)
             elif milestone_name in ["Guidance Committee Members", "Advisory Committee Formation", "Supervisory Committee Formation"]:
                 st.markdown(f"""
                 <div class="committee-card">
@@ -2077,7 +1950,6 @@ def student_dashboard():
                     PhD: Chair + 1‑2 Major + 1‑2 Cognate (Co‑chair optional).</div>
                 </div>
                 """, unsafe_allow_html=True)
-                
                 active = get_active_committee_version(student["student_number"])
                 if active:
                     st.success(f"✅ Active Committee (Version {active['version_number']}) – verified on {active['verification_date']}")
@@ -2096,15 +1968,15 @@ def student_dashboard():
                     else:
                         is_phd = is_phd_program(student["program"])
                         with st.form("submit_comm_student_modern", clear_on_submit=False):
-                            st.markdown('<div class="committee-card" style="padding: 1rem;">', unsafe_allow_html=True)
+                            st.markdown('<div class="committee-card" style="padding:1rem;">', unsafe_allow_html=True)
                             st.markdown("### 👥 Committee Members")
                             chair = st.selectbox("Chair *", options=FACULTY_NAMES, key="chair_select_sd")
-                            co_chair = st.selectbox("Co‑chair (optional)", options=[""] + FACULTY_NAMES, key="cochair_select_sd")
+                            co_chair = st.selectbox("Co‑chair (optional)", options=[""]+FACULTY_NAMES, key="cochair_select_sd")
                             if is_phd:
                                 major1 = st.selectbox("Major Member 1 *", options=FACULTY_NAMES, key="major1_select_sd")
-                                major2 = st.selectbox("Major Member 2 (optional)", options=[""] + FACULTY_NAMES, key="major2_select_sd")
+                                major2 = st.selectbox("Major Member 2 (optional)", options=[""]+FACULTY_NAMES, key="major2_select_sd")
                                 cognate1 = st.selectbox("Cognate Member 1 *", options=FACULTY_NAMES, key="cog1_select_sd")
-                                cognate2 = st.selectbox("Cognate Member 2 (optional)", options=[""] + FACULTY_NAMES, key="cog2_select_sd")
+                                cognate2 = st.selectbox("Cognate Member 2 (optional)", options=[""]+FACULTY_NAMES, key="cog2_select_sd")
                             else:
                                 major1 = st.selectbox("Major Member *", options=FACULTY_NAMES, key="major1_select_sd")
                                 major2 = ""
@@ -2113,180 +1985,78 @@ def student_dashboard():
                             st.markdown("---")
                             st.markdown("### 📄 Upload GS‑approved Committee Form")
                             pdf_file = st.file_uploader("Drag & drop or click to upload (PDF only)", type=["pdf"], key="modern_committee_pdf_sd")
-                            if pdf_file:
-                                st.success(f"✅ File selected: {pdf_file.name}")
+                            if pdf_file: st.success(f"✅ File selected: {pdf_file.name}")
                             submitted = st.form_submit_button("📎 Submit Committee for Verification", use_container_width=True)
                             if submitted:
                                 errors = []
-                                if not pdf_file:
-                                    errors.append("PDF file")
-                                if not chair:
-                                    errors.append("Chair")
-                                if not major1:
-                                    errors.append("Major Member")
-                                if not cognate1:
-                                    errors.append("Cognate Member")
-                                if errors:
-                                    st.error(f"Missing required fields: {', '.join(errors)}")
+                                if not pdf_file: errors.append("PDF file")
+                                if not chair: errors.append("Chair")
+                                if not major1: errors.append("Major Member")
+                                if not cognate1: errors.append("Cognate Member")
+                                if errors: st.error(f"Missing: {', '.join(errors)}")
                                 else:
-                                    members_dict = {
-                                        'chair': chair,
-                                        'co_chair': co_chair,
-                                        'member_major': major1,
-                                        'member_cognate1': cognate1,
-                                        'member_cognate2': cognate2 if cognate2 else ""
-                                    }
-                                    if is_phd and major2:
-                                        members_dict['member_major2'] = major2
-                                    if is_phd and cognate2:
-                                        members_dict['member_cognate2'] = cognate2
+                                    members_dict = {'chair':chair,'co_chair':co_chair,'member_major':major1,'member_cognate1':cognate1,'member_cognate2':cognate2}
+                                    if is_phd and major2: members_dict['member_major2'] = major2
+                                    if is_phd and cognate2: members_dict['member_cognate2'] = cognate2
                                     success, msg = save_committee_version_enhanced(student["student_number"], pdf_file, members_dict, is_phd)
-                                    if success:
-                                        st.success(msg)
-                                        st.balloons()
-                                        st.rerun()
-                                    else:
-                                        st.error(msg)
+                                    if success: st.success(msg); st.balloons(); st.rerun()
+                                    else: st.error(msg)
                             st.markdown('</div>', unsafe_allow_html=True)
                 versions = get_committee_versions(student["student_number"])
                 if not versions.empty:
                     with st.expander("Committee Version History"):
                         for _, ver in versions.iterrows():
                             st.markdown(f"**Version {ver['version_number']}** – {ver['verification_status']} – {ver['created_at']}")
-                            if ver['verification_status'] == "Verified Correct" and ver['is_active']:
-                                st.markdown("(Active)")
-                            if ver['remarks']:
-                                st.caption(f"Remarks: {ver['remarks']}")
+                            if ver['verification_status'] == "Verified Correct" and ver['is_active']: st.markdown("(Active)")
+                            if ver['remarks']: st.caption(f"Remarks: {ver['remarks']}")
                             st.markdown("---")
             else:
-                # Other milestones
-                row = milestones_df[milestones_df["milestone"] == milestone_name].iloc[0]
+                row = milestones_df[milestones_df["milestone"]==milestone_name].iloc[0]
                 status = row["status"]
                 st.markdown(get_status_badge(status), unsafe_allow_html=True)
-                if row["date"]:
-                    st.write(f"**Date:** {row['date']}")
+                if row["date"]: st.write(f"**Date:** {row['date']}")
                 if row["file_path"] and os.path.exists(row["file_path"]):
-                    with open(row["file_path"], "rb") as f:
-                        st.download_button("Download", f, file_name=os.path.basename(row["file_path"]))
-                if status in ["Not Started", "Rejected"]:
+                    with open(row["file_path"], "rb") as f: st.download_button("Download", f, file_name=os.path.basename(row["file_path"]))
+                if status in ["Not Started","Rejected"]:
                     with st.form(f"submit_{milestone_name}_student"):
                         file = st.file_uploader("Upload document", type=["pdf","jpg","jpeg","png"])
                         date_comp = st.date_input("Date of completion")
                         if st.form_submit_button("Submit for Approval") and file:
                             path = save_milestone_file(student["student_number"], milestone_name, file)
                             update_milestone(student["student_number"], milestone_name, "Pending", date_comp.strftime("%Y-%m-%d"), path, "", None)
-                            st.success("Submitted")
-                            st.rerun()
-                elif status == "Pending":
-                    st.info("Awaiting adviser review.")
-                elif status == "Approved":
-                    st.success("Approved")
+                            st.success("Submitted"); st.rerun()
+                elif status == "Pending": st.info("Awaiting adviser review.")
+                elif status == "Approved": st.success("Approved")
     
     st.caption("For corrections, contact your adviser or SESAM Staff.")
 
 # ==================== MAIN APP ====================
-# ==================== MAIN APP ====================
 if not st.session_state.logged_in:
-    # Modern login UI – Green theme
+    # Modern green login UI
     st.markdown("""
     <style>
-        .login-container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 80vh;
-            background: linear-gradient(135deg, #f5f7fa 0%, #e8f0e8 100%);
-            padding: 1rem;
-        }
-        .login-card {
-            background: white;
-            border-radius: 32px;
-            box-shadow: 0 20px 35px -10px rgba(0,0,0,0.1);
-            padding: 2rem 2rem 2.5rem;
-            max-width: 450px;
-            width: 100%;
-            transition: transform 0.2s ease;
-        }
-        .login-card:hover {
-            transform: translateY(-5px);
-        }
-        .login-header {
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-        .login-header h1 {
-            font-size: 2.2rem;
-            color: #1b5e20;
-            margin: 0;
-            font-weight: 600;
-        }
-        .login-header p {
-            color: #5b6e8c;
-            margin-top: 0.5rem;
-            font-size: 0.9rem;
-        }
-        .login-icon {
-            font-size: 3rem;
-            margin-bottom: 0.5rem;
-        }
-        .stTextInput > div > div > input {
-            border-radius: 40px !important;
-            padding: 0.6rem 1rem !important;
-            border: 1px solid #cbd5e1 !important;
-            font-size: 1rem !important;
-            transition: all 0.2s ease;
-        }
-        .stTextInput > div > div > input:focus {
-            border-color: #2e7d32 !important;
-            box-shadow: 0 0 0 2px rgba(46,125,50,0.2) !important;
-        }
-        .stButton > button {
-            background: linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%) !important;
-            border: none !important;
-            border-radius: 40px !important;
-            padding: 0.6rem !important;
-            font-weight: 600 !important;
-            font-size: 1rem !important;
-            color: white !important;
-            width: 100%;
-            transition: all 0.2s ease;
-            margin-top: 0.5rem;
-        }
-        .stButton > button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(46,125,50,0.3);
-        }
-        .demo-credentials {
-            text-align: center;
-            margin-top: 1.5rem;
-            font-size: 0.8rem;
-            color: #5b6e8c;
-            background: #f8fafc;
-            padding: 0.8rem;
-            border-radius: 20px;
-        }
+        .login-container { display: flex; justify-content: center; align-items: center; min-height: 80vh; background: linear-gradient(135deg, #f5f7fa 0%, #e8f0e8 100%); padding: 1rem; }
+        .login-card { background: white; border-radius: 32px; box-shadow: 0 20px 35px -10px rgba(0,0,0,0.1); padding: 2rem 2rem 2.5rem; max-width: 450px; width: 100%; transition: transform 0.2s ease; }
+        .login-card:hover { transform: translateY(-5px); }
+        .login-header { text-align: center; margin-bottom: 2rem; }
+        .login-header h1 { font-size: 2.2rem; color: #1b5e20; margin: 0; font-weight: 600; }
+        .login-header p { color: #5b6e8c; margin-top: 0.5rem; font-size: 0.9rem; }
+        .login-icon { font-size: 3rem; margin-bottom: 0.5rem; }
+        .stTextInput > div > div > input { border-radius: 40px !important; padding: 0.6rem 1rem !important; border: 1px solid #cbd5e1 !important; font-size: 1rem !important; transition: all 0.2s ease; }
+        .stTextInput > div > div > input:focus { border-color: #2e7d32 !important; box-shadow: 0 0 0 2px rgba(46,125,50,0.2) !important; }
+        .stButton > button { background: linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%) !important; border: none !important; border-radius: 40px !important; padding: 0.6rem !important; font-weight: 600 !important; font-size: 1rem !important; color: white !important; width: 100%; transition: all 0.2s ease; margin-top: 0.5rem; }
+        .stButton > button:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(46,125,50,0.3); }
+        .demo-credentials { text-align: center; margin-top: 1.5rem; font-size: 0.8rem; color: #5b6e8c; background: #f8fafc; padding: 0.8rem; border-radius: 20px; }
     </style>
     """, unsafe_allow_html=True)
-
-    col1, col2, col3 = st.columns([1, 2, 1])
+    col1, col2, col3 = st.columns([1,2,1])
     with col2:
-        st.markdown("""
-        <div class="login-card">
-            <div class="login-header">
-                <div class="login-icon">🎓</div>
-                <h1>SESAM KMIS</h1>
-                <p>Graduate Student Lifecycle Management</p>
-            </div>
-        """, unsafe_allow_html=True)
-
+        st.markdown('<div class="login-card"><div class="login-header"><div class="login-icon">🎓</div><h1>SESAM KMIS</h1><p>Graduate Student Lifecycle Management</p></div>', unsafe_allow_html=True)
         with st.form("login_form", clear_on_submit=False):
-            username = st.text_input("Username", placeholder="Enter your username or student number", key="login_username")
-            password = st.text_input("Password", type="password", placeholder="Enter your password", key="login_password")
-            submitted = st.form_submit_button("Sign In", use_container_width=True)
-
-            if submitted:
+            username = st.text_input("Username", placeholder="Enter your username or student number")
+            password = st.text_input("Password", type="password", placeholder="Enter your password")
+            if st.form_submit_button("Sign In", use_container_width=True):
                 try:
-                    # Check staff/adviser users first
                     if username in USERS and USERS[username]["password"] == password:
                         st.session_state.logged_in = True
                         st.session_state.username = username
@@ -2295,7 +2065,6 @@ if not st.session_state.logged_in:
                         st.session_state.consent_given = False
                         st.rerun()
                     else:
-                        # Check student records
                         df = load_data()
                         student_row = df[df["student_number"] == username]
                         if not student_row.empty and student_row.iloc[0].get("password") == password:
@@ -2309,16 +2078,7 @@ if not st.session_state.logged_in:
                             st.error("❌ Invalid username or password. Please try again.")
                 except Exception as e:
                     st.error(f"Login error: {e}")
-
-        st.markdown("""
-        <div class="demo-credentials">
-            <strong>Demo accounts:</strong><br>
-            Staff: staff1 / admin123 &nbsp;|&nbsp;
-            Adviser: adviser1 / adv123 &nbsp;|&nbsp;
-            Student: use registered student number as password
-        </div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="demo-credentials"><strong>Demo accounts:</strong><br>Staff: staff1 / admin123 &nbsp;|&nbsp;Adviser: adviser1 / adv123 &nbsp;|&nbsp;Student: use registered student number as password</div></div>', unsafe_allow_html=True)
     st.stop()
 
 # ==================== AFTER LOGIN ====================
@@ -2337,16 +2097,20 @@ with st.sidebar:
         st.session_state.logged_in = False
         st.session_state.consent_given = False
         st.rerun()
-    st.caption("SESAM KMIS v40.0 | Enhanced Adviser Dashboard")
+    st.caption("SESAM KMIS v43.0 | INC alert fixed")
 
 st.title("🎓 SESAM Graduate Student Lifecycle Management")
 
 role = st.session_state.role
 if role == "SESAM Staff":
-    staff_dashboard()
+    if st.session_state.staff_selected_student:
+        view_student_profile(st.session_state.staff_selected_student, "SESAM Staff")
+    else:
+        staff_dashboard()
 elif role == "Faculty Adviser":
-    adviser_dashboard()
     if st.session_state.adviser_selected_student:
         view_student_profile(st.session_state.adviser_selected_student, "Faculty Adviser")
+    else:
+        adviser_dashboard()
 elif role == "Student":
     student_dashboard()

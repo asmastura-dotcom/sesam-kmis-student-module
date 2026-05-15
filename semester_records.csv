@@ -1,0 +1,9 @@
+student_number,academic_year,semester,subjects_json,total_units,gwa,doc_path,doc_upload_time,doc_status,doc_remarks,doc_validated_by,doc_validated_time,semester_status,pos_courses,pos_approved_status
+S001,2022-2023,1st Sem,"[{""course_code"": ""Subject1"", ""course_description"": ""Information"", ""units"": 3, ""grade"": ""1.25""}, {""course_code"": ""Subject2"", ""course_description"": ""System"", ""units"": 3, ""grade"": ""1.75""}]",6,1.5,student_uploads\S001\semester_docs\2022-2023_1st Sem_20260515_220305.jpg,2026-05-15 22:03:05,Approved,,Dr. Jane Smith,2026-05-15 23:14:35,Regular,,
+S002,2022-2023,2nd Sem,[],0,0.0,,,,,,,Regular,,
+S003,2023-2024,1st Sem,[],0,0.0,,,,,,,Regular,,
+S004,2023-2024,1st Sem,[],0,0.0,,,,,,,Regular,,
+S005,2023-2024,2nd Sem,[],0,0.0,,,,,,,Regular,,
+S006,2024-2025,1st Sem,[],0,0.0,,,,,,,Regular,,
+S007,2024-2025,2nd Sem,[],0,0.0,,,,,,,Regular,,
+S008,2024-2025,2nd Sem,"[{""course_code"": ""Subj1"", ""course_description"": ""Information"", ""units"": 3, ""grade"": ""1.50""}, {""course_code"": ""Subj2"", ""course_description"": ""System"", ""units"": 3, ""grade"": ""1.75""}]",6,1.625,student_uploads\S008\semester_docs\2024-2025_2nd Sem_20260515_225454.jpg,2026-05-15 22:54:54,Pending,,,,Regular,,
