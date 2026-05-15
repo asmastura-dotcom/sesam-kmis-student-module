@@ -2158,29 +2158,168 @@ def student_dashboard():
     st.caption("For corrections, contact your adviser or SESAM Staff.")
 
 # ==================== MAIN APP ====================
+# ==================== MAIN APP ====================
 if not st.session_state.logged_in:
-    st.markdown("<h1 style='text-align:center'>SESAM KMIS</h1>", unsafe_allow_html=True)
-    with st.form("login_form"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        if st.form_submit_button("Login"):
-            if username in USERS and USERS[username]["password"] == password:
-                st.session_state.logged_in = True
-                st.session_state.username = username
-                st.session_state.role = USERS[username]["role"]
-                st.session_state.display_name = USERS[username]["display_name"]
-                st.session_state.consent_given = False
-                st.rerun()
-            else:
-                df = load_data()
-                student_row = df[df["student_number"] == username]
-                if not student_row.empty and student_row.iloc[0].get("password") == password:
-                    st.session_state.logged_in = True
-                    st.session_state.username = username
-                    st.session_state.role = "Student"
-                    st.session_state.display_name = student_row.iloc[0]["name"]
-                    st.session_state.consent_given = False
-                    st.rerun()
-                else:
-                    st.error("Invalid credentials")
+    # Modern login UI – Green theme
+    st.markdown("""
+    <style>
+        .login-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 80vh;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e8f0e8 100%);
+            padding: 1rem;
+        }
+        .login-card {
+            background: white;
+            border-radius: 32px;
+            box-shadow: 0 20px 35px -10px rgba(0,0,0,0.1);
+            padding: 2rem 2rem 2.5rem;
+            max-width: 450px;
+            width: 100%;
+            transition: transform 0.2s ease;
+        }
+        .login-card:hover {
+            transform: translateY(-5px);
+        }
+        .login-header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .login-header h1 {
+            font-size: 2.2rem;
+            color: #1b5e20;
+            margin: 0;
+            font-weight: 600;
+        }
+        .login-header p {
+            color: #5b6e8c;
+            margin-top: 0.5rem;
+            font-size: 0.9rem;
+        }
+        .login-icon {
+            font-size: 3rem;
+            margin-bottom: 0.5rem;
+        }
+        .stTextInput > div > div > input {
+            border-radius: 40px !important;
+            padding: 0.6rem 1rem !important;
+            border: 1px solid #cbd5e1 !important;
+            font-size: 1rem !important;
+            transition: all 0.2s ease;
+        }
+        .stTextInput > div > div > input:focus {
+            border-color: #2e7d32 !important;
+            box-shadow: 0 0 0 2px rgba(46,125,50,0.2) !important;
+        }
+        .stButton > button {
+            background: linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%) !important;
+            border: none !important;
+            border-radius: 40px !important;
+            padding: 0.6rem !important;
+            font-weight: 600 !important;
+            font-size: 1rem !important;
+            color: white !important;
+            width: 100%;
+            transition: all 0.2s ease;
+            margin-top: 0.5rem;
+        }
+        .stButton > button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(46,125,50,0.3);
+        }
+        .demo-credentials {
+            text-align: center;
+            margin-top: 1.5rem;
+            font-size: 0.8rem;
+            color: #5b6e8c;
+            background: #f8fafc;
+            padding: 0.8rem;
+            border-radius: 20px;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.markdown("""
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-icon">🎓</div>
+                <h1>SESAM KMIS</h1>
+                <p>Graduate Student Lifecycle Management</p>
+            </div>
+        """, unsafe_allow_html=True)
+
+        with st.form("login_form", clear_on_submit=False):
+            username = st.text_input("Username", placeholder="Enter your username or student number", key="login_username")
+            password = st.text_input("Password", type="password", placeholder="Enter your password", key="login_password")
+            submitted = st.form_submit_button("Sign In", use_container_width=True)
+
+            if submitted:
+                try:
+                    # Check staff/adviser users first
+                    if username in USERS and USERS[username]["password"] == password:
+                        st.session_state.logged_in = True
+                        st.session_state.username = username
+                        st.session_state.role = USERS[username]["role"]
+                        st.session_state.display_name = USERS[username]["display_name"]
+                        st.session_state.consent_given = False
+                        st.rerun()
+                    else:
+                        # Check student records
+                        df = load_data()
+                        student_row = df[df["student_number"] == username]
+                        if not student_row.empty and student_row.iloc[0].get("password") == password:
+                            st.session_state.logged_in = True
+                            st.session_state.username = username
+                            st.session_state.role = "Student"
+                            st.session_state.display_name = student_row.iloc[0]["name"]
+                            st.session_state.consent_given = False
+                            st.rerun()
+                        else:
+                            st.error("❌ Invalid username or password. Please try again.")
+                except Exception as e:
+                    st.error(f"Login error: {e}")
+
+        st.markdown("""
+        <div class="demo-credentials">
+            <strong>Demo accounts:</strong><br>
+            Staff: staff1 / admin123 &nbsp;|&nbsp;
+            Adviser: adviser1 / adv123 &nbsp;|&nbsp;
+            Student: use registered student number as password
+        </div>
+        </div>
+        """, unsafe_allow_html=True)
     st.stop()
+
+# ==================== AFTER LOGIN ====================
+if st.session_state.logged_in and not st.session_state.consent_given:
+    show_consent_form()
+    st.stop()
+
+init_committee_tables()
+init_pos_tables()
+convert_expired_grades()
+df = load_data()
+
+with st.sidebar:
+    st.markdown(f"**{st.session_state.display_name}**  \n{st.session_state.role}  \n✅ Consent given")
+    if st.button("🚪 Logout"):
+        st.session_state.logged_in = False
+        st.session_state.consent_given = False
+        st.rerun()
+    st.caption("SESAM KMIS v40.0 | Enhanced Adviser Dashboard")
+
+st.title("🎓 SESAM Graduate Student Lifecycle Management")
+
+role = st.session_state.role
+if role == "SESAM Staff":
+    staff_dashboard()
+elif role == "Faculty Adviser":
+    adviser_dashboard()
+    if st.session_state.adviser_selected_student:
+        view_student_profile(st.session_state.adviser_selected_student, "Faculty Adviser")
+elif role == "Student":
+    student_dashboard()
